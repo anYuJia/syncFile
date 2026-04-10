@@ -1,0 +1,115 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { connect } from 'net';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
+import { Sandbox } from '../storage/sandbox';
+import { MessageDecoder, encodeMessage } from './codec';
+import type { FileOfferMessage } from './protocol';
+import { isFileReject } from './protocol';
+import { TcpServer } from './tcp-server';
+
+describe('TcpServer', () => {
+  let root: string;
+  let sandbox: Sandbox;
+  let server: TcpServer;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'syncfile-srv-'));
+    sandbox = new Sandbox(root);
+    server = new TcpServer({ sandbox });
+  });
+
+  afterEach(async () => {
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('emits an incoming offer and writes the file when accepted', async () => {
+    const port = await server.listen(0);
+
+    const offerPromise = new Promise<void>((resolve) => {
+      server.on('incoming-offer', (offer, respond) => {
+        expect(offer.fileName).toBe('hello.txt');
+        expect(offer.fileSize).toBe(5);
+        respond.accept();
+        resolve();
+      });
+    });
+
+    const completedPromise = new Promise<string>((resolve) => {
+      server.on('transfer-complete', (info) => resolve(info.savedPath));
+    });
+
+    const socket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+    const offer: FileOfferMessage = {
+      type: 'file-offer',
+      version: 1,
+      fileId: 'f1',
+      fileName: 'hello.txt',
+      fileSize: 5,
+      fromDevice: { deviceId: 'dev-a', name: 'A' }
+    };
+
+    socket.write(encodeMessage(offer));
+
+    await new Promise<void>((resolve) => {
+      socket.once('data', () => resolve());
+    });
+
+    socket.write(Buffer.from('hello'));
+    socket.write(encodeMessage({ type: 'file-complete', fileId: 'f1', bytesSent: 5 }));
+
+    await offerPromise;
+    const savedPath = await completedPromise;
+    socket.end();
+
+    expect(statSync(savedPath).size).toBe(5);
+    expect(readFileSync(savedPath, 'utf8')).toBe('hello');
+  });
+
+  it('rejects the offer and ends the connection', async () => {
+    const port = await server.listen(0);
+    const decoder = new MessageDecoder();
+
+    server.on('incoming-offer', (_offer, respond) => {
+      respond.reject('user-declined');
+    });
+
+    const socket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+    socket.write(
+      encodeMessage({
+        type: 'file-offer',
+        version: 1,
+        fileId: 'f2',
+        fileName: 'x.bin',
+        fileSize: 10,
+        fromDevice: { deviceId: 'dev-a', name: 'A' }
+      })
+    );
+
+    const rejected = await new Promise<boolean>((resolve) => {
+      socket.on('data', (chunk) => {
+        const messages = decoder.push(chunk);
+        if (messages.some((message) => isFileReject(message))) {
+          resolve(true);
+        }
+      });
+      socket.once('end', () => resolve(false));
+      setTimeout(() => resolve(false), 1000);
+    });
+
+    const ended = await new Promise<boolean>((resolve) => {
+      socket.once('end', () => resolve(true));
+      setTimeout(() => resolve(false), 1000);
+    });
+
+    expect(rejected).toBe(true);
+    expect(ended).toBe(true);
+  });
+});

@@ -1,0 +1,41 @@
+appId: com.anyujia.syncfile
+productName: syncFile
+
+directories:
+  output: release
+
+files:
+  - out/**/*
+
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+npmRebuild: false
+
+publish:
+  - provider: github
+    owner: anYuJia
+    repo: syncFile
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - ia32
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
