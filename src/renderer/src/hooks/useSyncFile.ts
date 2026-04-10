@@ -7,6 +7,7 @@ import type {
   TransferId,
   TransferProgress
 } from '@shared/types';
+import type { Messages } from '../i18n';
 
 interface TransferWithTimestamp extends TransferProgress {
   updatedAt: number;
@@ -57,7 +58,7 @@ function buildTransferFromEvent(
   };
 }
 
-export function useSyncFile(): UseSyncFileResult {
+export function useSyncFile(messages: Messages): UseSyncFileResult {
   const [selfDevice, setSelfDevice] = useState<Device | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [pendingOffers, setPendingOffers] = useState<IncomingOffer[]>([]);
@@ -83,7 +84,7 @@ export function useSyncFile(): UseSyncFileResult {
         if (!active) {
           return;
         }
-        setErrorMessage((error as Error).message || 'Failed to load device information.');
+        setErrorMessage(localizeError(error, messages) || messages.failedToLoadDeviceInformation);
       } finally {
         if (active) {
           setIsLoading(false);
@@ -135,7 +136,7 @@ export function useSyncFile(): UseSyncFileResult {
       offTransferProgress();
       offTransferComplete();
     };
-  }, []);
+  }, [messages]);
 
   const transfers = Object.values(transferMap).sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -164,7 +165,7 @@ export function useSyncFile(): UseSyncFileResult {
       });
       return transferId;
     } catch (error) {
-      setErrorMessage((error as Error).message || 'Send failed.');
+      setErrorMessage(localizeError(error, messages) || messages.sendFailed);
       throw error;
     }
   }
@@ -174,7 +175,7 @@ export function useSyncFile(): UseSyncFileResult {
       await window.syncFile.acceptIncoming(offerId);
       setPendingOffers((prev) => prev.filter((offer) => offer.offerId !== offerId));
     } catch (error) {
-      setErrorMessage((error as Error).message || 'Failed to accept incoming file.');
+      setErrorMessage(localizeError(error, messages) || messages.failedToAcceptIncomingFile);
       throw error;
     }
   }
@@ -184,7 +185,7 @@ export function useSyncFile(): UseSyncFileResult {
       await window.syncFile.rejectIncoming(offerId, reason);
       setPendingOffers((prev) => prev.filter((offer) => offer.offerId !== offerId));
     } catch (error) {
-      setErrorMessage((error as Error).message || 'Failed to reject incoming file.');
+      setErrorMessage(localizeError(error, messages) || messages.failedToRejectIncomingFile);
       throw error;
     }
   }
@@ -193,7 +194,7 @@ export function useSyncFile(): UseSyncFileResult {
     try {
       await window.syncFile.openSandbox();
     } catch (error) {
-      setErrorMessage((error as Error).message || 'Unable to open sandbox folder.');
+      setErrorMessage(localizeError(error, messages) || messages.failedToOpenSandbox);
       throw error;
     }
   }
@@ -211,4 +212,32 @@ export function useSyncFile(): UseSyncFileResult {
     rejectOffer,
     openSandbox
   };
+}
+
+function localizeError(error: unknown, messages: Messages): string | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const message = error.message;
+  if (message.includes('device') && message.includes('not found')) {
+    return messages.errorDeviceNotFound;
+  }
+  if (message.includes('offer') && message.includes('not found')) {
+    return messages.errorOfferNotFound;
+  }
+  if (message.includes('peer declined')) {
+    return messages.errorPeerDeclined;
+  }
+  if (message.includes('before accepting the offer')) {
+    return messages.errorPeerClosedBeforeAccept;
+  }
+  if (message.includes('before transfer completed')) {
+    return messages.errorPeerClosedBeforeComplete;
+  }
+  if (message.includes('socket closed before transfer completed')) {
+    return messages.errorSocketClosedBeforeComplete;
+  }
+
+  return message || null;
 }

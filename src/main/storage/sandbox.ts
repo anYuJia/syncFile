@@ -2,9 +2,14 @@ import { mkdirSync } from 'fs';
 import { basename, join } from 'path';
 
 export class Sandbox {
-  constructor(private readonly root: string) {}
+  constructor(private root: string) {}
+
+  setRoot(root: string): void {
+    this.root = root;
+  }
 
   rootPath(): string {
+    mkdirSync(this.root, { recursive: true });
     return this.root;
   }
 

@@ -51,6 +51,9 @@ describe('Sandbox', () => {
   });
 
   it('returns the sandbox root for openSandbox', () => {
+    rmSync(root, { recursive: true, force: true });
+
     expect(sandbox.rootPath()).toBe(root);
+    expect(existsSync(root)).toBe(true);
   });
 });

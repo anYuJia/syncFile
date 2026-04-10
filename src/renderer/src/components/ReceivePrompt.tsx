@@ -1,4 +1,5 @@
 import type { IncomingOffer } from '@shared/types';
+import type { Messages } from '../i18n';
 
 interface ReceivePromptProps {
   offer: IncomingOffer;
@@ -6,6 +7,7 @@ interface ReceivePromptProps {
   busy?: boolean;
   onAccept: (offerId: string) => void | Promise<void>;
   onReject: (offerId: string) => void | Promise<void>;
+  messages: Messages;
 }
 
 function formatBytes(bytes: number): string {
@@ -26,20 +28,27 @@ export function ReceivePrompt({
   queueCount,
   busy = false,
   onAccept,
-  onReject
+  onReject,
+  messages
 }: ReceivePromptProps): JSX.Element {
   return (
     <div className="receive-prompt-overlay" role="presentation">
-      <div className="receive-prompt" role="dialog" aria-modal="true" aria-label="Incoming file offer">
-        <h3 className="receive-prompt-title">Incoming file request</h3>
+      <div
+        className="receive-prompt"
+        role="dialog"
+        aria-modal="true"
+        aria-label={messages.incomingFileRequestAriaLabel}
+      >
+        <div className="receive-prompt-stamp">{messages.incomingFileRequest}</div>
+        <h3 className="receive-prompt-title">{offer.fileName}</h3>
         <p className="receive-prompt-from">
-          <strong>{offer.fromDevice.name}</strong> wants to send:
+          <strong>{offer.fromDevice.name}</strong> {messages.wantsToSend}
         </p>
         <div className="receive-prompt-file">
           <p className="receive-prompt-file-name">{offer.fileName}</p>
           <p className="receive-prompt-file-size">{formatBytes(offer.fileSize)}</p>
         </div>
-        {queueCount > 1 && <p className="receive-prompt-queue">{queueCount - 1} more request(s) waiting.</p>}
+        {queueCount > 1 && <p className="receive-prompt-queue">{messages.waitingRequests(queueCount - 1)}</p>}
         <div className="receive-prompt-actions">
           <button
             type="button"
@@ -47,10 +56,10 @@ export function ReceivePrompt({
             onClick={() => onReject(offer.offerId)}
             disabled={busy}
           >
-            Reject
+            {messages.reject}
           </button>
           <button type="button" className="button" onClick={() => onAccept(offer.offerId)} disabled={busy}>
-            Accept
+            {messages.accept}
           </button>
         </div>
       </div>

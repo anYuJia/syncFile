@@ -1,8 +1,12 @@
 import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import type { Messages } from '../i18n';
 
 interface DropZoneProps {
   disabled?: boolean;
   onFileDropped: (filePath: string) => void;
+  messages: Messages;
+  selectedDeviceName?: string | null;
+  selfDeviceName?: string | null;
 }
 
 function fileToPath(file: File): string | null {
@@ -20,7 +24,13 @@ function pickFirstPath(fileList: FileList): string | null {
   return fileToPath(fileList[0]);
 }
 
-export function DropZone({ disabled = false, onFileDropped }: DropZoneProps): JSX.Element {
+export function DropZone({
+  disabled = false,
+  onFileDropped,
+  messages,
+  selectedDeviceName,
+  selfDeviceName
+}: DropZoneProps): JSX.Element {
   const [isDragActive, setIsDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -78,10 +88,29 @@ export function DropZone({ disabled = false, onFileDropped }: DropZoneProps): JS
       aria-disabled={disabled}
     >
       <input ref={inputRef} type="file" className="drop-zone-input" onChange={handleFileInput} />
-      <p className="drop-zone-title">Drop a file here</p>
-      <p className="drop-zone-subtitle">
-        {disabled ? 'Select a target device first.' : 'Or click to pick from disk.'}
-      </p>
+      <div className="drop-zone-ticket">
+        <span className="drop-zone-passport">{messages.dropZonePassport}</span>
+        <div className="drop-zone-route">
+          <span className="drop-zone-route-pill">{selfDeviceName ?? messages.selfDeviceLabel}</span>
+          <span className="drop-zone-route-line" />
+          <span className="drop-zone-route-pill is-target">
+            {selectedDeviceName ?? messages.dropZoneTargetFallback}
+          </span>
+        </div>
+        <p className="drop-zone-title">{messages.dropZoneTitle}</p>
+        <p className="drop-zone-target">
+          {selectedDeviceName
+            ? messages.dropZoneTargetReady(selectedDeviceName)
+            : messages.dropZoneTargetFallback}
+        </p>
+        <p className="drop-zone-subtitle">
+          {disabled ? messages.dropZoneSelectDeviceFirst : messages.dropZoneHint}
+        </p>
+        <div className="drop-zone-footer">
+          <span className="drop-zone-action">{messages.dropZoneAction}</span>
+          {!disabled && <span className="drop-zone-caption">{messages.dropZonePickFromDisk}</span>}
+        </div>
+      </div>
     </div>
   );
 }

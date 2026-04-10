@@ -8,6 +8,7 @@ import { DeviceRegistry } from './discovery/device-registry';
 import { MdnsService } from './discovery/mdns-service';
 import { registerIpcHandlers } from './ipc/handlers';
 import { loadOrCreateIdentity } from './storage/device-identity';
+import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
 import { TcpClient } from './transfer/tcp-client';
 import { TcpServer } from './transfer/tcp-server';
@@ -55,7 +56,9 @@ async function createWindow(): Promise<BrowserWindow> {
 async function bootstrap(): Promise<void> {
   const userDataDir = app.getPath('userData');
   const identity = loadOrCreateIdentity(userDataDir);
-  const sandbox = new Sandbox(join(userDataDir, 'sandbox'));
+  const defaultSandboxRoot = join(userDataDir, 'sandbox');
+  const sandboxLocation = new SandboxLocationStore(userDataDir);
+  const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const registry = new DeviceRegistry();
 
   tcpServer = new TcpServer({ sandbox });
@@ -99,6 +102,7 @@ async function bootstrap(): Promise<void> {
       tcpServer,
       tcpClient,
       sandbox,
+      sandboxLocation,
       identity,
       getSelfDevice,
       getWindow: () => mainWindow

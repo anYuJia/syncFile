@@ -1,7 +1,9 @@
 import type { TransferProgress } from '@shared/types';
+import type { Messages } from '../i18n';
 
 interface TransferListProps {
   transfers: TransferProgress[];
+  messages: Messages;
 }
 
 function formatBytes(bytes: number): string {
@@ -17,20 +19,20 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function statusLabel(status: TransferProgress['status']): string {
+function statusLabel(status: TransferProgress['status'], messages: Messages): string {
   if (status === 'in-progress') {
-    return 'In progress';
+    return messages.transferStatusInProgress;
   }
   if (status === 'completed') {
-    return 'Completed';
+    return messages.transferStatusCompleted;
   }
   if (status === 'failed') {
-    return 'Failed';
+    return messages.transferStatusFailed;
   }
   if (status === 'rejected') {
-    return 'Rejected';
+    return messages.transferStatusRejected;
   }
-  return 'Pending';
+  return messages.transferStatusPending;
 }
 
 function progressPercent(item: TransferProgress): number {
@@ -44,33 +46,38 @@ function progressPercent(item: TransferProgress): number {
   return Math.min(100, Math.max(0, raw));
 }
 
-export function TransferList({ transfers }: TransferListProps): JSX.Element {
+export function TransferList({ transfers, messages }: TransferListProps): JSX.Element {
   if (transfers.length === 0) {
-    return <div className="transfer-list-empty">No transfer records yet.</div>;
+    return <div className="transfer-list-empty">{messages.transferEmpty}</div>;
   }
 
   return (
     <ul className="transfer-list">
       {transfers.map((item) => {
         const percent = progressPercent(item);
-        const directionLabel = item.direction === 'send' ? 'Send to' : 'Receive from';
+        const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
+        const statusText = statusLabel(item.status, messages);
         return (
           <li key={item.transferId} className={`transfer-item is-${item.status}`}>
+            <div className="transfer-item-stamp">{statusText}</div>
             <div className="transfer-item-top">
-              <div className="transfer-item-name">{item.fileName}</div>
-              <div className="transfer-item-status">{statusLabel(item.status)}</div>
+              <div className="transfer-item-title-group">
+                <div className="transfer-item-direction">{directionLabel}</div>
+                <div className="transfer-item-name">{item.fileName}</div>
+              </div>
+              <div className="transfer-item-percent">{percent}%</div>
             </div>
             <div className="transfer-item-meta">
-              {directionLabel} {item.peerDeviceName || 'unknown'}
+              {directionLabel} {item.peerDeviceName || messages.unknownDevice}
             </div>
             <div className="transfer-progress-track" aria-hidden="true">
               <div className="transfer-progress-fill" style={{ width: `${percent}%` }} />
             </div>
             <div className="transfer-item-foot">
-              <span>{percent}%</span>
               <span>
                 {formatBytes(item.bytesTransferred)} / {formatBytes(item.fileSize)}
               </span>
+              <span>{item.peerDeviceName || messages.unknownDevice}</span>
             </div>
             {item.error && <div className="transfer-item-error">{item.error}</div>}
           </li>

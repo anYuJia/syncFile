@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { basename } from 'path';
 import { statSync } from 'fs';
 
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron';
 
 import { IpcChannels, type IpcChannel } from '../../shared/ipc-channels';
 import type {
@@ -13,6 +13,7 @@ import type {
   TransferProgress
 } from '../../shared/types';
 import type { DeviceRegistry } from '../discovery/device-registry';
+import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
 import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
@@ -35,6 +36,7 @@ export interface IpcContext {
   tcpServer: TcpServer;
   tcpClient: TcpClient;
   sandbox: Sandbox;
+  sandboxLocation: SandboxLocationStore;
   identity: DeviceIdentity;
   getSelfDevice: () => Device;
   getWindow: () => BrowserWindow | null;
@@ -144,7 +146,30 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   ipcMain.handle(IpcChannels.OpenSandbox, async (): Promise<void> => {
-    await shell.openPath(context.sandbox.rootPath());
+    let targetPath = context.sandboxLocation.currentPath();
+    if (!targetPath) {
+      const window = context.getWindow();
+      const dialogOptions: OpenDialogOptions = {
+        title: 'Select Sandbox Folder',
+        buttonLabel: 'Use This Folder',
+        properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+      };
+      const selected = window
+        ? await dialog.showOpenDialog(window, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+
+      if (selected.canceled || selected.filePaths.length === 0) {
+        return;
+      }
+
+      targetPath = context.sandboxLocation.save(selected.filePaths[0]);
+      context.sandbox.setRoot(targetPath);
+    }
+
+    const result = await shell.openPath(context.sandbox.rootPath());
+    if (result.length > 0) {
+      throw new Error(result);
+    }
   });
 
   context.registry.on('device-online', (device) => {
