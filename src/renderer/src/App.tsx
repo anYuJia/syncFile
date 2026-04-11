@@ -7,6 +7,7 @@ import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
+import type { IncomingOffer, TrustedDevice } from '@shared/types';
 
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
 const MIN_RIGHT_PANE_SECTION_HEIGHT = 180;
@@ -35,6 +36,7 @@ export function App(): JSX.Element {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [rightPaneSplit, setRightPaneSplit] = useState<number | null>(() => {
     const saved = localStorage.getItem(RIGHT_PANE_SPLIT_KEY);
     const parsed = saved ? Number(saved) : Number.NaN;
@@ -47,6 +49,11 @@ export function App(): JSX.Element {
   });
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
+  const trustedDeviceIds = new Set(trustedDevices.map((device) => device.deviceId));
+
+  useEffect(() => {
+    void refreshTrustedDevices();
+  }, []);
 
   useEffect(() => {
     if (devices.length === 0) {
@@ -171,6 +178,43 @@ export function App(): JSX.Element {
     }
   }
 
+  async function refreshTrustedDevices(): Promise<void> {
+    try {
+      const currentSettings = await window.syncFile.getSettings();
+      setTrustedDevices(currentSettings.trustedDevices);
+    } catch {
+      // Best effort only.
+    }
+  }
+
+  async function handleTrustAndAccept(offer: IncomingOffer): Promise<void> {
+    try {
+      setBusyOfferId(offer.offerId);
+      try {
+        const currentSettings = await window.syncFile.getSettings();
+        const trustedDevices = dedupeTrustedDevices([
+          ...currentSettings.trustedDevices,
+          {
+            deviceId: offer.fromDevice.deviceId,
+            name: offer.fromDevice.name,
+            trustedAt: Date.now()
+          }
+        ]);
+
+        await window.syncFile.saveSettings({ trustedDevices });
+        setTrustedDevices(trustedDevices);
+      } catch {
+        // Accept the current file even if persisting trust fails.
+      }
+
+      await acceptOffer(offer.offerId);
+    } catch {
+      // Hook already stores and exposes the error message where possible.
+    } finally {
+      setBusyOfferId(null);
+    }
+  }
+
   const currentOffer = pendingOffers[0] ?? null;
   const dispatchCardStyle =
     rightPaneSplit === null
@@ -256,6 +300,7 @@ export function App(): JSX.Element {
           <DeviceList
             devices={devices}
             selectedDeviceId={selectedDeviceId}
+            trustedDeviceIds={trustedDeviceIds}
             onSelect={(deviceId) => setSelectedDeviceId(deviceId)}
             messages={messages}
           />
@@ -303,15 +348,31 @@ export function App(): JSX.Element {
         <ReceivePrompt
           offer={currentOffer}
           queueCount={pendingOffers.length}
+          trustedSender={trustedDeviceIds.has(currentOffer.fromDevice.deviceId)}
           busy={busyOfferId === currentOffer.offerId}
           onAccept={handleAccept}
+          onTrustAndAccept={handleTrustAndAccept}
           onReject={handleReject}
           messages={messages}
         />
       )}
       {isSettingsOpen && (
-        <SettingsModal messages={messages} onClose={() => setIsSettingsOpen(false)} />
+        <SettingsModal
+          messages={messages}
+          onClose={() => {
+            setIsSettingsOpen(false);
+            void refreshTrustedDevices();
+          }}
+        />
       )}
     </div>
   );
+}
+
+function dedupeTrustedDevices(devices: TrustedDevice[]): TrustedDevice[] {
+  const deduped = new Map<string, TrustedDevice>();
+  for (const device of devices) {
+    deduped.set(device.deviceId, device);
+  }
+  return [...deduped.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

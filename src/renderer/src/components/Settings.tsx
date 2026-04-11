@@ -10,7 +10,9 @@ interface SettingsModalProps {
 const DEFAULT_SETTINGS: Settings = {
   maxSandboxSizeMB: 1024,
   autoAccept: false,
-  openReceivedFolder: false
+  autoAcceptMaxSizeMB: 64,
+  openReceivedFolder: false,
+  trustedDevices: []
 };
 
 function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
@@ -70,7 +72,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     try {
       const normalized: Settings = {
         ...settings,
-        maxSandboxSizeMB: Math.min(102400, Math.max(64, Math.round(settings.maxSandboxSizeMB) || 1024))
+        maxSandboxSizeMB: Math.min(102400, Math.max(64, Math.round(settings.maxSandboxSizeMB) || 1024)),
+        autoAcceptMaxSizeMB: Math.min(102400, Math.max(1, Math.round(settings.autoAcceptMaxSizeMB) || 64))
       };
       await window.syncFile.saveSettings(normalized);
       onClose();
@@ -103,6 +106,13 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const remainingBytes = Math.max(0, maxBytes - usedBytes);
   const usageRatio = maxBytes > 0 ? Math.min(100, Math.round((usedBytes / maxBytes) * 100)) : 0;
   const displayPath = sandboxLocation?.path ?? '';
+
+  const handleRemoveTrustedDevice = (deviceId: string): void => {
+    setSettings((current) => ({
+      ...current,
+      trustedDevices: current.trustedDevices.filter((device) => device.deviceId !== deviceId)
+    }));
+  };
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -145,6 +155,25 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   </button>
                 </div>
 
+                <div className="settings-input-row">
+                  <div className="settings-toggle-text">
+                    <span className="settings-label">{messages.settingsAutoAcceptMaxSize}</span>
+                    <span className="settings-desc">{messages.settingsAutoAcceptMaxSizeDesc}</span>
+                  </div>
+                  <input
+                    type="number"
+                    className="settings-input"
+                    min={1}
+                    max={102400}
+                    value={settings.autoAcceptMaxSizeMB}
+                    disabled={!settings.autoAccept}
+                    onChange={(e) =>
+                      setSettings({ ...settings, autoAcceptMaxSizeMB: Math.max(0, Number(e.target.value)) })
+                    }
+                  />
+                  <span className="settings-unit">{messages.settingsMaxSandboxSizeUnit}</span>
+                </div>
+
               </div>
 
               <div className="settings-card">
@@ -165,6 +194,33 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     <span className="settings-toggle-knob" />
                   </button>
                 </div>
+              </div>
+
+              <div className="settings-card">
+                <span className="settings-label">{messages.settingsTrustedDevices}</span>
+                <span className="settings-desc">{messages.settingsTrustedDevicesDesc}</span>
+
+                {settings.trustedDevices.length === 0 ? (
+                  <div className="settings-empty-state">{messages.settingsTrustedDevicesEmpty}</div>
+                ) : (
+                  <div className="settings-trusted-list">
+                    {settings.trustedDevices.map((device) => (
+                      <div key={device.deviceId} className="settings-trusted-item">
+                        <div className="settings-trusted-copy">
+                          <span className="settings-trusted-name">{device.name}</span>
+                          <span className="settings-trusted-id">{device.deviceId.slice(0, 8)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() => handleRemoveTrustedDevice(device.deviceId)}
+                        >
+                          {messages.settingsTrustedDevicesRemove}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </section>

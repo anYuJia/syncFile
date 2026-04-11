@@ -28,6 +28,13 @@ interface PendingOffer {
   responder: OfferResponder;
 }
 
+type ReceiveMode = 'manual' | 'trusted-device' | 'auto-accept';
+
+interface AcceptedInboundMeta {
+  info: IncomingOfferInfo;
+  receiveMode: ReceiveMode;
+}
+
 interface OutboundTransferMeta {
   transferId: string;
   fileName: string;
@@ -49,7 +56,7 @@ export interface IpcContext {
 
 export function registerIpcHandlers(context: IpcContext): void {
   const pendingOffers = new Map<string, PendingOffer>();
-  const completedOrAcceptedOffers = new Map<string, IncomingOfferInfo>();
+  const completedOrAcceptedOffers = new Map<string, AcceptedInboundMeta>();
   const outboundTransfers = new Map<string, OutboundTransferMeta>();
 
   const sendToRenderer = <T>(channel: IpcChannel, payload: T): void => {
@@ -78,6 +85,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     offer: IncomingOfferInfo,
     bytesTransferred: number,
     status: TransferProgress['status'],
+    receiveMode: ReceiveMode,
     error?: string
   ): TransferProgress => ({
     transferId: offer.offerId,
@@ -87,6 +95,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     bytesTransferred,
     peerDeviceName: offer.fromDevice.name,
     status,
+    receiveMode,
     error
   });
 
@@ -97,9 +106,31 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
+  const autoAcceptLimitBytes = (settings: Settings): number => settings.autoAcceptMaxSizeMB * 1024 * 1024;
 
   const exceedsSandboxLimit = (fileSize: number, settings: Settings): boolean => {
     return context.sandbox.currentUsageBytes() + fileSize > sandboxLimitBytes(settings);
+  };
+
+  const isTrustedDevice = (deviceId: string, settings: Settings): boolean => {
+    return settings.trustedDevices.some((device) => device.deviceId === deviceId);
+  };
+
+  const resolveReceiveMode = (info: IncomingOfferInfo, settings: Settings): ReceiveMode => {
+    if (isTrustedDevice(info.fromDevice.deviceId, settings)) {
+      return 'trusted-device';
+    }
+    if (settings.autoAccept) {
+      return 'auto-accept';
+    }
+    return 'manual';
+  };
+
+  const canAutoAcceptOffer = (info: IncomingOfferInfo, settings: Settings): boolean => {
+    return (
+      info.fileSize <= autoAcceptLimitBytes(settings) &&
+      resolveReceiveMode(info, settings) !== 'manual'
+    );
   };
 
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
@@ -161,10 +192,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!pending) {
       throw new Error(`offer ${offerId} not found`);
     }
-    completedOrAcceptedOffers.set(offerId, pending.info);
+    const receiveMode = resolveReceiveMode(pending.info, context.settingsStore.get());
+    completedOrAcceptedOffers.set(offerId, { info: pending.info, receiveMode });
     pending.responder.accept();
     pendingOffers.delete(offerId);
-    sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending'));
+    sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending', receiveMode));
   });
 
   ipcMain.handle(
@@ -176,7 +208,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
       pending.responder.reject(reason);
       pendingOffers.delete(offerId);
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected'));
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected', 'manual'));
     }
   );
 
@@ -250,14 +282,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     const settings = context.settingsStore.get();
     if (exceedsSandboxLimit(info.fileSize, settings)) {
       responder.reject('too-large');
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected'));
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
       return;
     }
 
-    if (settings.autoAccept) {
-      completedOrAcceptedOffers.set(info.offerId, info);
+    if (canAutoAcceptOffer(info, settings)) {
+      const receiveMode = resolveReceiveMode(info, settings);
+      completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
       responder.accept();
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending'));
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
       return;
     }
 
@@ -269,7 +302,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       fileName: info.fileName,
       fileSize: info.fileSize,
       mimeType: info.mimeType,
-      receivedAt: Date.now()
+      receivedAt: Date.now(),
+      saveDirectory: context.sandbox.directoryForIncoming(info.fromDevice.deviceId)
     };
 
     sendToRenderer(IpcChannels.IncomingOffer, offer);
@@ -280,11 +314,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     const progress: TransferProgress = {
       transferId: info.offerId,
       direction: 'receive',
-      fileName: meta?.fileName ?? basename(info.savedPath),
-      fileSize: meta?.fileSize ?? info.bytesReceived,
+      fileName: meta?.info.fileName ?? basename(info.savedPath),
+      fileSize: meta?.info.fileSize ?? info.bytesReceived,
       bytesTransferred: info.bytesReceived,
       peerDeviceName: info.fromDevice.name,
-      status: 'completed'
+      status: 'completed',
+      receiveMode: meta?.receiveMode ?? 'manual'
     };
 
     completedOrAcceptedOffers.delete(info.offerId);
@@ -293,6 +328,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (context.settingsStore.get().openReceivedFolder) {
       shell.showItemInFolder(info.savedPath);
     }
+  });
+
+  context.tcpServer.on('progress', (info) => {
+    const receiveMode = completedOrAcceptedOffers.get(info.offerId)?.receiveMode ?? 'manual';
+    sendToRenderer(
+      IpcChannels.TransferProgress,
+      makeInboundProgress(info, info.bytesReceived, 'in-progress', receiveMode)
+    );
   });
 
   context.tcpServer.on('transfer-error', (error) => {

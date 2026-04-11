@@ -4,8 +4,10 @@ import type { Messages } from '../i18n';
 interface ReceivePromptProps {
   offer: IncomingOffer;
   queueCount: number;
+  trustedSender?: boolean;
   busy?: boolean;
   onAccept: (offerId: string) => void | Promise<void>;
+  onTrustAndAccept: (offer: IncomingOffer) => void | Promise<void>;
   onReject: (offerId: string) => void | Promise<void>;
   messages: Messages;
 }
@@ -26,8 +28,10 @@ function formatBytes(bytes: number): string {
 export function ReceivePrompt({
   offer,
   queueCount,
+  trustedSender = false,
   busy = false,
   onAccept,
+  onTrustAndAccept,
   onReject,
   messages
 }: ReceivePromptProps): JSX.Element {
@@ -44,9 +48,14 @@ export function ReceivePrompt({
         <p className="receive-prompt-from">
           <strong>{offer.fromDevice.name}</strong> {messages.wantsToSend}
         </p>
+        {trustedSender && <p className="receive-prompt-trusted">{messages.trustedDeviceLabel}</p>}
         <div className="receive-prompt-file">
           <p className="receive-prompt-file-name">{offer.fileName}</p>
           <p className="receive-prompt-file-size">{formatBytes(offer.fileSize)}</p>
+        </div>
+        <div className="receive-prompt-path">
+          <span className="receive-prompt-path-label">{messages.receivePromptSaveTo}</span>
+          <span className="receive-prompt-path-value">{offer.saveDirectory}</span>
         </div>
         {queueCount > 1 && <p className="receive-prompt-queue">{messages.waitingRequests(queueCount - 1)}</p>}
         <div className="receive-prompt-actions">
@@ -58,6 +67,16 @@ export function ReceivePrompt({
           >
             {messages.reject}
           </button>
+          {!trustedSender && (
+            <button
+              type="button"
+              className="button button-muted"
+              onClick={() => onTrustAndAccept(offer)}
+              disabled={busy}
+            >
+              {messages.trustAndAccept}
+            </button>
+          )}
           <button type="button" className="button" onClick={() => onAccept(offer.offerId)} disabled={busy}>
             {messages.accept}
           </button>

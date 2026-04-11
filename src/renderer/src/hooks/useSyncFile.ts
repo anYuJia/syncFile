@@ -53,6 +53,7 @@ function buildTransferFromEvent(
       incoming.bytesTransferred >= 0 ? incoming.bytesTransferred : previous?.bytesTransferred ?? 0,
     peerDeviceName: incoming.peerDeviceName || fallbackPeerDeviceName,
     status: incoming.status ?? previous?.status ?? 'pending',
+    receiveMode: incoming.receiveMode ?? previous?.receiveMode,
     error: incoming.error ?? previous?.error,
     updatedAt: Date.now()
   };

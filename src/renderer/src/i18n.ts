@@ -5,6 +5,7 @@ export interface Messages {
   selfDeviceLabel: string;
   loadingLocalDevice: string;
   appNotReady: string;
+  trustedDeviceLabel: string;
   heroEyebrow: string;
   heroLead: string;
   heroStamp: string;
@@ -44,12 +45,16 @@ export interface Messages {
   transferStatusCompleted: string;
   transferStatusFailed: string;
   transferStatusRejected: string;
+  transferReceiveModeTrusted: string;
+  transferReceiveModeAuto: string;
   incomingFileRequest: string;
   incomingFileRequestAriaLabel: string;
   wantsToSend: string;
   waitingRequests: (count: number) => string;
+  receivePromptSaveTo: string;
   reject: string;
   accept: string;
+  trustAndAccept: string;
   failedToLoadDeviceInformation: string;
   sendFailed: string;
   failedToAcceptIncomingFile: string;
@@ -72,8 +77,14 @@ export interface Messages {
   settingsMaxSandboxSizeUnit: string;
   settingsAutoAccept: string;
   settingsAutoAcceptDesc: string;
+  settingsAutoAcceptMaxSize: string;
+  settingsAutoAcceptMaxSizeDesc: string;
   settingsOpenReceivedFolder: string;
   settingsOpenReceivedFolderDesc: string;
+  settingsTrustedDevices: string;
+  settingsTrustedDevicesDesc: string;
+  settingsTrustedDevicesEmpty: string;
+  settingsTrustedDevicesRemove: string;
   settingsAcceptNote: string;
   settingsSandboxFolder: string;
   settingsSandboxFolderDesc: string;
@@ -103,6 +114,7 @@ const zh: Messages = {
   selfDeviceLabel: '本机设备',
   loadingLocalDevice: '正在加载本机设备信息...',
   appNotReady: '应用尚未就绪',
+  trustedDeviceLabel: '已信任',
   heroEyebrow: '局域网即时投递',
   heroLead: '把此刻需要的文件，像一张被盖章的航空托运单那样，直接送往下一台设备。',
   heroStamp: 'AIR DESK',
@@ -142,12 +154,16 @@ const zh: Messages = {
   transferStatusCompleted: '已完成',
   transferStatusFailed: '失败',
   transferStatusRejected: '已拒绝',
+  transferReceiveModeTrusted: '来自已信任设备',
+  transferReceiveModeAuto: '自动接受',
   incomingFileRequest: '收到文件请求',
   incomingFileRequestAriaLabel: '收到文件请求',
   wantsToSend: '想要发送给你：',
   waitingRequests: (count: number) => `还有 ${count} 个请求正在等待处理。`,
+  receivePromptSaveTo: '将保存到',
   reject: '拒绝',
   accept: '接受',
+  trustAndAccept: '信任并接受',
   failedToLoadDeviceInformation: '加载设备信息失败。',
   sendFailed: '发送失败。',
   failedToAcceptIncomingFile: '接受文件失败。',
@@ -169,9 +185,15 @@ const zh: Messages = {
   settingsMaxSandboxSizeDesc: '如果新文件会让沙箱总占用超出上限，将自动拒收。',
   settingsMaxSandboxSizeUnit: 'MB',
   settingsAutoAccept: '自动接受',
-  settingsAutoAcceptDesc: '自动接受所有传入的文件请求，无需手动确认。',
+  settingsAutoAcceptDesc: '按下面的规则自动接受传入文件，无需每次手动确认。',
+  settingsAutoAcceptMaxSize: '自动接受大小上限',
+  settingsAutoAcceptMaxSizeDesc: '只有不超过这个大小的文件，才会被自动接受；更大的文件仍会手动确认。',
   settingsOpenReceivedFolder: '接收完成后打开收件夹',
   settingsOpenReceivedFolderDesc: '每次收完文件后，在系统文件管理器里定位到新文件。',
+  settingsTrustedDevices: '已信任设备',
+  settingsTrustedDevicesDesc: '这些设备发送的小文件会在大小限制内自动接受。',
+  settingsTrustedDevicesEmpty: '还没有已信任设备。',
+  settingsTrustedDevicesRemove: '移除',
   settingsAcceptNote: '当前版本一旦接受文件，就会直接写入沙箱，因此不再区分“接受后是否下载”。',
   settingsSandboxFolder: '沙箱位置',
   settingsSandboxFolderDesc: '所有收到的文件都会按设备分目录存放在这里。',
@@ -199,6 +221,7 @@ const en: Messages = {
   selfDeviceLabel: 'This device',
   loadingLocalDevice: 'Loading local device...',
   appNotReady: 'Not ready',
+  trustedDeviceLabel: 'Trusted',
   heroEyebrow: 'LAN EXPRESS DESK',
   heroLead: 'Hand off the file you need right now like a stamped local airmail packet.',
   heroStamp: 'LOCAL AIRMAIL',
@@ -238,12 +261,16 @@ const en: Messages = {
   transferStatusCompleted: 'Completed',
   transferStatusFailed: 'Failed',
   transferStatusRejected: 'Rejected',
+  transferReceiveModeTrusted: 'Trusted device',
+  transferReceiveModeAuto: 'Auto-accepted',
   incomingFileRequest: 'Incoming file request',
   incomingFileRequestAriaLabel: 'Incoming file offer',
   wantsToSend: 'wants to send:',
   waitingRequests: (count: number) => `${count} more request(s) waiting.`,
+  receivePromptSaveTo: 'Will be saved to',
   reject: 'Reject',
   accept: 'Accept',
+  trustAndAccept: 'Trust & accept',
   failedToLoadDeviceInformation: 'Failed to load device information.',
   sendFailed: 'Send failed.',
   failedToAcceptIncomingFile: 'Failed to accept incoming file.',
@@ -265,9 +292,15 @@ const en: Messages = {
   settingsMaxSandboxSizeDesc: 'If a new file would push total sandbox usage past this limit, it is rejected automatically.',
   settingsMaxSandboxSizeUnit: 'MB',
   settingsAutoAccept: 'Auto-accept',
-  settingsAutoAcceptDesc: 'Automatically accept all incoming file requests without confirmation.',
+  settingsAutoAcceptDesc: 'Automatically accept incoming files that match the rule below.',
+  settingsAutoAcceptMaxSize: 'Auto-accept size limit',
+  settingsAutoAcceptMaxSizeDesc: 'Only files up to this size are auto-accepted. Larger files still require manual approval.',
   settingsOpenReceivedFolder: 'Reveal after receive',
   settingsOpenReceivedFolderDesc: 'Show the new file in the system file manager after each completed receive.',
+  settingsTrustedDevices: 'Trusted devices',
+  settingsTrustedDevicesDesc: 'Small files from these devices are auto-accepted within the size limit.',
+  settingsTrustedDevicesEmpty: 'No trusted devices yet.',
+  settingsTrustedDevicesRemove: 'Remove',
   settingsAcceptNote: 'In the current build, accepting a file immediately writes it into the sandbox, so there is no separate download step.',
   settingsSandboxFolder: 'Sandbox folder',
   settingsSandboxFolderDesc: 'All received files are stored here in per-device subfolders.',

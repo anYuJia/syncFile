@@ -17,11 +17,15 @@ export class Sandbox {
     return directorySize(this.rootPath());
   }
 
-  pathForIncoming(deviceId: string, originalFileName: string): string {
+  directoryForIncoming(deviceId: string): string {
     const safeDeviceId = sanitizeSegment(deviceId);
     const deviceDir = join(this.root, safeDeviceId);
     mkdirSync(deviceDir, { recursive: true });
+    return deviceDir;
+  }
 
+  pathForIncoming(deviceId: string, originalFileName: string): string {
+    const deviceDir = this.directoryForIncoming(deviceId);
     const safeName = sanitizeSegment(basename(originalFileName));
     const stamp = formatTimestamp(new Date());
     return join(deviceDir, `${stamp}_${safeName}`);

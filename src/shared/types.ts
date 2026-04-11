@@ -32,6 +32,7 @@ export interface TransferProgress {
   bytesTransferred: number;
   peerDeviceName: string;
   status: TransferStatus;
+  receiveMode?: 'manual' | 'trusted-device' | 'auto-accept';
   error?: string;
 }
 
@@ -45,14 +46,23 @@ export interface IncomingOffer {
   fileSize: number;
   mimeType?: string;
   receivedAt: number;
+  saveDirectory: string;
 }
 
 export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed';
 
+export interface TrustedDevice {
+  deviceId: string;
+  name: string;
+  trustedAt: number;
+}
+
 export interface Settings {
   maxSandboxSizeMB: number;
   autoAccept: boolean;
+  autoAcceptMaxSizeMB: number;
   openReceivedFolder: boolean;
+  trustedDevices: TrustedDevice[];
 }
 
 export interface SandboxLocationInfo {

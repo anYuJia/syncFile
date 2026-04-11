@@ -66,4 +66,11 @@ describe('Sandbox', () => {
 
     expect(sandbox.currentUsageBytes()).toBe(10);
   });
+
+  it('returns the device directory for incoming files', () => {
+    const deviceDir = sandbox.directoryForIncoming('device-a');
+
+    expect(deviceDir).toContain('device-a');
+    expect(existsSync(deviceDir)).toBe(true);
+  });
 });

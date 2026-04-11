@@ -22,7 +22,9 @@ describe('SettingsStore', () => {
     expect(store.get()).toEqual({
       maxSandboxSizeMB: 1024,
       autoAccept: false,
-      openReceivedFolder: false
+      autoAcceptMaxSizeMB: 64,
+      openReceivedFolder: false,
+      trustedDevices: []
     });
   });
 
@@ -42,7 +44,51 @@ describe('SettingsStore', () => {
     expect(store.get()).toEqual({
       maxSandboxSizeMB: 2048,
       autoAccept: true,
-      openReceivedFolder: true
+      autoAcceptMaxSizeMB: 64,
+      openReceivedFolder: true,
+      trustedDevices: []
     });
+  });
+
+  it('loads trusted devices when present', () => {
+    writeFileSync(
+      join(root, 'settings.json'),
+      JSON.stringify({
+        maxSandboxSizeMB: 1024,
+        autoAccept: false,
+        autoAcceptMaxSizeMB: 32,
+        openReceivedFolder: false,
+        trustedDevices: [
+          { deviceId: 'dev-1', name: 'Alice MacBook', trustedAt: 1234567890 }
+        ]
+      }),
+      'utf8'
+    );
+
+    const store = new SettingsStore(root);
+
+    expect(store.get().trustedDevices).toEqual([
+      { deviceId: 'dev-1', name: 'Alice MacBook', trustedAt: 1234567890 }
+    ]);
+  });
+
+  it('filters invalid trusted device records', () => {
+    writeFileSync(
+      join(root, 'settings.json'),
+      JSON.stringify({
+        trustedDevices: [
+          { deviceId: 'dev-1', name: 'Alice MacBook', trustedAt: 1234567890 },
+          { deviceId: '', name: 'bad', trustedAt: 1 },
+          { deviceId: 'dev-2', name: 'missing-time' }
+        ]
+      }),
+      'utf8'
+    );
+
+    const store = new SettingsStore(root);
+
+    expect(store.get().trustedDevices).toEqual([
+      { deviceId: 'dev-1', name: 'Alice MacBook', trustedAt: 1234567890 }
+    ]);
   });
 });

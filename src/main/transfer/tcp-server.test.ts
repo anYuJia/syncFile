@@ -28,6 +28,7 @@ describe('TcpServer', () => {
 
   it('emits an incoming offer and writes the file when accepted', async () => {
     const port = await server.listen(0);
+    const progressEvents: number[] = [];
 
     const offerPromise = new Promise<void>((resolve) => {
       server.on('incoming-offer', (offer, respond) => {
@@ -40,6 +41,10 @@ describe('TcpServer', () => {
 
     const completedPromise = new Promise<string>((resolve) => {
       server.on('transfer-complete', (info) => resolve(info.savedPath));
+    });
+
+    server.on('progress', (info) => {
+      progressEvents.push(info.bytesReceived);
     });
 
     const socket = connect(port, '127.0.0.1');
@@ -69,6 +74,7 @@ describe('TcpServer', () => {
 
     expect(statSync(savedPath).size).toBe(5);
     expect(readFileSync(savedPath, 'utf8')).toBe('hello');
+    expect(progressEvents).toContain(5);
   });
 
   it('rejects the offer and ends the connection', async () => {

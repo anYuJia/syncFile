@@ -44,8 +44,20 @@ export interface TransferCompleteInfo {
   };
 }
 
+export interface ReceiveProgressInfo {
+  offerId: string;
+  fileName: string;
+  fileSize: number;
+  bytesReceived: number;
+  fromDevice: {
+    deviceId: string;
+    name: string;
+  };
+}
+
 export interface TcpServerEvents {
   'incoming-offer': (offer: IncomingOfferInfo, respond: OfferResponder) => void;
+  progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
   'transfer-error': (error: Error) => void;
 }
@@ -227,6 +239,13 @@ export class TcpServer extends EventEmitter {
           const fileChunk = chunk.subarray(offset, offset + take);
           writeFileBytes(fileChunk);
           bytesReceived += take;
+          this.emit('progress', {
+            offerId: offer.fileId,
+            fileName: offer.fileName,
+            fileSize: offer.fileSize,
+            bytesReceived,
+            fromDevice: offer.fromDevice
+          });
           offset += take;
           if (bytesReceived < offer.fileSize) {
             return;

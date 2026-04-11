@@ -6,7 +6,9 @@ import type { Settings } from '../../shared/types';
 const DEFAULT_SETTINGS: Settings = {
   maxSandboxSizeMB: 1024,
   autoAccept: false,
-  openReceivedFolder: false
+  autoAcceptMaxSizeMB: 64,
+  openReceivedFolder: false,
+  trustedDevices: []
 };
 
 export class SettingsStore {
@@ -43,15 +45,38 @@ export class SettingsStore {
             ? parsed.maxSandboxSizeMB
             : DEFAULT_SETTINGS.maxSandboxSizeMB,
         autoAccept: typeof parsed.autoAccept === 'boolean' ? parsed.autoAccept : DEFAULT_SETTINGS.autoAccept,
+        autoAcceptMaxSizeMB:
+          typeof parsed.autoAcceptMaxSizeMB === 'number' && parsed.autoAcceptMaxSizeMB > 0
+            ? parsed.autoAcceptMaxSizeMB
+            : DEFAULT_SETTINGS.autoAcceptMaxSizeMB,
         openReceivedFolder:
           typeof parsed.openReceivedFolder === 'boolean'
             ? parsed.openReceivedFolder
             : typeof (parsed as { autoDownload?: boolean }).autoDownload === 'boolean'
               ? Boolean((parsed as { autoDownload?: boolean }).autoDownload)
-              : DEFAULT_SETTINGS.openReceivedFolder
+              : DEFAULT_SETTINGS.openReceivedFolder,
+        trustedDevices:
+          Array.isArray(parsed.trustedDevices)
+            ? parsed.trustedDevices.filter(isTrustedDeviceRecord)
+            : DEFAULT_SETTINGS.trustedDevices
       };
     } catch {
       return { ...DEFAULT_SETTINGS };
     }
   }
+}
+
+function isTrustedDeviceRecord(value: unknown): value is Settings['trustedDevices'][number] {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<Settings['trustedDevices'][number]>;
+  return (
+    typeof candidate.deviceId === 'string' &&
+    candidate.deviceId.length > 0 &&
+    typeof candidate.name === 'string' &&
+    candidate.name.length > 0 &&
+    typeof candidate.trustedAt === 'number'
+  );
 }

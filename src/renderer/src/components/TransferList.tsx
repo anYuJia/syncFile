@@ -46,6 +46,19 @@ function progressPercent(item: TransferProgress): number {
   return Math.min(100, Math.max(0, raw));
 }
 
+function receiveModeLabel(item: TransferProgress, messages: Messages): string | null {
+  if (item.direction !== 'receive') {
+    return null;
+  }
+  if (item.receiveMode === 'trusted-device') {
+    return messages.transferReceiveModeTrusted;
+  }
+  if (item.receiveMode === 'auto-accept') {
+    return messages.transferReceiveModeAuto;
+  }
+  return null;
+}
+
 export function TransferList({ transfers, messages }: TransferListProps): JSX.Element {
   if (transfers.length === 0) {
     return <div className="transfer-list-empty">{messages.transferEmpty}</div>;
@@ -57,6 +70,7 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
         const percent = progressPercent(item);
         const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
         const statusText = statusLabel(item.status, messages);
+        const receiveModeText = receiveModeLabel(item, messages);
         return (
           <li key={item.transferId} className={`transfer-item is-${item.status}`}>
             <div className="transfer-item-stamp">{statusText}</div>
@@ -70,6 +84,7 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
             <div className="transfer-item-meta">
               {directionLabel} {item.peerDeviceName || messages.unknownDevice}
             </div>
+            {receiveModeText && <div className="transfer-item-note">{receiveModeText}</div>}
             <div className="transfer-progress-track" aria-hidden="true">
               <div className="transfer-progress-fill" style={{ width: `${percent}%` }} />
             </div>
