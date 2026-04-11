@@ -9,12 +9,14 @@ import type {
   Device,
   IncomingOffer,
   RejectReason,
+  Settings,
   TransferId,
   TransferProgress
 } from '../../shared/types';
 import type { DeviceRegistry } from '../discovery/device-registry';
 import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
+import type { SettingsStore } from '../storage/settings';
 import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
 import type { IncomingOfferInfo, OfferResponder, TcpServer } from '../transfer/tcp-server';
@@ -37,6 +39,7 @@ export interface IpcContext {
   tcpClient: TcpClient;
   sandbox: Sandbox;
   sandboxLocation: SandboxLocationStore;
+  settingsStore: SettingsStore;
   identity: DeviceIdentity;
   getSelfDevice: () => Device;
   getWindow: () => BrowserWindow | null;
@@ -170,6 +173,30 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (result.length > 0) {
       throw new Error(result);
     }
+  });
+
+  ipcMain.handle(IpcChannels.SelectFile, async (): Promise<string | null> => {
+    const window = context.getWindow();
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Select File',
+      properties: ['openFile']
+    };
+    const selected = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (selected.canceled || selected.filePaths.length === 0) {
+      return null;
+    }
+    return selected.filePaths[0];
+  });
+
+  ipcMain.handle(IpcChannels.GetSettings, (): Settings => {
+    return context.settingsStore.get();
+  });
+
+  ipcMain.handle(IpcChannels.SaveSettings, (_event, partial: Partial<Settings>): Settings => {
+    return context.settingsStore.save(partial);
   });
 
   context.registry.on('device-online', (device) => {

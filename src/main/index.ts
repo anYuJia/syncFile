@@ -10,6 +10,7 @@ import { registerIpcHandlers } from './ipc/handlers';
 import { loadOrCreateIdentity } from './storage/device-identity';
 import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
+import { SettingsStore } from './storage/settings';
 import { TcpClient } from './transfer/tcp-client';
 import { TcpServer } from './transfer/tcp-server';
 
@@ -59,6 +60,7 @@ async function bootstrap(): Promise<void> {
   const defaultSandboxRoot = join(userDataDir, 'sandbox');
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
+  const settingsStore = new SettingsStore(userDataDir);
   const registry = new DeviceRegistry();
 
   tcpServer = new TcpServer({ sandbox });
@@ -103,6 +105,7 @@ async function bootstrap(): Promise<void> {
       tcpClient,
       sandbox,
       sandboxLocation,
+      settingsStore,
       identity,
       getSelfDevice,
       getWindow: () => mainWindow

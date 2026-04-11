@@ -5,6 +5,7 @@ import type {
   Device,
   IncomingOffer,
   RejectReason,
+  Settings,
   TransferId,
   TransferProgress
 } from '../shared/types';
@@ -27,6 +28,10 @@ const api = {
   rejectIncoming: (offerId: string, reason?: RejectReason): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.RejectIncoming, offerId, reason),
   openSandbox: (): Promise<void> => ipcRenderer.invoke(IpcChannels.OpenSandbox),
+  selectFile: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.SelectFile),
+  getSettings: (): Promise<Settings> => ipcRenderer.invoke(IpcChannels.GetSettings),
+  saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
+    ipcRenderer.invoke(IpcChannels.SaveSettings, settings),
   onDeviceOnline: (callback: (device: Device) => void): (() => void) =>
     subscribe(IpcChannels.DeviceOnline, callback),
   onDeviceOffline: (callback: (deviceId: string) => void): (() => void) =>

@@ -43,7 +43,8 @@ export function DeviceList({
               role="option"
               aria-selected={selected}
             >
-              <span className="device-item-index">{String(index + 1).padStart(2, '0')}</span>
+              <span className="device-item-indicator" />
+
               <span className="device-item-main">
                 <span className="device-item-row">
                   <span className="device-item-name">{device.name}</span>

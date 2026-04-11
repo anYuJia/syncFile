@@ -61,6 +61,22 @@ export interface Messages {
   errorPeerClosedBeforeAccept: string;
   errorPeerClosedBeforeComplete: string;
   errorSocketClosedBeforeComplete: string;
+  settings: string;
+  settingsMaxSandboxSize: string;
+  settingsMaxSandboxSizeUnit: string;
+  settingsAutoAccept: string;
+  settingsAutoAcceptDesc: string;
+  settingsAutoDownload: string;
+  settingsAutoDownloadDesc: string;
+  settingsSave: string;
+  settingsCancel: string;
+  dropZoneFileSelected: (fileName: string) => string;
+  dropZoneClearFile: string;
+  dropZoneSend: string;
+  dropZoneSelectDevice: string;
+  dropZoneClearAll: string;
+  dropZoneFileCount: (n: number) => string;
+  dropZoneRemoveFile: string;
 }
 
 export const LOCALE_STORAGE_KEY = 'syncfile.locale';
@@ -125,7 +141,23 @@ const zh: Messages = {
   errorPeerDeclined: '对方拒绝了这次传输。',
   errorPeerClosedBeforeAccept: '对方在接受前关闭了连接。',
   errorPeerClosedBeforeComplete: '对方在传输完成前关闭了连接。',
-  errorSocketClosedBeforeComplete: '连接在传输完成前被关闭。'
+  errorSocketClosedBeforeComplete: '连接在传输完成前被关闭。',
+  settings: '设置',
+  settingsMaxSandboxSize: '沙箱最大容量',
+  settingsMaxSandboxSizeUnit: 'MB',
+  settingsAutoAccept: '自动接受',
+  settingsAutoAcceptDesc: '自动接受所有传入的文件请求，无需手动确认。',
+  settingsAutoDownload: '自动下载',
+  settingsAutoDownloadDesc: '接受后自动保存文件到沙箱，无需额外操作。',
+  settingsSave: '保存',
+  settingsCancel: '取消',
+  dropZoneFileSelected: (fileName: string) => `已选择：${fileName}`,
+  dropZoneClearFile: '清除',
+  dropZoneSend: '发送',
+  dropZoneSelectDevice: '请选择一台目标设备',
+  dropZoneClearAll: '清空',
+  dropZoneFileCount: (n: number) => `已选 ${n} 个文件`,
+  dropZoneRemoveFile: '移除'
 };
 
 const en: Messages = {
@@ -188,7 +220,23 @@ const en: Messages = {
   errorPeerDeclined: 'The peer declined this transfer.',
   errorPeerClosedBeforeAccept: 'The peer closed the connection before accepting.',
   errorPeerClosedBeforeComplete: 'The peer closed the connection before completion.',
-  errorSocketClosedBeforeComplete: 'The connection closed before transfer completion.'
+  errorSocketClosedBeforeComplete: 'The connection closed before transfer completion.',
+  settings: 'Settings',
+  settingsMaxSandboxSize: 'Max sandbox size',
+  settingsMaxSandboxSizeUnit: 'MB',
+  settingsAutoAccept: 'Auto-accept',
+  settingsAutoAcceptDesc: 'Automatically accept all incoming file requests without confirmation.',
+  settingsAutoDownload: 'Auto-download',
+  settingsAutoDownloadDesc: 'Automatically save files to sandbox after accepting.',
+  settingsSave: 'Save',
+  settingsCancel: 'Cancel',
+  dropZoneFileSelected: (fileName: string) => `Selected: ${fileName}`,
+  dropZoneClearFile: 'Clear',
+  dropZoneSend: 'Send',
+  dropZoneSelectDevice: 'Select a target device',
+  dropZoneClearAll: 'Clear all',
+  dropZoneFileCount: (n: number) => `${n} file(s) selected`,
+  dropZoneRemoveFile: 'Remove'
 };
 
 export const messagesByLocale: Record<Locale, Messages> = {

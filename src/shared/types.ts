@@ -48,3 +48,9 @@ export interface IncomingOffer {
 }
 
 export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed';
+
+export interface Settings {
+  maxSandboxSizeMB: number;
+  autoAccept: boolean;
+  autoDownload: boolean;
+}

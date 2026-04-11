@@ -9,6 +9,9 @@ export const IpcChannels = {
   AcceptIncoming: 'syncfile:accept-incoming',
   RejectIncoming: 'syncfile:reject-incoming',
   OpenSandbox: 'syncfile:open-sandbox',
+  SelectFile: 'syncfile:select-file',
+  GetSettings: 'syncfile:get-settings',
+  SaveSettings: 'syncfile:save-settings',
 
   // Main -> Renderer (send)
   DeviceOnline: 'syncfile:device-online',
