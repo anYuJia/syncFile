@@ -6,7 +6,7 @@ import type { Settings } from '../../shared/types';
 const DEFAULT_SETTINGS: Settings = {
   maxSandboxSizeMB: 1024,
   autoAccept: false,
-  autoDownload: false
+  openReceivedFolder: false
 };
 
 export class SettingsStore {
@@ -43,7 +43,12 @@ export class SettingsStore {
             ? parsed.maxSandboxSizeMB
             : DEFAULT_SETTINGS.maxSandboxSizeMB,
         autoAccept: typeof parsed.autoAccept === 'boolean' ? parsed.autoAccept : DEFAULT_SETTINGS.autoAccept,
-        autoDownload: typeof parsed.autoDownload === 'boolean' ? parsed.autoDownload : DEFAULT_SETTINGS.autoDownload
+        openReceivedFolder:
+          typeof parsed.openReceivedFolder === 'boolean'
+            ? parsed.openReceivedFolder
+            : typeof (parsed as { autoDownload?: boolean }).autoDownload === 'boolean'
+              ? Boolean((parsed as { autoDownload?: boolean }).autoDownload)
+              : DEFAULT_SETTINGS.openReceivedFolder
       };
     } catch {
       return { ...DEFAULT_SETTINGS };

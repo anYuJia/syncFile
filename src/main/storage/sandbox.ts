@@ -1,4 +1,4 @@
-import { mkdirSync } from 'fs';
+import { mkdirSync, readdirSync, statSync } from 'fs';
 import { basename, join } from 'path';
 
 export class Sandbox {
@@ -11,6 +11,10 @@ export class Sandbox {
   rootPath(): string {
     mkdirSync(this.root, { recursive: true });
     return this.root;
+  }
+
+  currentUsageBytes(): number {
+    return directorySize(this.rootPath());
   }
 
   pathForIncoming(deviceId: string, originalFileName: string): string {
@@ -36,4 +40,21 @@ function formatTimestamp(d: Date): string {
   const mi = String(d.getMinutes()).padStart(2, '0');
   const ss = String(d.getSeconds()).padStart(2, '0');
   return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
+}
+
+function directorySize(path: string): number {
+  let total = 0;
+
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    const fullPath = join(path, entry.name);
+    if (entry.isDirectory()) {
+      total += directorySize(fullPath);
+      continue;
+    }
+    if (entry.isFile()) {
+      total += statSync(fullPath).size;
+    }
+  }
+
+  return total;
 }

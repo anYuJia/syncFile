@@ -58,16 +58,28 @@ export interface Messages {
   errorDeviceNotFound: string;
   errorOfferNotFound: string;
   errorPeerDeclined: string;
+  errorPeerDeclinedTooLarge: string;
   errorPeerClosedBeforeAccept: string;
   errorPeerClosedBeforeComplete: string;
   errorSocketClosedBeforeComplete: string;
   settings: string;
+  settingsReceiveSection: string;
+  settingsReceiveSectionDesc: string;
+  settingsStorageSection: string;
+  settingsStorageSectionDesc: string;
   settingsMaxSandboxSize: string;
+  settingsMaxSandboxSizeDesc: string;
   settingsMaxSandboxSizeUnit: string;
   settingsAutoAccept: string;
   settingsAutoAcceptDesc: string;
-  settingsAutoDownload: string;
-  settingsAutoDownloadDesc: string;
+  settingsOpenReceivedFolder: string;
+  settingsOpenReceivedFolderDesc: string;
+  settingsAcceptNote: string;
+  settingsSandboxFolder: string;
+  settingsSandboxFolderDesc: string;
+  settingsSandboxFolderDefault: string;
+  settingsSandboxFolderCustom: string;
+  settingsChangeSandboxFolder: string;
   settingsSave: string;
   settingsCancel: string;
   dropZoneFileSelected: (fileName: string) => string;
@@ -77,6 +89,8 @@ export interface Messages {
   dropZoneClearAll: string;
   dropZoneFileCount: (n: number) => string;
   dropZoneRemoveFile: string;
+  dropZoneAddMore: string;
+  dropZoneDropToAdd: string;
 }
 
 export const LOCALE_STORAGE_KEY = 'syncfile.locale';
@@ -102,7 +116,7 @@ const zh: Messages = {
   manifestKicker: '设备清单',
   manifestNote: '在线设备会被整理成投递目的地。选中之后，右侧发件台会立刻进入可发送状态。',
   dispatchKicker: '发件台',
-  dispatchNote: '支持拖拽或点击选取。当前阶段按单文件投递，接收端需要手动确认。',
+  dispatchNote: '支持拖拽或点击选取，可连续加入多个文件；接收端仍需手动确认。',
   ledgerKicker: '传输账本',
   ledgerNote: '每一笔投递都会记在这里，从等待、传输到完成或失败都可追踪。',
   noOnlinePeers: '暂无在线设备',
@@ -139,16 +153,28 @@ const zh: Messages = {
   errorDeviceNotFound: '未找到目标设备。',
   errorOfferNotFound: '未找到对应的接收请求。',
   errorPeerDeclined: '对方拒绝了这次传输。',
+  errorPeerDeclinedTooLarge: '对方因接收容量限制拒绝了这次传输。',
   errorPeerClosedBeforeAccept: '对方在接受前关闭了连接。',
   errorPeerClosedBeforeComplete: '对方在传输完成前关闭了连接。',
   errorSocketClosedBeforeComplete: '连接在传输完成前被关闭。',
   settings: '设置',
+  settingsReceiveSection: '接收策略',
+  settingsReceiveSectionDesc: '控制传入文件如何进入当前设备。',
+  settingsStorageSection: '存储策略',
+  settingsStorageSectionDesc: '决定文件保存到哪里，以及沙箱最多能装多少内容。',
   settingsMaxSandboxSize: '沙箱最大容量',
+  settingsMaxSandboxSizeDesc: '如果新文件会让沙箱总占用超出上限，将自动拒收。',
   settingsMaxSandboxSizeUnit: 'MB',
   settingsAutoAccept: '自动接受',
   settingsAutoAcceptDesc: '自动接受所有传入的文件请求，无需手动确认。',
-  settingsAutoDownload: '自动下载',
-  settingsAutoDownloadDesc: '接受后自动保存文件到沙箱，无需额外操作。',
+  settingsOpenReceivedFolder: '接收完成后打开收件夹',
+  settingsOpenReceivedFolderDesc: '每次收完文件后，在系统文件管理器里定位到新文件。',
+  settingsAcceptNote: '当前版本一旦接受文件，就会直接写入沙箱，因此不再区分“接受后是否下载”。',
+  settingsSandboxFolder: '沙箱位置',
+  settingsSandboxFolderDesc: '所有收到的文件都会按设备分目录存放在这里。',
+  settingsSandboxFolderDefault: '默认位置',
+  settingsSandboxFolderCustom: '自定义位置',
+  settingsChangeSandboxFolder: '更换位置',
   settingsSave: '保存',
   settingsCancel: '取消',
   dropZoneFileSelected: (fileName: string) => `已选择：${fileName}`,
@@ -157,7 +183,9 @@ const zh: Messages = {
   dropZoneSelectDevice: '请选择一台目标设备',
   dropZoneClearAll: '清空',
   dropZoneFileCount: (n: number) => `已选 ${n} 个文件`,
-  dropZoneRemoveFile: '移除'
+  dropZoneRemoveFile: '移除',
+  dropZoneAddMore: '继续添加',
+  dropZoneDropToAdd: '松开以加入当前队列'
 };
 
 const en: Messages = {
@@ -181,7 +209,7 @@ const en: Messages = {
   manifestKicker: 'Manifest',
   manifestNote: 'Discovered peers are listed here as ready destinations. Pick one to arm the dispatch desk.',
   dispatchKicker: 'Dispatch desk',
-  dispatchNote: 'Drag a file in or click to browse. Phase 1 sends one file at a time and requires receiver approval.',
+  dispatchNote: 'Drag files in or click to browse. You can queue multiple files, and the receiver still confirms manually.',
   ledgerKicker: 'Ledger',
   ledgerNote: 'Every handoff is logged here, from queueing to delivery, rejection, or failure.',
   noOnlinePeers: 'No online peers',
@@ -218,16 +246,28 @@ const en: Messages = {
   errorDeviceNotFound: 'Target device not found.',
   errorOfferNotFound: 'Incoming offer not found.',
   errorPeerDeclined: 'The peer declined this transfer.',
+  errorPeerDeclinedTooLarge: 'The peer rejected this transfer because its receive limit was reached.',
   errorPeerClosedBeforeAccept: 'The peer closed the connection before accepting.',
   errorPeerClosedBeforeComplete: 'The peer closed the connection before completion.',
   errorSocketClosedBeforeComplete: 'The connection closed before transfer completion.',
   settings: 'Settings',
+  settingsReceiveSection: 'Receive behavior',
+  settingsReceiveSectionDesc: 'Control how incoming files enter this device.',
+  settingsStorageSection: 'Storage behavior',
+  settingsStorageSectionDesc: 'Choose where received files live and how much space the sandbox can use.',
   settingsMaxSandboxSize: 'Max sandbox size',
+  settingsMaxSandboxSizeDesc: 'If a new file would push total sandbox usage past this limit, it is rejected automatically.',
   settingsMaxSandboxSizeUnit: 'MB',
   settingsAutoAccept: 'Auto-accept',
   settingsAutoAcceptDesc: 'Automatically accept all incoming file requests without confirmation.',
-  settingsAutoDownload: 'Auto-download',
-  settingsAutoDownloadDesc: 'Automatically save files to sandbox after accepting.',
+  settingsOpenReceivedFolder: 'Reveal after receive',
+  settingsOpenReceivedFolderDesc: 'Show the new file in the system file manager after each completed receive.',
+  settingsAcceptNote: 'In the current build, accepting a file immediately writes it into the sandbox, so there is no separate download step.',
+  settingsSandboxFolder: 'Sandbox folder',
+  settingsSandboxFolderDesc: 'All received files are stored here in per-device subfolders.',
+  settingsSandboxFolderDefault: 'Default location',
+  settingsSandboxFolderCustom: 'Custom location',
+  settingsChangeSandboxFolder: 'Change folder',
   settingsSave: 'Save',
   settingsCancel: 'Cancel',
   dropZoneFileSelected: (fileName: string) => `Selected: ${fileName}`,
@@ -236,7 +276,9 @@ const en: Messages = {
   dropZoneSelectDevice: 'Select a target device',
   dropZoneClearAll: 'Clear all',
   dropZoneFileCount: (n: number) => `${n} file(s) selected`,
-  dropZoneRemoveFile: 'Remove'
+  dropZoneRemoveFile: 'Remove',
+  dropZoneAddMore: 'Add more',
+  dropZoneDropToAdd: 'Release to add to queue'
 };
 
 export const messagesByLocale: Record<Locale, Messages> = {

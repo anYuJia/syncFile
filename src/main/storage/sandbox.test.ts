@@ -56,4 +56,14 @@ describe('Sandbox', () => {
     expect(sandbox.rootPath()).toBe(root);
     expect(existsSync(root)).toBe(true);
   });
+
+  it('calculates total sandbox usage recursively', () => {
+    const first = sandbox.pathForIncoming('device-a', 'first.txt');
+    const second = sandbox.pathForIncoming('device-b', 'second.txt');
+
+    writeFileSync(first, '1234');
+    writeFileSync(second, '123456');
+
+    expect(sandbox.currentUsageBytes()).toBe(10);
+  });
 });

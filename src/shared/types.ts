@@ -52,5 +52,10 @@ export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed';
 export interface Settings {
   maxSandboxSizeMB: number;
   autoAccept: boolean;
-  autoDownload: boolean;
+  openReceivedFolder: boolean;
+}
+
+export interface SandboxLocationInfo {
+  path: string;
+  isCustom: boolean;
 }

@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
+import { useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
 import type { Messages } from '../i18n';
 
 /* ── Types ────────────────────────────────────────────────────── */
@@ -95,6 +95,7 @@ export function DropZone({
   selectedDeviceName,
   selfDeviceName
 }: DropZoneProps): JSX.Element {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
 
@@ -133,6 +134,10 @@ export function DropZone({
     event.target.value = '';
   };
 
+  const openFilePicker = (): void => {
+    fileInputRef.current?.click();
+  };
+
   const handleRemove = (event: MouseEvent, path: string): void => {
     event.preventDefault();
     event.stopPropagation();
@@ -158,13 +163,14 @@ export function DropZone({
 
   return (
     <div
-      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}`}
+      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}${hasFiles ? ' has-files' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {/* Hidden file input */}
       <input
+        ref={fileInputRef}
         id={INPUT_ID}
         type="file"
         multiple
@@ -172,41 +178,73 @@ export function DropZone({
         onChange={handleFileInput}
       />
 
-      {/* Main drop area — always visible, always clickable */}
-      <label htmlFor={INPUT_ID} className="drop-zone-label">
-        <div className="drop-zone-icon" aria-hidden="true">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        </div>
-        <p className="drop-zone-title">{messages.dropZoneTitle}</p>
-        <p className="drop-zone-subtitle">{messages.dropZoneAction}</p>
-      </label>
-
-      {/* File list — compact rows below the drop area */}
-      {hasFiles && (
+      {!hasFiles ? (
+        <button type="button" className="drop-zone-label" onClick={openFilePicker}>
+          <span className="drop-zone-icon" aria-hidden="true">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </span>
+          <span className="drop-zone-title">{messages.dropZoneTitle}</span>
+          <span className="drop-zone-subtitle">{messages.dropZoneAction}</span>
+        </button>
+      ) : (
         <div className="dz-files">
-          <ul className="dz-file-list">
-            {pendingFiles.map((file) => (
-              <li key={file.path} className="dz-file-item">
-                <FileIcon name={file.name} />
-                <span className="dz-file-item-name" title={file.name}>{file.name}</span>
-                <span className="dz-file-item-size">{formatSize(file.size)}</span>
-                <button
-                  type="button"
-                  className="dz-file-item-remove"
-                  onClick={(e) => handleRemove(e, file.path)}
-                  title={messages.dropZoneRemoveFile}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          <div className="dz-file-stage">
+            <div className="dz-file-grid">
+              {pendingFiles.map((file) => (
+                <div key={file.path} className="dz-file-tile">
+                  <FileIcon name={file.name} />
+                  <span className="dz-file-tile-name" title={file.name}>{file.name}</span>
+                  <span className="dz-file-tile-size">{formatSize(file.size)}</span>
+                  <button
+                    type="button"
+                    className="dz-file-tile-remove"
+                    onClick={(e) => handleRemove(e, file.path)}
+                    title={messages.dropZoneRemoveFile}
+                    aria-label={`${messages.dropZoneRemoveFile} ${file.name}`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className="dz-file-tile dz-file-tile-add"
+                onClick={openFilePicker}
+                title={messages.dropZoneAction}
+                aria-label={messages.dropZoneAction}
+              >
+                <span className="dz-file-tile-add-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
+                </span>
+                <span className="dz-file-tile-add-label">{messages.dropZoneAddMore}</span>
+              </button>
+            </div>
+
+            {isDragActive && (
+              <div className="dz-drop-overlay" aria-hidden="true">
+                <div className="dz-drop-overlay-card">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <span>{messages.dropZoneDropToAdd}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="dz-send-bar">
             <span className="dz-send-bar-info">
               {messages.dropZoneFileCount(pendingFiles.length)}

@@ -226,6 +226,9 @@ function localizeError(error: unknown, messages: Messages): string | null {
   if (message.includes('offer') && message.includes('not found')) {
     return messages.errorOfferNotFound;
   }
+  if (message.includes('peer declined transfer: too-large')) {
+    return messages.errorPeerDeclinedTooLarge;
+  }
   if (message.includes('peer declined')) {
     return messages.errorPeerDeclined;
   }

@@ -9,6 +9,7 @@ import type {
   Device,
   IncomingOffer,
   RejectReason,
+  SandboxLocationInfo,
   Settings,
   TransferId,
   TransferProgress
@@ -72,6 +73,33 @@ export function registerIpcHandlers(context: IpcContext): void {
     error
   });
 
+  const makeInboundProgress = (
+    offer: IncomingOfferInfo,
+    bytesTransferred: number,
+    status: TransferProgress['status'],
+    error?: string
+  ): TransferProgress => ({
+    transferId: offer.offerId,
+    direction: 'receive',
+    fileName: offer.fileName,
+    fileSize: offer.fileSize,
+    bytesTransferred,
+    peerDeviceName: offer.fromDevice.name,
+    status,
+    error
+  });
+
+  const currentSandboxLocation = (): SandboxLocationInfo => ({
+    path: context.sandbox.rootPath(),
+    isCustom: context.sandboxLocation.currentPath() !== null
+  });
+
+  const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
+
+  const exceedsSandboxLimit = (fileSize: number, settings: Settings): boolean => {
+    return context.sandbox.currentUsageBytes() + fileSize > sandboxLimitBytes(settings);
+  };
+
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
     return context.registry.list();
   });
@@ -134,6 +162,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     completedOrAcceptedOffers.set(offerId, pending.info);
     pending.responder.accept();
     pendingOffers.delete(offerId);
+    sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending'));
   });
 
   ipcMain.handle(
@@ -145,6 +174,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
       pending.responder.reject(reason);
       pendingOffers.delete(offerId);
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected'));
     }
   );
 
@@ -173,6 +203,30 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (result.length > 0) {
       throw new Error(result);
     }
+  });
+
+  ipcMain.handle(IpcChannels.GetSandboxLocation, (): SandboxLocationInfo => {
+    return currentSandboxLocation();
+  });
+
+  ipcMain.handle(IpcChannels.ChooseSandboxLocation, async (): Promise<SandboxLocationInfo | null> => {
+    const window = context.getWindow();
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Select Sandbox Folder',
+      buttonLabel: 'Use This Folder',
+      properties: ['openDirectory', 'createDirectory', 'promptToCreate']
+    };
+    const selected = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (selected.canceled || selected.filePaths.length === 0) {
+      return null;
+    }
+
+    const rootPath = context.sandboxLocation.save(selected.filePaths[0]);
+    context.sandbox.setRoot(rootPath);
+    return currentSandboxLocation();
   });
 
   ipcMain.handle(IpcChannels.SelectFile, async (): Promise<string | null> => {
@@ -208,6 +262,20 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.tcpServer.on('incoming-offer', (info, responder) => {
+    const settings = context.settingsStore.get();
+    if (exceedsSandboxLimit(info.fileSize, settings)) {
+      responder.reject('too-large');
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected'));
+      return;
+    }
+
+    if (settings.autoAccept) {
+      completedOrAcceptedOffers.set(info.offerId, info);
+      responder.accept();
+      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending'));
+      return;
+    }
+
     pendingOffers.set(info.offerId, { info, responder });
 
     const offer: IncomingOffer = {
@@ -236,6 +304,10 @@ export function registerIpcHandlers(context: IpcContext): void {
 
     completedOrAcceptedOffers.delete(info.offerId);
     sendToRenderer(IpcChannels.TransferComplete, progress);
+
+    if (context.settingsStore.get().openReceivedFolder) {
+      shell.showItemInFolder(info.savedPath);
+    }
   });
 
   context.tcpServer.on('transfer-error', (error) => {

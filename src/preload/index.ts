@@ -5,6 +5,7 @@ import type {
   Device,
   IncomingOffer,
   RejectReason,
+  SandboxLocationInfo,
   Settings,
   TransferId,
   TransferProgress
@@ -28,6 +29,9 @@ const api = {
   rejectIncoming: (offerId: string, reason?: RejectReason): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.RejectIncoming, offerId, reason),
   openSandbox: (): Promise<void> => ipcRenderer.invoke(IpcChannels.OpenSandbox),
+  getSandboxLocation: (): Promise<SandboxLocationInfo> => ipcRenderer.invoke(IpcChannels.GetSandboxLocation),
+  chooseSandboxLocation: (): Promise<SandboxLocationInfo | null> =>
+    ipcRenderer.invoke(IpcChannels.ChooseSandboxLocation),
   selectFile: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.SelectFile),
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IpcChannels.GetSettings),
   saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
