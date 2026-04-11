@@ -1,4 +1,4 @@
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { platform as getPlatform } from 'os';
 
 import { app, BrowserWindow, shell } from 'electron';
@@ -57,7 +57,7 @@ async function createWindow(): Promise<BrowserWindow> {
 async function bootstrap(): Promise<void> {
   const userDataDir = app.getPath('userData');
   const identity = loadOrCreateIdentity(userDataDir);
-  const defaultSandboxRoot = join(userDataDir, 'sandbox');
+  const defaultSandboxRoot = resolveDefaultSandboxRoot();
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const settingsStore = new SettingsStore(userDataDir);
@@ -112,6 +112,20 @@ async function bootstrap(): Promise<void> {
     });
     ipcRegistered = true;
   }
+}
+
+function resolveDefaultSandboxRoot(): string {
+  if (!app.isPackaged) {
+    return join(app.getAppPath(), 'file');
+  }
+
+  const exeDir = dirname(app.getPath('exe'));
+  if (getPlatform() === 'darwin') {
+    const appBundleDir = dirname(dirname(exeDir));
+    return join(dirname(appBundleDir), 'file');
+  }
+
+  return join(exeDir, 'file');
 }
 
 async function cleanup(): Promise<void> {

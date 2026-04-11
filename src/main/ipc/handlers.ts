@@ -11,6 +11,7 @@ import type {
   RejectReason,
   SandboxLocationInfo,
   Settings,
+  SettingsPayload,
   TransferId,
   TransferProgress
 } from '../../shared/types';
@@ -91,7 +92,8 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   const currentSandboxLocation = (): SandboxLocationInfo => ({
     path: context.sandbox.rootPath(),
-    isCustom: context.sandboxLocation.currentPath() !== null
+    isCustom: context.sandboxLocation.currentPath() !== null,
+    usageBytes: context.sandbox.currentUsageBytes()
   });
 
   const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
@@ -179,26 +181,6 @@ export function registerIpcHandlers(context: IpcContext): void {
   );
 
   ipcMain.handle(IpcChannels.OpenSandbox, async (): Promise<void> => {
-    let targetPath = context.sandboxLocation.currentPath();
-    if (!targetPath) {
-      const window = context.getWindow();
-      const dialogOptions: OpenDialogOptions = {
-        title: 'Select Sandbox Folder',
-        buttonLabel: 'Use This Folder',
-        properties: ['openDirectory', 'createDirectory', 'promptToCreate']
-      };
-      const selected = window
-        ? await dialog.showOpenDialog(window, dialogOptions)
-        : await dialog.showOpenDialog(dialogOptions);
-
-      if (selected.canceled || selected.filePaths.length === 0) {
-        return;
-      }
-
-      targetPath = context.sandboxLocation.save(selected.filePaths[0]);
-      context.sandbox.setRoot(targetPath);
-    }
-
     const result = await shell.openPath(context.sandbox.rootPath());
     if (result.length > 0) {
       throw new Error(result);
@@ -245,8 +227,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     return selected.filePaths[0];
   });
 
-  ipcMain.handle(IpcChannels.GetSettings, (): Settings => {
-    return context.settingsStore.get();
+  ipcMain.handle(IpcChannels.GetSettings, (): SettingsPayload => {
+    return {
+      ...context.settingsStore.get(),
+      sandboxLocation: currentSandboxLocation()
+    };
   });
 
   ipcMain.handle(IpcChannels.SaveSettings, (_event, partial: Partial<Settings>): Settings => {

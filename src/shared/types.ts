@@ -58,4 +58,9 @@ export interface Settings {
 export interface SandboxLocationInfo {
   path: string;
   isCustom: boolean;
+  usageBytes: number;
+}
+
+export interface SettingsPayload extends Settings {
+  sandboxLocation: SandboxLocationInfo;
 }

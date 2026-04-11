@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { DeviceList } from './components/DeviceList';
 import { DropZone } from './components/DropZone';
@@ -7,6 +7,15 @@ import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
+
+const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
+const MIN_RIGHT_PANE_SECTION_HEIGHT = 180;
+const AUTO_DISPATCH_MIN_HEIGHT = 260;
+const RIGHT_PANE_RESIZER_HEIGHT = 12;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 export function App(): JSX.Element {
   const { locale, messages, setLocale } = useLocale();
@@ -26,10 +35,17 @@ export function App(): JSX.Element {
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [rightPaneSplit, setRightPaneSplit] = useState<number | null>(() => {
+    const saved = localStorage.getItem(RIGHT_PANE_SPLIT_KEY);
+    const parsed = saved ? Number(saved) : Number.NaN;
+    return Number.isFinite(parsed) ? clamp(parsed, 0.25, 0.75) : null;
+  });
+  const [isResizingPanels, setIsResizingPanels] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const rightPaneRef = useRef<HTMLDivElement>(null);
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
 
   useEffect(() => {
@@ -56,6 +72,61 @@ export function App(): JSX.Element {
       localStorage.setItem('theme', 'light');
     }
   }, [isDarkMode]);
+
+  useEffect(() => {
+    if (rightPaneSplit === null) {
+      localStorage.removeItem(RIGHT_PANE_SPLIT_KEY);
+      return;
+    }
+
+    localStorage.setItem(RIGHT_PANE_SPLIT_KEY, String(rightPaneSplit));
+  }, [rightPaneSplit]);
+
+  useEffect(() => {
+    if (!isResizingPanels) {
+      return;
+    }
+
+    const updateSplitFromPointer = (clientY: number): void => {
+      const pane = rightPaneRef.current;
+      if (!pane) {
+        return;
+      }
+
+      const rect = pane.getBoundingClientRect();
+      const availableHeight = rect.height - RIGHT_PANE_RESIZER_HEIGHT;
+      if (availableHeight <= MIN_RIGHT_PANE_SECTION_HEIGHT * 2) {
+        return;
+      }
+
+      const minRatio = MIN_RIGHT_PANE_SECTION_HEIGHT / availableHeight;
+      const maxRatio = 1 - minRatio;
+      const nextRatio = (clientY - rect.top - RIGHT_PANE_RESIZER_HEIGHT / 2) / availableHeight;
+      setRightPaneSplit(clamp(nextRatio, minRatio, maxRatio));
+    };
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      updateSplitFromPointer(event.clientY);
+    };
+
+    const stopResizing = (): void => {
+      setIsResizingPanels(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResizing);
+    window.addEventListener('pointercancel', stopResizing);
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResizing);
+      window.removeEventListener('pointercancel', stopResizing);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingPanels]);
 
   async function handleSendFiles(filePaths: string[]): Promise<void> {
     const fallbackTarget = devices.length === 1 ? devices[0].deviceId : null;
@@ -101,6 +172,21 @@ export function App(): JSX.Element {
   }
 
   const currentOffer = pendingOffers[0] ?? null;
+  const dispatchCardStyle =
+    rightPaneSplit === null
+      ? undefined
+      : {
+          flexBasis: `calc((100% - ${RIGHT_PANE_RESIZER_HEIGHT}px) * ${rightPaneSplit})`
+        };
+
+  const handlePaneResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    event.preventDefault();
+    setIsResizingPanels(true);
+  };
+
+  const handlePaneResizerDoubleClick = (): void => {
+    setRightPaneSplit(null);
+  };
 
   return (
     <div className="app-shell">
@@ -161,7 +247,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      <main className="content-grid">
+      <main className={`content-grid${isResizingPanels ? ' is-resizing' : ''}`}>
         <section className="card card-manifest">
           <div className="card-head">
             <h2>{messages.onlineDevices}</h2>
@@ -175,24 +261,42 @@ export function App(): JSX.Element {
           />
         </section>
 
-        <section className="card card-dispatch">
-          <div className="card-head">
-            <h2>{messages.sendFile}</h2>
-          </div>
-          <DropZone
-            onSend={(filePaths) => void handleSendFiles(filePaths)}
-            messages={messages}
-            selectedDeviceName={selectedDevice?.name ?? null}
-            selfDeviceName={selfDevice?.name ?? null}
-          />
-        </section>
+        <div
+          ref={rightPaneRef}
+          className={`right-pane${rightPaneSplit === null ? ' is-auto' : ''}`}
+        >
+          <section
+            className="card card-dispatch"
+            style={dispatchCardStyle}
+          >
+            <div className="card-head">
+              <h2>{messages.sendFile}</h2>
+            </div>
+            <DropZone
+              onSend={(filePaths) => void handleSendFiles(filePaths)}
+              messages={messages}
+              selectedDeviceName={selectedDevice?.name ?? null}
+              selfDeviceName={selfDevice?.name ?? null}
+            />
+          </section>
 
-        <section className="card card-ledger">
-          <div className="card-head">
-            <h2>{messages.transferActivity}</h2>
-          </div>
-          <TransferList transfers={transfers} messages={messages} />
-        </section>
+          <button
+            type="button"
+            className={`pane-resizer${isResizingPanels ? ' is-active' : ''}`}
+            onPointerDown={handlePaneResizerPointerDown}
+            onDoubleClick={handlePaneResizerDoubleClick}
+            aria-label="Resize send and transfer panels"
+          >
+            <span className="pane-resizer-handle" aria-hidden="true" />
+          </button>
+
+          <section className="card card-ledger">
+            <div className="card-head">
+              <h2>{messages.transferActivity}</h2>
+            </div>
+            <TransferList transfers={transfers} messages={messages} />
+          </section>
+        </div>
       </main>
 
       {currentOffer && (

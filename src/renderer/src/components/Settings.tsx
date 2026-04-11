@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SandboxLocationInfo, Settings } from '@shared/types';
+import type { SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
 
 interface SettingsModalProps {
@@ -13,6 +13,17 @@ const DEFAULT_SETTINGS: Settings = {
   openReceivedFolder: false
 };
 
+function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
+  return typeof payload === 'object' && payload !== null && 'sandboxLocation' in payload;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [sandboxLocation, setSandboxLocation] = useState<SandboxLocationInfo | null>(null);
@@ -22,26 +33,37 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     getSandboxLocation?: () => Promise<SandboxLocationInfo>;
     chooseSandboxLocation?: () => Promise<SandboxLocationInfo | null>;
   };
-  const supportsSandboxSelection =
-    typeof api.getSandboxLocation === 'function' && typeof api.chooseSandboxLocation === 'function';
 
   useEffect(() => {
-    const load = async (): Promise<void> => {
-      try {
-        const nextSettings = await window.syncFile.getSettings();
-        setSettings(nextSettings);
-
-        if (typeof api.getSandboxLocation === 'function') {
-          const nextSandboxLocation = await api.getSandboxLocation();
-          setSandboxLocation(nextSandboxLocation);
-        }
-      } catch {
-        // Keep defaults if IPC not available
-      }
-    };
-
-    void load();
+    void refreshSettings();
   }, [api]);
+
+  const refreshSettings = async (): Promise<void> => {
+    try {
+      const nextSettings = await window.syncFile.getSettings();
+      setSettings(nextSettings);
+      if (hasSandboxLocation(nextSettings)) {
+        setSandboxLocation(nextSettings.sandboxLocation);
+      }
+
+      if (typeof api.getSandboxLocation === 'function') {
+        const nextSandboxLocation = await api.getSandboxLocation();
+        setSandboxLocation(nextSandboxLocation);
+      }
+    } catch {
+      // Keep defaults if IPC not available
+    }
+  };
+
+  const handleOpenSandbox = async (): Promise<void> => {
+    setChoosingSandbox(true);
+    try {
+      await window.syncFile.openSandbox();
+      await refreshSettings();
+    } finally {
+      setChoosingSandbox(false);
+    }
+  };
 
   const handleSave = async (): Promise<void> => {
     setSaving(true);
@@ -66,7 +88,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
     setChoosingSandbox(true);
     try {
-      const selected = await api.chooseSandboxLocation();
+      const selected = await api.chooseSandboxLocation().catch(() => null);
       if (selected) {
         setSandboxLocation(selected);
       }
@@ -76,18 +98,22 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   };
 
   const busy = saving || choosingSandbox;
+  const maxBytes = settings.maxSandboxSizeMB * 1024 * 1024;
+  const usedBytes = sandboxLocation?.usageBytes ?? 0;
+  const remainingBytes = Math.max(0, maxBytes - usedBytes);
+  const usageRatio = maxBytes > 0 ? Math.min(100, Math.round((usedBytes / maxBytes) * 100)) : 0;
+  const displayPath = sandboxLocation?.path ?? '';
 
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
-          <h2 className="settings-title">{messages.settings}</h2>
-          <button type="button" className="settings-close" onClick={onClose} aria-label={messages.dismiss}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+          <button type="button" className="settings-back" onClick={onClose} aria-label={messages.dismiss}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
+          <h2 className="settings-title">{messages.settings}</h2>
         </div>
 
         <div className="settings-body">
@@ -118,6 +144,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     <span className="settings-toggle-knob" />
                   </button>
                 </div>
+
               </div>
 
               <div className="settings-card">
@@ -165,6 +192,22 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   />
                   <span className="settings-unit">{messages.settingsMaxSandboxSizeUnit}</span>
                 </div>
+
+                <div className="settings-usage">
+                  <div className="settings-usage-top">
+                    <span className="settings-usage-total">
+                      {messages.settingsUsageOfLimit(formatBytes(usedBytes), formatBytes(maxBytes))}
+                    </span>
+                    <span className="settings-usage-percent">{usageRatio}%</span>
+                  </div>
+                  <div className="settings-usage-track" aria-hidden="true">
+                    <div className="settings-usage-fill" style={{ width: `${usageRatio}%` }} />
+                  </div>
+                  <div className="settings-usage-meta">
+                    <span>{messages.settingsSpaceUsed}: {formatBytes(usedBytes)}</span>
+                    <span>{messages.settingsSpaceRemaining}: {formatBytes(remainingBytes)}</span>
+                  </div>
+                </div>
               </div>
 
               <div className="settings-card">
@@ -181,14 +224,14 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 </div>
 
                 <div className="settings-path-box">
-                  {sandboxLocation?.path ?? '...'}
+                  {displayPath}
                 </div>
 
                 <div className="settings-inline-actions">
                   <button
                     type="button"
                     className="button button-muted"
-                    onClick={() => void window.syncFile.openSandbox()}
+                    onClick={() => void handleOpenSandbox()}
                     disabled={busy}
                   >
                     {messages.openSandbox}
@@ -197,7 +240,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     type="button"
                     className="button button-muted"
                     onClick={() => void handleChooseSandbox()}
-                    disabled={busy || !supportsSandboxSelection}
+                    disabled={busy}
                   >
                     {messages.settingsChangeSandboxFolder}
                   </button>

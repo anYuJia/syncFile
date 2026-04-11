@@ -80,6 +80,9 @@ export interface Messages {
   settingsSandboxFolderDefault: string;
   settingsSandboxFolderCustom: string;
   settingsChangeSandboxFolder: string;
+  settingsSpaceUsed: string;
+  settingsSpaceRemaining: string;
+  settingsUsageOfLimit: (used: string, total: string) => string;
   settingsSave: string;
   settingsCancel: string;
   dropZoneFileSelected: (fileName: string) => string;
@@ -175,6 +178,9 @@ const zh: Messages = {
   settingsSandboxFolderDefault: '默认位置',
   settingsSandboxFolderCustom: '自定义位置',
   settingsChangeSandboxFolder: '更换位置',
+  settingsSpaceUsed: '已用空间',
+  settingsSpaceRemaining: '剩余空间',
+  settingsUsageOfLimit: (used, total) => `${used} / ${total}`,
   settingsSave: '保存',
   settingsCancel: '取消',
   dropZoneFileSelected: (fileName: string) => `已选择：${fileName}`,
@@ -268,6 +274,9 @@ const en: Messages = {
   settingsSandboxFolderDefault: 'Default location',
   settingsSandboxFolderCustom: 'Custom location',
   settingsChangeSandboxFolder: 'Change folder',
+  settingsSpaceUsed: 'Used',
+  settingsSpaceRemaining: 'Remaining',
+  settingsUsageOfLimit: (used, total) => `${used} / ${total}`,
   settingsSave: 'Save',
   settingsCancel: 'Cancel',
   dropZoneFileSelected: (fileName: string) => `Selected: ${fileName}`,
