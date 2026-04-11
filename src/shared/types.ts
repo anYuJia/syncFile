@@ -78,6 +78,13 @@ export interface SandboxLocationInfo {
   usageBytes: number;
 }
 
+export interface MaintenanceInfo {
+  transferHistoryCount: number;
+  resumableTransferCount: number;
+  resumableTransferBytes: number;
+}
+
 export interface SettingsPayload extends Settings {
   sandboxLocation: SandboxLocationInfo;
+  maintenance: MaintenanceInfo;
 }

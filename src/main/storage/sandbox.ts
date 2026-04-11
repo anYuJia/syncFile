@@ -10,6 +10,11 @@ interface IncomingResumeMeta {
   partialPath: string;
 }
 
+export interface ResumeCacheSummary {
+  count: number;
+  bytes: number;
+}
+
 export class Sandbox {
   constructor(private root: string) {}
 
@@ -108,10 +113,56 @@ export class Sandbox {
     return statSync(meta.partialPath).size;
   }
 
+  resumeCacheSummary(): ResumeCacheSummary {
+    const resumeDir = this.resumeDirectoryPath();
+    if (!existsSync(resumeDir)) {
+      return { count: 0, bytes: 0 };
+    }
+
+    let count = 0;
+    let bytes = 0;
+    for (const entry of readdirSync(resumeDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue;
+      }
+      const fileId = entry.name.slice(0, -5);
+      const meta = this.readIncomingResumeMeta(fileId);
+      if (!meta) {
+        continue;
+      }
+      count += 1;
+      if (existsSync(meta.partialPath)) {
+        bytes += statSync(meta.partialPath).size;
+      }
+    }
+
+    return { count, bytes };
+  }
+
+  clearResumeCache(): void {
+    const resumeDir = this.resumeDirectoryPath();
+    if (!existsSync(resumeDir)) {
+      return;
+    }
+
+    for (const entry of readdirSync(resumeDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue;
+      }
+      const fileId = entry.name.slice(0, -5);
+      this.discardIncomingResume(fileId, true);
+    }
+  }
+
   private resumeMetaPath(fileId: string): string {
+    const resumeDir = this.resumeDirectoryPath();
+    return join(resumeDir, `${sanitizeSegment(fileId)}.json`);
+  }
+
+  private resumeDirectoryPath(): string {
     const resumeDir = join(this.rootPath(), '.resume');
     mkdirSync(resumeDir, { recursive: true });
-    return join(resumeDir, `${sanitizeSegment(fileId)}.json`);
+    return resumeDir;
   }
 
   private readIncomingResumeMeta(fileId: string): IncomingResumeMeta | null {

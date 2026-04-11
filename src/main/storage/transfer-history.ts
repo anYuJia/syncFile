@@ -20,6 +20,10 @@ export class TransferHistoryStore {
     return [...this.records.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  count(): number {
+    return this.records.size;
+  }
+
   upsert(progress: TransferProgress): TransferRecord {
     const previous = this.records.get(progress.transferId);
     const record: TransferRecord = {
@@ -31,6 +35,11 @@ export class TransferHistoryStore {
     this.trim();
     this.persist();
     return record;
+  }
+
+  clear(): void {
+    this.records.clear();
+    this.persist();
   }
 
   private trim(): void {

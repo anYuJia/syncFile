@@ -90,6 +90,13 @@ export interface Messages {
   settingsTrustedDevicesDesc: string;
   settingsTrustedDevicesEmpty: string;
   settingsTrustedDevicesRemove: string;
+  settingsMaintenanceSection: string;
+  settingsMaintenanceSectionDesc: string;
+  settingsTransferHistoryCount: string;
+  settingsResumeCacheCount: string;
+  settingsResumeCacheBytes: string;
+  settingsClearTransferHistory: string;
+  settingsClearResumeCache: string;
   settingsAcceptNote: string;
   settingsSandboxFolder: string;
   settingsSandboxFolderDesc: string;
@@ -204,6 +211,13 @@ const zh: Messages = {
   settingsTrustedDevicesDesc: '这些设备发送的小文件会在大小限制内自动接受。',
   settingsTrustedDevicesEmpty: '还没有已信任设备。',
   settingsTrustedDevicesRemove: '移除',
+  settingsMaintenanceSection: '维护',
+  settingsMaintenanceSectionDesc: '管理本地历史记录和未完成缓存。',
+  settingsTransferHistoryCount: '历史记录条数',
+  settingsResumeCacheCount: '未完成缓存数',
+  settingsResumeCacheBytes: '未完成缓存大小',
+  settingsClearTransferHistory: '清理历史',
+  settingsClearResumeCache: '清理未完成缓存',
   settingsAcceptNote: '当前版本一旦接受文件，就会直接写入沙箱，因此不再区分“接受后是否下载”。',
   settingsSandboxFolder: '沙箱位置',
   settingsSandboxFolderDesc: '所有收到的文件都会按设备分目录存放在这里。',
@@ -316,6 +330,13 @@ const en: Messages = {
   settingsTrustedDevicesDesc: 'Small files from these devices are auto-accepted within the size limit.',
   settingsTrustedDevicesEmpty: 'No trusted devices yet.',
   settingsTrustedDevicesRemove: 'Remove',
+  settingsMaintenanceSection: 'Maintenance',
+  settingsMaintenanceSectionDesc: 'Manage local history and unfinished cached data.',
+  settingsTransferHistoryCount: 'History entries',
+  settingsResumeCacheCount: 'Resumable cache count',
+  settingsResumeCacheBytes: 'Resumable cache size',
+  settingsClearTransferHistory: 'Clear history',
+  settingsClearResumeCache: 'Clear resumable cache',
   settingsAcceptNote: 'In the current build, accepting a file immediately writes it into the sandbox, so there is no separate download step.',
   settingsSandboxFolder: 'Sandbox folder',
   settingsSandboxFolderDesc: 'All received files are stored here in per-device subfolders.',

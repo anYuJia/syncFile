@@ -37,4 +37,22 @@ describe('TransferHistoryStore', () => {
     expect(records[0].status).toBe('completed');
     expect(records[0].localPath).toBe('/tmp/demo.txt');
   });
+
+  it('clears stored transfer records', () => {
+    const store = new TransferHistoryStore(root);
+    store.upsert({
+      transferId: 't1',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 100,
+      peerDeviceName: 'Peer',
+      status: 'completed'
+    });
+
+    store.clear();
+
+    expect(store.list()).toEqual([]);
+    expect(store.count()).toBe(0);
+  });
 });

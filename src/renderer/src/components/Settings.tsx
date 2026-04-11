@@ -29,6 +29,11 @@ function formatBytes(bytes: number): string {
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [sandboxLocation, setSandboxLocation] = useState<SandboxLocationInfo | null>(null);
+  const [maintenance, setMaintenance] = useState<SettingsPayload['maintenance']>({
+    transferHistoryCount: 0,
+    resumableTransferCount: 0,
+    resumableTransferBytes: 0
+  });
   const [saving, setSaving] = useState(false);
   const [choosingSandbox, setChoosingSandbox] = useState(false);
   const api = window.syncFile as typeof window.syncFile & {
@@ -46,6 +51,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       setSettings(nextSettings);
       if (hasSandboxLocation(nextSettings)) {
         setSandboxLocation(nextSettings.sandboxLocation);
+        setMaintenance(nextSettings.maintenance);
       }
 
       if (typeof api.getSandboxLocation === 'function') {
@@ -112,6 +118,26 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       ...current,
       trustedDevices: current.trustedDevices.filter((device) => device.deviceId !== deviceId)
     }));
+  };
+
+  const handleClearTransferHistory = async (): Promise<void> => {
+    setChoosingSandbox(true);
+    try {
+      await window.syncFile.clearTransferHistory();
+      await refreshSettings();
+    } finally {
+      setChoosingSandbox(false);
+    }
+  };
+
+  const handleClearResumeCache = async (): Promise<void> => {
+    setChoosingSandbox(true);
+    try {
+      await window.syncFile.clearResumeCache();
+      await refreshSettings();
+    } finally {
+      setChoosingSandbox(false);
+    }
   };
 
   return (
@@ -301,6 +327,51 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     {messages.settingsChangeSandboxFolder}
                   </button>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h3 className="settings-section-title">{messages.settingsMaintenanceSection}</h3>
+              <p className="settings-section-copy">{messages.settingsMaintenanceSectionDesc}</p>
+            </div>
+
+            <div className="settings-card-list">
+              <div className="settings-card">
+                <div className="settings-maintenance-metric">
+                  <span className="settings-label">{messages.settingsTransferHistoryCount}</span>
+                  <span className="settings-maintenance-value">{maintenance.transferHistoryCount}</span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-muted"
+                  onClick={() => void handleClearTransferHistory()}
+                  disabled={busy || maintenance.transferHistoryCount === 0}
+                >
+                  {messages.settingsClearTransferHistory}
+                </button>
+              </div>
+
+              <div className="settings-card">
+                <div className="settings-maintenance-metric">
+                  <span className="settings-label">{messages.settingsResumeCacheCount}</span>
+                  <span className="settings-maintenance-value">{maintenance.resumableTransferCount}</span>
+                </div>
+                <div className="settings-maintenance-metric">
+                  <span className="settings-label">{messages.settingsResumeCacheBytes}</span>
+                  <span className="settings-maintenance-value">
+                    {formatBytes(maintenance.resumableTransferBytes)}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-muted"
+                  onClick={() => void handleClearResumeCache()}
+                  disabled={busy || maintenance.resumableTransferCount === 0}
+                >
+                  {messages.settingsClearResumeCache}
+                </button>
               </div>
             </div>
           </section>

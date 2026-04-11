@@ -1528,6 +1528,20 @@ body {
   flex-wrap: wrap;
 }
 
+.settings-maintenance-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.settings-maintenance-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
 .settings-empty-state {
   margin-top: 12px;
   padding: 12px 14px;

@@ -85,4 +85,17 @@ describe('Sandbox', () => {
     expect(existsSync(finalPath)).toBe(true);
     expect(readFileSync(finalPath, 'utf8')).toBe('hello');
   });
+
+  it('reports and clears resume cache', () => {
+    const first = sandbox.prepareIncomingResume('file-1', 'device-a', 'hello.txt', 5);
+    const second = sandbox.prepareIncomingResume('file-2', 'device-b', 'world.txt', 3);
+    writeFileSync(first.partialPath, 'hello');
+    writeFileSync(second.partialPath, 'abc');
+
+    expect(sandbox.resumeCacheSummary()).toEqual({ count: 2, bytes: 8 });
+
+    sandbox.clearResumeCache();
+
+    expect(sandbox.resumeCacheSummary()).toEqual({ count: 0, bytes: 0 });
+  });
 });

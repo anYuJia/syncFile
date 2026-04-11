@@ -124,6 +124,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     usageBytes: context.sandbox.currentUsageBytes()
   });
 
+  const currentMaintenanceInfo = () => {
+    const resumeCache = context.sandbox.resumeCacheSummary();
+    return {
+      transferHistoryCount: context.transferHistoryStore.count(),
+      resumableTransferCount: resumeCache.count,
+      resumableTransferBytes: resumeCache.bytes
+    };
+  };
+
   const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
   const autoAcceptLimitBytes = (settings: Settings): number => settings.autoAcceptMaxSizeMB * 1024 * 1024;
 
@@ -293,6 +302,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     shell.showItemInFolder(path);
   });
 
+  ipcMain.handle(IpcChannels.ClearTransferHistory, (): void => {
+    context.transferHistoryStore.clear();
+  });
+
+  ipcMain.handle(IpcChannels.ClearResumeCache, (): void => {
+    context.sandbox.clearResumeCache();
+  });
+
   ipcMain.handle(IpcChannels.GetSandboxLocation, (): SandboxLocationInfo => {
     return currentSandboxLocation();
   });
@@ -336,7 +353,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IpcChannels.GetSettings, (): SettingsPayload => {
     return {
       ...context.settingsStore.get(),
-      sandboxLocation: currentSandboxLocation()
+      sandboxLocation: currentSandboxLocation(),
+      maintenance: currentMaintenanceInfo()
     };
   });
 
