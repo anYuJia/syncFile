@@ -922,6 +922,48 @@ body {
 
 /* ── Transfer list ────────────────────────────────────────────── */
 
+.transfer-toolbar {
+  padding: 4px 10px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.transfer-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.transfer-filter {
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.transfer-filter.is-active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.transfer-search {
+  min-width: 160px;
+  max-width: 220px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 6px 10px;
+}
+
 .transfer-list {
   margin: 0;
   padding: 4px 10px 10px;
@@ -971,6 +1013,15 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.transfer-item-summary {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .transfer-item-title-group {
@@ -1053,6 +1104,34 @@ body {
 .transfer-item-error {
   color: var(--danger);
   font-size: 10px;
+}
+
+.transfer-item-details {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.transfer-item-detail-row {
+  display: grid;
+  gap: 2px;
+}
+
+.transfer-item-detail-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transfer-item-detail-value {
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-word;
+  font-family: 'SF Mono', 'Menlo', monospace;
 }
 
 .transfer-item.is-completed .transfer-progress-fill {
@@ -1195,6 +1274,34 @@ body {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.pair-prompt-grid {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.pair-prompt-card {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  display: grid;
+  gap: 4px;
+}
+
+.pair-prompt-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pair-prompt-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Menlo', monospace;
 }
 
 /* ── Settings modal ────────────────────────────────────────────── */

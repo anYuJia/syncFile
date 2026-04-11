@@ -7,6 +7,7 @@ export const IpcChannels = {
   GetSelfDevice: 'syncfile:get-self-device',
   GetTransferHistory: 'syncfile:get-transfer-history',
   SendFile: 'syncfile:send-file',
+  PauseTransfer: 'syncfile:pause-transfer',
   CancelTransfer: 'syncfile:cancel-transfer',
   AcceptIncoming: 'syncfile:accept-incoming',
   RejectIncoming: 'syncfile:reject-incoming',

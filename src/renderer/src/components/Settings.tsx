@@ -113,10 +113,13 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const usageRatio = maxBytes > 0 ? Math.min(100, Math.round((usedBytes / maxBytes) * 100)) : 0;
   const displayPath = sandboxLocation?.path ?? '';
 
-  const handleRemoveTrustedDevice = (deviceId: string): void => {
+  const handleRemoveTrustedDevice = (deviceId: string, trustFingerprint: string): void => {
     setSettings((current) => ({
       ...current,
-      trustedDevices: current.trustedDevices.filter((device) => device.deviceId !== deviceId)
+      trustedDevices: current.trustedDevices.filter(
+        (device) =>
+          !(device.deviceId === deviceId && device.trustFingerprint === trustFingerprint)
+      )
     }));
   };
 
@@ -241,7 +244,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                         <button
                           type="button"
                           className="button button-ghost"
-                          onClick={() => handleRemoveTrustedDevice(device.deviceId)}
+                          onClick={() => handleRemoveTrustedDevice(device.deviceId, device.trustFingerprint)}
                         >
                           {messages.settingsTrustedDevicesRemove}
                         </button>

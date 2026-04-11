@@ -27,6 +27,8 @@ const api = {
   getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
     ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
+  pauseTransfer: (transferId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.PauseTransfer, transferId),
   cancelTransfer: (transferId: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.CancelTransfer, transferId),
   acceptIncoming: (offerId: string): Promise<void> =>

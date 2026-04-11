@@ -86,6 +86,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   const completedOrAcceptedOffers = new Map<string, AcceptedInboundMeta>();
   const outboundTransfers = new Map<string, OutboundTransferMeta>();
   const cancellingOutboundTransfers = new Set<string>();
+  const pausingOutboundTransfers = new Set<string>();
 
   const sendToRenderer = <T>(channel: IpcChannel, payload: T): void => {
     const window = context.getWindow();
@@ -252,6 +253,8 @@ export function registerIpcHandlers(context: IpcContext): void {
         const currentMeta = outboundTransfers.get(transferId) ?? meta;
         const wasCancelled =
           cancellingOutboundTransfers.has(transferId) || error.message.includes('transfer cancelled');
+        const wasPaused =
+          pausingOutboundTransfers.has(transferId) || error.message.includes('transfer paused');
 
         if (wasCancelled) {
           publishTransferEvent(
@@ -263,6 +266,16 @@ export function registerIpcHandlers(context: IpcContext): void {
           return;
         }
 
+        if (wasPaused) {
+          const previousBytes = context.transferHistoryStore.get(transferId)?.bytesTransferred ?? 0;
+          publishTransferEvent(
+            IpcChannels.TransferProgress,
+            makeOutboundProgress(currentMeta, previousBytes, 'paused')
+          );
+          pausingOutboundTransfers.delete(transferId);
+          return;
+        }
+
         publishTransferEvent(
           IpcChannels.TransferProgress,
           makeOutboundProgress(currentMeta, 0, 'failed', error.message)
@@ -271,6 +284,18 @@ export function registerIpcHandlers(context: IpcContext): void {
       });
 
     return { value: transferId };
+  });
+
+  ipcMain.handle(IpcChannels.PauseTransfer, (_event, transferId: string): void => {
+    const outbound = outboundTransfers.get(transferId);
+    if (!outbound) {
+      throw new Error(`transfer ${transferId} not found`);
+    }
+    const paused = context.tcpClient.cancel(transferId);
+    if (!paused) {
+      throw new Error(`transfer ${transferId} not found`);
+    }
+    pausingOutboundTransfers.add(transferId);
   });
 
   ipcMain.handle(IpcChannels.CancelTransfer, (_event, transferId: string): void => {

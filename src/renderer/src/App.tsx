@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 
 import { DeviceList } from './components/DeviceList';
 import { DropZone } from './components/DropZone';
+import { PairDevicePrompt } from './components/PairDevicePrompt';
 import { ReceivePrompt } from './components/ReceivePrompt';
 import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
-import type { IncomingOffer, TrustedDevice } from '@shared/types';
+import type { Device, IncomingOffer, TrustedDevice } from '@shared/types';
 
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
 const MIN_RIGHT_PANE_SECTION_HEIGHT = 180;
@@ -28,6 +29,7 @@ export function App(): JSX.Element {
     errorMessage,
     clearError,
     sendFile,
+    pauseTransfer,
     cancelTransfer,
     retryTransfer,
     acceptOffer,
@@ -37,6 +39,7 @@ export function App(): JSX.Element {
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [rightPaneSplit, setRightPaneSplit] = useState<number | null>(() => {
@@ -51,6 +54,7 @@ export function App(): JSX.Element {
   });
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
+  const pairingDevice = devices.find((device) => device.deviceId === pairingDeviceId) ?? null;
   const trustedDeviceKeys = new Set(
     trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)
   );
@@ -190,6 +194,14 @@ export function App(): JSX.Element {
     }
   }
 
+  async function handlePauseTransfer(transferId: string): Promise<void> {
+    try {
+      await pauseTransfer(transferId);
+    } catch {
+      // Hook already stores and exposes the error message.
+    }
+  }
+
   async function handleRetryTransfer(transferId: string): Promise<void> {
     try {
       await retryTransfer(transferId);
@@ -233,6 +245,27 @@ export function App(): JSX.Element {
       // Hook already stores and exposes the error message where possible.
     } finally {
       setBusyOfferId(null);
+    }
+  }
+
+  async function handlePairDevice(device: Device): Promise<void> {
+    try {
+      const currentSettings = await window.syncFile.getSettings();
+      const trustedDevices = dedupeTrustedDevices([
+        ...currentSettings.trustedDevices,
+        {
+          deviceId: device.deviceId,
+          name: device.name,
+          trustFingerprint: device.trustFingerprint,
+          trustedAt: Date.now()
+        }
+      ]);
+
+      await window.syncFile.saveSettings({ trustedDevices });
+      setTrustedDevices(trustedDevices);
+      setPairingDeviceId(null);
+    } catch {
+      // Best effort; settings error remains in UI elsewhere.
     }
   }
 
@@ -337,6 +370,19 @@ export function App(): JSX.Element {
           >
             <div className="card-head">
               <h2>{messages.sendFile}</h2>
+              {selectedDevice && (
+                trustedDeviceKeys.has(`${selectedDevice.deviceId}:${selectedDevice.trustFingerprint}`) ? (
+                  <span className="device-item-trusted">{messages.pairedDevice}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button-ghost"
+                    onClick={() => setPairingDeviceId(selectedDevice.deviceId)}
+                  >
+                    {messages.pairDevice}
+                  </button>
+                )
+              )}
             </div>
             <DropZone
               onSend={(filePaths) => void handleSendFiles(filePaths)}
@@ -363,6 +409,7 @@ export function App(): JSX.Element {
             <TransferList
               transfers={transfers}
               messages={messages}
+              onPause={handlePauseTransfer}
               onCancel={handleCancelTransfer}
               onRetry={handleRetryTransfer}
             />
@@ -381,6 +428,15 @@ export function App(): JSX.Element {
           onAccept={handleAccept}
           onTrustAndAccept={handleTrustAndAccept}
           onReject={handleReject}
+          messages={messages}
+        />
+      )}
+      {pairingDevice && selfDevice && (
+        <PairDevicePrompt
+          device={pairingDevice}
+          selfFingerprint={selfDevice.trustFingerprint}
+          onConfirm={handlePairDevice}
+          onClose={() => setPairingDeviceId(null)}
           messages={messages}
         />
       )}

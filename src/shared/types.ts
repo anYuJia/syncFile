@@ -21,6 +21,7 @@ export type TransferDirection = 'send' | 'receive';
 export type TransferStatus =
   | 'pending'
   | 'in-progress'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'rejected'

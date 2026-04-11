@@ -43,6 +43,7 @@ export interface Messages {
   unknownDevice: string;
   transferStatusPending: string;
   transferStatusInProgress: string;
+  transferStatusPaused: string;
   transferStatusCompleted: string;
   transferStatusFailed: string;
   transferStatusRejected: string;
@@ -52,7 +53,24 @@ export interface Messages {
   transferOpenFile: string;
   transferRevealFile: string;
   transferCancel: string;
+  transferPause: string;
+  transferResume: string;
   transferRetry: string;
+  taskFilterAll: string;
+  taskFilterActive: string;
+  taskFilterDone: string;
+  taskFilterIssues: string;
+  taskSearchPlaceholder: string;
+  transferLocalPath: string;
+  transferPeerId: string;
+  pairDevice: string;
+  pairedDevice: string;
+  pairPromptTitle: string;
+  pairPromptDesc: (deviceName: string) => string;
+  pairPromptConfirm: string;
+  pairPromptCancel: string;
+  pairPromptLocalFingerprint: string;
+  pairPromptRemoteFingerprint: string;
   incomingFileRequest: string;
   incomingFileRequestAriaLabel: string;
   wantsToSend: string;
@@ -166,6 +184,7 @@ const zh: Messages = {
   unknownDevice: '未知设备',
   transferStatusPending: '等待中',
   transferStatusInProgress: '传输中',
+  transferStatusPaused: '已暂停',
   transferStatusCompleted: '已完成',
   transferStatusFailed: '失败',
   transferStatusRejected: '已拒绝',
@@ -175,7 +194,24 @@ const zh: Messages = {
   transferOpenFile: '打开文件',
   transferRevealFile: '在文件夹中显示',
   transferCancel: '取消',
+  transferPause: '暂停',
+  transferResume: '继续',
   transferRetry: '重试',
+  taskFilterAll: '全部',
+  taskFilterActive: '进行中',
+  taskFilterDone: '已完成',
+  taskFilterIssues: '异常',
+  taskSearchPlaceholder: '搜索文件名或设备',
+  transferLocalPath: '本地路径',
+  transferPeerId: '设备 ID',
+  pairDevice: '配对',
+  pairedDevice: '已配对',
+  pairPromptTitle: '确认设备指纹',
+  pairPromptDesc: (deviceName) => `请和 ${deviceName} 设备上的指纹进行核对，确认一致后再建立配对。`,
+  pairPromptConfirm: '确认配对',
+  pairPromptCancel: '暂不配对',
+  pairPromptLocalFingerprint: '本机指纹',
+  pairPromptRemoteFingerprint: '对方指纹',
   incomingFileRequest: '收到文件请求',
   incomingFileRequestAriaLabel: '收到文件请求',
   wantsToSend: '想要发送给你：',
@@ -287,6 +323,7 @@ const en: Messages = {
   unknownDevice: 'unknown',
   transferStatusPending: 'Pending',
   transferStatusInProgress: 'In progress',
+  transferStatusPaused: 'Paused',
   transferStatusCompleted: 'Completed',
   transferStatusFailed: 'Failed',
   transferStatusRejected: 'Rejected',
@@ -296,7 +333,24 @@ const en: Messages = {
   transferOpenFile: 'Open file',
   transferRevealFile: 'Reveal in folder',
   transferCancel: 'Cancel',
+  transferPause: 'Pause',
+  transferResume: 'Resume',
   transferRetry: 'Retry',
+  taskFilterAll: 'All',
+  taskFilterActive: 'Active',
+  taskFilterDone: 'Done',
+  taskFilterIssues: 'Issues',
+  taskSearchPlaceholder: 'Search file or device',
+  transferLocalPath: 'Local path',
+  transferPeerId: 'Peer ID',
+  pairDevice: 'Pair',
+  pairedDevice: 'Paired',
+  pairPromptTitle: 'Confirm device fingerprint',
+  pairPromptDesc: (deviceName) => `Compare the fingerprint shown on ${deviceName} before trusting this device.`,
+  pairPromptConfirm: 'Confirm pair',
+  pairPromptCancel: 'Not now',
+  pairPromptLocalFingerprint: 'This device',
+  pairPromptRemoteFingerprint: 'Remote device',
   incomingFileRequest: 'Incoming file request',
   incomingFileRequestAriaLabel: 'Incoming file offer',
   wantsToSend: 'wants to send:',

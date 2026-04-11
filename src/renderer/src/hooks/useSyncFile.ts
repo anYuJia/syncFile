@@ -23,6 +23,7 @@ interface UseSyncFileResult {
   errorMessage: string | null;
   clearError: () => void;
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string) => Promise<TransferId>;
+  pauseTransfer: (transferId: string) => Promise<void>;
   cancelTransfer: (transferId: string) => Promise<void>;
   retryTransfer: (transferId: string) => Promise<TransferId>;
   acceptOffer: (offerId: string) => Promise<void>;
@@ -205,6 +206,15 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     }
   }
 
+  async function pauseTransfer(transferId: string): Promise<void> {
+    try {
+      await window.syncFile.pauseTransfer(transferId);
+    } catch (error) {
+      setErrorMessage(localizeError(error, messages) || messages.sendFailed);
+      throw error;
+    }
+  }
+
   async function cancelTransfer(transferId: string): Promise<void> {
     try {
       await window.syncFile.cancelTransfer(transferId);
@@ -250,6 +260,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     errorMessage,
     clearError: () => setErrorMessage(null),
     sendFile,
+    pauseTransfer,
     cancelTransfer,
     retryTransfer,
     acceptOffer,
