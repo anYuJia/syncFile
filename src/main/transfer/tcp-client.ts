@@ -3,10 +3,12 @@ import { basename } from 'path';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { connect, type Socket } from 'net';
+import type { ReadStream } from 'fs';
 
 import { MessageDecoder, encodeMessage } from './codec';
 import {
   isFileAccept,
+  isFileCancel,
   isFileReject,
   type FileOfferMessage
 } from './protocol';
@@ -38,6 +40,13 @@ export interface ProgressEvent {
   totalBytes: number;
 }
 
+interface ActiveTransfer {
+  socket: Socket;
+  stream: ReadStream | null;
+  cancelled: boolean;
+  accepted: boolean;
+}
+
 export declare interface TcpClient {
   on(event: 'progress', listener: (progress: ProgressEvent) => void): this;
   once(event: 'progress', listener: (progress: ProgressEvent) => void): this;
@@ -46,8 +55,42 @@ export declare interface TcpClient {
 }
 
 export class TcpClient extends EventEmitter {
+  private readonly activeTransfers = new Map<string, ActiveTransfer>();
+
   constructor(private readonly options: TcpClientOptions) {
     super();
+  }
+
+  cancel(fileId: string): boolean {
+    const transfer = this.activeTransfers.get(fileId);
+    if (!transfer) {
+      return false;
+    }
+
+    transfer.cancelled = true;
+    if (!transfer.accepted) {
+      try {
+        transfer.socket.write(
+          encodeMessage({
+            type: 'file-cancel',
+            fileId,
+            reason: 'sender-cancelled'
+          }),
+          () => transfer.socket.end()
+        );
+      } catch {
+        // Best effort only.
+      }
+    } else {
+      transfer.socket.destroy();
+    }
+    transfer.stream?.destroy(new Error('transfer cancelled'));
+    setTimeout(() => {
+      if (!transfer.socket.destroyed) {
+        transfer.socket.destroy();
+      }
+    }, 200);
+    return true;
   }
 
   async sendFile(params: SendFileParams): Promise<SendFileResult> {
@@ -67,10 +110,17 @@ export class TcpClient extends EventEmitter {
     };
 
     await new Promise<void>((resolve, reject) => {
-      let accepted = false;
       let settled = false;
+      const activeTransfer: ActiveTransfer = {
+        socket,
+        stream: null,
+        cancelled: false,
+        accepted: false
+      };
+      this.activeTransfers.set(fileId, activeTransfer);
 
       const cleanup = (): void => {
+        this.activeTransfers.delete(fileId);
         socket.off('data', onData);
         socket.off('error', onError);
         socket.off('close', onClose);
@@ -81,7 +131,7 @@ export class TcpClient extends EventEmitter {
         settled = true;
         cleanup();
         socket.destroy();
-        reject(error);
+        reject(activeTransfer.cancelled ? new Error('transfer cancelled') : error);
       };
 
       const finish = (): void => {
@@ -96,10 +146,23 @@ export class TcpClient extends EventEmitter {
           const messages = decoder.push(chunk);
           for (const message of messages) {
             if (isFileAccept(message) && message.fileId === fileId) {
-              accepted = true;
-              this.streamFile(socket, params.filePath, fileId, fileName, stats.size)
+              activeTransfer.accepted = true;
+              this.streamFile(
+                socket,
+                params.filePath,
+                fileId,
+                fileName,
+                stats.size,
+                message.startOffset ?? 0
+              )
                 .then(finish)
                 .catch((error) => fail(error as Error));
+              return;
+            }
+
+            if (isFileCancel(message) && message.fileId === fileId) {
+              activeTransfer.cancelled = true;
+              fail(new Error(`peer cancelled transfer: ${message.reason}`));
               return;
             }
 
@@ -124,7 +187,7 @@ export class TcpClient extends EventEmitter {
         if (!settled) {
           fail(
             new Error(
-              accepted
+              activeTransfer.accepted
                 ? 'peer closed connection before transfer completed'
                 : 'peer closed connection before accepting the offer'
             )
@@ -150,18 +213,41 @@ export class TcpClient extends EventEmitter {
     filePath: string,
     fileId: string,
     fileName: string,
-    totalBytes: number
+    totalBytes: number,
+    startOffset: number
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      const stream = createReadStream(filePath);
-      let bytesTransferred = 0;
+      if (startOffset >= totalBytes) {
+        socket.write(
+          encodeMessage({
+            type: 'file-complete',
+            fileId,
+            bytesSent: totalBytes
+          }),
+          (error?: Error | null) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve();
+          }
+        );
+        return;
+      }
+
+      const stream = createReadStream(filePath, { start: startOffset });
+      const activeTransfer = this.activeTransfers.get(fileId);
+      if (activeTransfer) {
+        activeTransfer.stream = stream;
+      }
+      let bytesTransferred = startOffset;
       let settled = false;
 
       const fail = (error: Error): void => {
         if (settled) return;
         settled = true;
         stream.destroy();
-        reject(error);
+        reject(activeTransfer?.cancelled ? new Error('transfer cancelled') : error);
       };
 
       stream.on('data', (chunk) => {

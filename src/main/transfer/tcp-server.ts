@@ -5,8 +5,10 @@ import { EventEmitter } from 'events';
 import type { Sandbox } from '../storage/sandbox';
 import { MessageDecoder, encodeMessage } from './codec';
 import {
+  isFileCancel,
   isFileComplete,
   isFileOffer,
+  type FileCancelMessage,
   type FileCompleteMessage,
   type FileOfferMessage,
   type FileRejectMessage
@@ -32,6 +34,7 @@ export interface IncomingOfferInfo {
 export interface OfferResponder {
   accept(): void;
   reject(reason: RejectReason): void;
+  cancel(reason: 'receiver-cancelled'): void;
 }
 
 export interface TransferCompleteInfo {
@@ -59,6 +62,7 @@ export interface TcpServerEvents {
   'incoming-offer': (offer: IncomingOfferInfo, respond: OfferResponder) => void;
   progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
+  'transfer-cancelled': (info: ReceiveProgressInfo & { reason: 'sender-cancelled' | 'receiver-cancelled' }) => void;
   'transfer-error': (error: Error) => void;
 }
 
@@ -84,6 +88,19 @@ type ConnectionPhase =
 export class TcpServer extends EventEmitter {
   private readonly server: Server;
   private readonly sockets = new Set<Socket>();
+  private readonly activeReceives = new Map<
+    string,
+      {
+        socket: Socket;
+        writeStream: WriteStream | null;
+        partialPath: string | null;
+        finalPath: string | null;
+        bytesReceived: number;
+        fromDevice: IncomingOfferInfo['fromDevice'];
+        fileName: string;
+        fileSize: number;
+      }
+  >();
 
   constructor(private readonly options: TcpServerOptions) {
     super();
@@ -136,7 +153,8 @@ export class TcpServer extends EventEmitter {
     let phase: ConnectionPhase = 'awaiting-offer';
     let offer: FileOfferMessage | null = null;
     let writeStream: WriteStream | null = null;
-    let savedPath: string | null = null;
+    let partialPath: string | null = null;
+    let finalPath: string | null = null;
     let bytesReceived = 0;
     let bufferedData = Buffer.alloc(0);
     let settled = false;
@@ -146,12 +164,16 @@ export class TcpServer extends EventEmitter {
       settled = true;
       phase = 'errored';
       writeStream?.destroy(error);
+      if (offer) {
+        this.activeReceives.delete(offer.fileId);
+        this.options.sandbox.discardIncomingResume(offer.fileId, true);
+      }
       this.emit('transfer-error', error);
       socket.destroy();
     };
 
     const finalize = (message: FileCompleteMessage): void => {
-      if (!offer || !writeStream || !savedPath) {
+      if (!offer || !writeStream || !partialPath) {
         fail(new Error('cannot finalize transfer before file stream is ready'));
         return;
       }
@@ -170,11 +192,12 @@ export class TcpServer extends EventEmitter {
       settled = true;
       phase = 'completed';
       const finalOffer = offer;
-      const finalPath = savedPath;
       writeStream.end(() => {
+        this.activeReceives.delete(finalOffer.fileId);
+        const savedPath = this.options.sandbox.completeIncomingResume(finalOffer.fileId);
         this.emit('transfer-complete', {
           offerId: finalOffer.fileId,
-          savedPath: finalPath,
+          savedPath,
           bytesReceived,
           fromDevice: finalOffer.fromDevice
         });
@@ -184,6 +207,10 @@ export class TcpServer extends EventEmitter {
     const handleControlChunk = (chunk: Buffer): void => {
       const messages = decoder.push(chunk);
       for (const message of messages) {
+        if (isFileCancel(message)) {
+          handleCancel(message);
+          continue;
+        }
         if (isFileComplete(message)) {
           finalize(message);
           continue;
@@ -191,6 +218,25 @@ export class TcpServer extends EventEmitter {
         fail(new Error(`unexpected control message: ${message.type}`));
         return;
       }
+    };
+
+    const handleCancel = (message: FileCancelMessage): void => {
+      if (!offer || message.fileId !== offer.fileId || settled) {
+        return;
+      }
+      settled = true;
+      phase = 'rejected';
+      writeStream?.destroy();
+      this.activeReceives.delete(offer.fileId);
+      this.emit('transfer-cancelled', {
+        offerId: offer.fileId,
+        fileName: offer.fileName,
+        fileSize: offer.fileSize,
+        bytesReceived,
+        fromDevice: offer.fromDevice,
+        reason: message.reason
+      });
+      socket.destroy();
     };
 
     const writeFileBytes = (chunk: Buffer): void => {
@@ -239,6 +285,10 @@ export class TcpServer extends EventEmitter {
           const fileChunk = chunk.subarray(offset, offset + take);
           writeFileBytes(fileChunk);
           bytesReceived += take;
+          const active = this.activeReceives.get(offer.fileId);
+          if (active) {
+            active.bytesReceived = bytesReceived;
+          }
           this.emit('progress', {
             offerId: offer.fileId,
             fileName: offer.fileName,
@@ -265,11 +315,35 @@ export class TcpServer extends EventEmitter {
         if (!offer || phase !== 'awaiting-decision') {
           return;
         }
-        savedPath = this.options.sandbox.pathForIncoming(offer.fromDevice.deviceId, offer.fileName);
-        writeStream = createWriteStream(savedPath);
+        const prepared = this.options.sandbox.prepareIncomingResume(
+          offer.fileId,
+          offer.fromDevice.deviceId,
+          offer.fileName,
+          offer.fileSize
+        );
+        partialPath = prepared.partialPath;
+        finalPath = prepared.finalPath;
+        bytesReceived = prepared.bytesReceived;
+        writeStream = createWriteStream(partialPath, { flags: bytesReceived > 0 ? 'a' : 'w' });
         writeStream.once('error', fail);
+        this.activeReceives.set(offer.fileId, {
+          socket,
+          writeStream,
+          partialPath,
+          finalPath,
+          bytesReceived,
+          fromDevice: offer.fromDevice,
+          fileName: offer.fileName,
+          fileSize: offer.fileSize
+        });
 
-        socket.write(encodeMessage({ type: 'file-accept', fileId: offer.fileId }));
+        socket.write(
+          encodeMessage({
+            type: 'file-accept',
+            fileId: offer.fileId,
+            startOffset: bytesReceived
+          })
+        );
         phase = 'receiving-file';
         flushBufferedData();
       },
@@ -280,6 +354,17 @@ export class TcpServer extends EventEmitter {
         settled = true;
         phase = 'rejected';
         socket.write(encodeMessage({ type: 'file-reject', fileId: offer.fileId, reason }));
+        socket.destroySoon();
+      },
+      cancel: (reason) => {
+        if (!offer || (phase !== 'awaiting-decision' && phase !== 'receiving-file' && phase !== 'awaiting-complete')) {
+          return;
+        }
+        settled = true;
+        phase = 'rejected';
+        writeStream?.destroy();
+        this.activeReceives.delete(offer.fileId);
+        socket.write(encodeMessage({ type: 'file-cancel', fileId: offer.fileId, reason }));
         socket.destroySoon();
       }
     };
@@ -330,7 +415,18 @@ export class TcpServer extends EventEmitter {
       }
 
       if (phase === 'awaiting-decision') {
-        fail(new Error('received file data before the offer was accepted'));
+        try {
+          const messages = decoder.push(chunk);
+          for (const message of messages) {
+            if (isFileCancel(message)) {
+              handleCancel(message);
+              return;
+            }
+          }
+          fail(new Error('received file data before the offer was accepted'));
+        } catch (error) {
+          fail(error as Error);
+        }
         return;
       }
 
@@ -349,8 +445,53 @@ export class TcpServer extends EventEmitter {
 
     socket.on('close', () => {
       if (!settled && phase !== 'rejected' && phase !== 'completed') {
-        this.emit('transfer-error', new Error('socket closed before transfer completed'));
+        settled = true;
+        if (offer) {
+          this.activeReceives.delete(offer.fileId);
+          this.emit('transfer-cancelled', {
+            offerId: offer.fileId,
+            fileName: offer.fileName,
+            fileSize: offer.fileSize,
+            bytesReceived,
+            fromDevice: offer.fromDevice,
+            reason: 'sender-cancelled'
+          });
+        } else {
+          this.emit('transfer-error', new Error('socket closed before transfer completed'));
+        }
+        writeStream?.end();
       }
     });
+  }
+
+  cancel(offerId: string): boolean {
+    const active = this.activeReceives.get(offerId);
+    if (!active) {
+      return false;
+    }
+
+    active.writeStream?.destroy();
+    try {
+      active.socket.write(
+        encodeMessage({
+          type: 'file-cancel',
+          fileId: offerId,
+          reason: 'receiver-cancelled'
+        })
+      );
+    } catch {
+      // Best effort only.
+    }
+    active.socket.destroy();
+    this.activeReceives.delete(offerId);
+    this.emit('transfer-cancelled', {
+      offerId,
+      fileName: active.fileName,
+      fileSize: active.fileSize,
+      bytesReceived: active.bytesReceived,
+      fromDevice: active.fromDevice,
+      reason: 'receiver-cancelled'
+    });
+    return true;
   }
 }

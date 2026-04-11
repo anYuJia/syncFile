@@ -28,6 +28,8 @@ export function App(): JSX.Element {
     errorMessage,
     clearError,
     sendFile,
+    cancelTransfer,
+    retryTransfer,
     acceptOffer,
     rejectOffer,
     openSandbox
@@ -173,6 +175,22 @@ export function App(): JSX.Element {
   async function handleOpenSandbox(): Promise<void> {
     try {
       await openSandbox();
+    } catch {
+      // Hook already stores and exposes the error message.
+    }
+  }
+
+  async function handleCancelTransfer(transferId: string): Promise<void> {
+    try {
+      await cancelTransfer(transferId);
+    } catch {
+      // Hook already stores and exposes the error message.
+    }
+  }
+
+  async function handleRetryTransfer(transferId: string): Promise<void> {
+    try {
+      await retryTransfer(transferId);
     } catch {
       // Hook already stores and exposes the error message.
     }
@@ -339,7 +357,12 @@ export function App(): JSX.Element {
             <div className="card-head">
               <h2>{messages.transferActivity}</h2>
             </div>
-            <TransferList transfers={transfers} messages={messages} />
+            <TransferList
+              transfers={transfers}
+              messages={messages}
+              onCancel={handleCancelTransfer}
+              onRetry={handleRetryTransfer}
+            />
           </section>
         </div>
       </main>

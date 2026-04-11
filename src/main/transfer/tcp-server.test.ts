@@ -7,7 +7,7 @@ import { join } from 'path';
 import { Sandbox } from '../storage/sandbox';
 import { MessageDecoder, encodeMessage } from './codec';
 import type { FileOfferMessage } from './protocol';
-import { isFileReject } from './protocol';
+import { isFileCancel, isFileReject } from './protocol';
 import { TcpServer } from './tcp-server';
 
 describe('TcpServer', () => {
@@ -117,5 +117,44 @@ describe('TcpServer', () => {
 
     expect(rejected).toBe(true);
     expect(ended).toBe(true);
+  });
+
+  it('sends a cancel message when receiver cancels after accepting', async () => {
+    const port = await server.listen(0);
+    const decoder = new MessageDecoder();
+
+    server.on('incoming-offer', (_offer, respond) => {
+      respond.accept();
+      setTimeout(() => {
+        server.cancel('f3');
+      }, 20);
+    });
+
+    const socket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+    socket.write(
+      encodeMessage({
+        type: 'file-offer',
+        version: 1,
+        fileId: 'f3',
+        fileName: 'x.bin',
+        fileSize: 100,
+        fromDevice: { deviceId: 'dev-a', name: 'A' }
+      })
+    );
+
+    const cancelReason = await new Promise<string | null>((resolve) => {
+      socket.on('data', (chunk) => {
+        const messages = decoder.push(chunk);
+        const cancelled = messages.find((message) => isFileCancel(message));
+        if (cancelled && isFileCancel(cancelled)) {
+          resolve(cancelled.reason);
+        }
+      });
+      setTimeout(() => resolve(null), 1000);
+    });
+
+    expect(cancelReason).toBe('receiver-cancelled');
   });
 });

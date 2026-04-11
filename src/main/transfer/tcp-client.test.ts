@@ -70,4 +70,71 @@ describe('TcpClient', () => {
       client.sendFile({ host: '127.0.0.1', port, filePath: sourcePath })
     ).rejects.toThrow(/declined/i);
   });
+
+  it('cancels an in-progress transfer', async () => {
+    const sourcePath = join(root, 'large.bin');
+    writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 7));
+
+    const client = new TcpClient({
+      selfDevice: { deviceId: 'client-device', name: 'Client' }
+    });
+
+    let cancelled = false;
+    client.on('progress', (progress) => {
+      if (!cancelled && progress.bytesTransferred > 0) {
+        cancelled = client.cancel('cancel-me');
+      }
+    });
+
+    await expect(
+      client.sendFile({
+        host: '127.0.0.1',
+        port,
+        filePath: sourcePath,
+        fileId: 'cancel-me'
+      })
+    ).rejects.toThrow(/cancelled/i);
+    expect(cancelled).toBe(true);
+  });
+
+  it('resumes a cancelled transfer when retried with the same file id', async () => {
+    const sourcePath = join(root, 'resume.bin');
+    writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 9));
+
+    const client = new TcpClient({
+      selfDevice: { deviceId: 'client-device', name: 'Client' }
+    });
+
+    let cancelled = false;
+    client.on('progress', (progress) => {
+      if (!cancelled && progress.fileId === 'resume-me' && progress.bytesTransferred > 0) {
+        cancelled = client.cancel('resume-me');
+      }
+    });
+
+    await expect(
+      client.sendFile({
+        host: '127.0.0.1',
+        port,
+        filePath: sourcePath,
+        fileId: 'resume-me'
+      })
+    ).rejects.toThrow(/cancelled/i);
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const savedPathPromise = new Promise<string>((resolve) => {
+      server.once('transfer-complete', (info) => resolve(info.savedPath));
+    });
+
+    await client.sendFile({
+      host: '127.0.0.1',
+      port,
+      filePath: sourcePath,
+      fileId: 'resume-me'
+    });
+
+    const savedPath = await savedPathPromise;
+    expect(Buffer.compare(readFileSync(savedPath), readFileSync(sourcePath))).toBe(0);
+  });
 });

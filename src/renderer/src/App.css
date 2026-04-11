@@ -1064,12 +1064,14 @@ body {
 }
 
 .transfer-item.is-failed .transfer-progress-fill,
-.transfer-item.is-rejected .transfer-progress-fill {
+.transfer-item.is-rejected .transfer-progress-fill,
+.transfer-item.is-cancelled .transfer-progress-fill {
   background: var(--danger);
 }
 
 .transfer-item.is-failed .transfer-item-stamp,
-.transfer-item.is-rejected .transfer-item-stamp {
+.transfer-item.is-rejected .transfer-item-stamp,
+.transfer-item.is-cancelled .transfer-item-stamp {
   color: var(--danger);
 }
 

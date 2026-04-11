@@ -4,6 +4,8 @@ import type { Messages } from '../i18n';
 interface TransferListProps {
   transfers: TransferProgress[];
   messages: Messages;
+  onCancel: (transferId: string) => void | Promise<void>;
+  onRetry: (transferId: string) => void | Promise<void>;
 }
 
 function formatBytes(bytes: number): string {
@@ -32,6 +34,9 @@ function statusLabel(status: TransferProgress['status'], messages: Messages): st
   if (status === 'rejected') {
     return messages.transferStatusRejected;
   }
+  if (status === 'cancelled') {
+    return messages.transferStatusCancelled;
+  }
   return messages.transferStatusPending;
 }
 
@@ -59,7 +64,7 @@ function receiveModeLabel(item: TransferProgress, messages: Messages): string | 
   return null;
 }
 
-export function TransferList({ transfers, messages }: TransferListProps): JSX.Element {
+export function TransferList({ transfers, messages, onCancel, onRetry }: TransferListProps): JSX.Element {
   if (transfers.length === 0) {
     return <div className="transfer-list-empty">{messages.transferEmpty}</div>;
   }
@@ -87,6 +92,12 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
         const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
         const statusText = statusLabel(item.status, messages);
         const receiveModeText = receiveModeLabel(item, messages);
+        const canCancel = item.status === 'pending' || item.status === 'in-progress';
+        const canRetry =
+          item.direction === 'send' &&
+          (item.status === 'failed' || item.status === 'rejected' || item.status === 'cancelled') &&
+          Boolean(item.localPath) &&
+          Boolean(item.peerDeviceId);
         return (
           <li key={item.transferId} className={`transfer-item is-${item.status}`}>
             <div className="transfer-item-stamp">{statusText}</div>
@@ -110,8 +121,27 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
               </span>
               <span>{item.peerDeviceName || messages.unknownDevice}</span>
             </div>
-            {item.status === 'completed' && item.localPath && (
+            {(canCancel || canRetry || (item.status === 'completed' && item.localPath)) && (
               <div className="transfer-item-actions">
+                {canCancel && (
+                  <button
+                    type="button"
+                    className="button button-ghost transfer-item-action"
+                    onClick={() => void onCancel(item.transferId)}
+                  >
+                    {messages.transferCancel}
+                  </button>
+                )}
+                {canRetry && (
+                  <button
+                    type="button"
+                    className="button button-ghost transfer-item-action"
+                    onClick={() => void onRetry(item.transferId)}
+                  >
+                    {messages.transferRetry}
+                  </button>
+                )}
+                {item.status === 'completed' && item.localPath && (
                 <button
                   type="button"
                   className="button button-ghost transfer-item-action"
@@ -119,13 +149,16 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
                 >
                   {messages.transferOpenFile}
                 </button>
-                <button
-                  type="button"
-                  className="button button-ghost transfer-item-action"
-                  onClick={() => void handleRevealPath(item.localPath!)}
-                >
-                  {messages.transferRevealFile}
-                </button>
+                )}
+                {item.status === 'completed' && item.localPath && (
+                  <button
+                    type="button"
+                    className="button button-ghost transfer-item-action"
+                    onClick={() => void handleRevealPath(item.localPath!)}
+                  >
+                    {messages.transferRevealFile}
+                  </button>
+                )}
               </div>
             )}
             {item.error && <div className="transfer-item-error">{item.error}</div>}

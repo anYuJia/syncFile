@@ -40,6 +40,7 @@ interface OutboundTransferMeta {
   fileName: string;
   fileSize: number;
   peerDeviceName: string;
+  peerDeviceId: string;
   localPath: string;
 }
 
@@ -59,6 +60,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   const pendingOffers = new Map<string, PendingOffer>();
   const completedOrAcceptedOffers = new Map<string, AcceptedInboundMeta>();
   const outboundTransfers = new Map<string, OutboundTransferMeta>();
+  const cancellingOutboundTransfers = new Set<string>();
 
   const sendToRenderer = <T>(channel: IpcChannel, payload: T): void => {
     const window = context.getWindow();
@@ -78,6 +80,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     fileSize: meta.fileSize,
     bytesTransferred,
     peerDeviceName: meta.peerDeviceName,
+    peerDeviceId: meta.peerDeviceId,
     localPath: meta.localPath,
     status,
     error
@@ -97,6 +100,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     fileSize: offer.fileSize,
     bytesTransferred,
     peerDeviceName: offer.fromDevice.name,
+    peerDeviceId: offer.fromDevice.deviceId,
     localPath,
     status,
     receiveMode,
@@ -145,13 +149,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.getSelfDevice();
   });
 
-  ipcMain.handle(IpcChannels.SendFile, (_event, deviceId: string, filePath: string): TransferId => {
+  ipcMain.handle(
+    IpcChannels.SendFile,
+    (_event, deviceId: string, filePath: string, existingTransferId?: string): TransferId => {
     const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
     if (!device) {
       throw new Error(`device ${deviceId} not found`);
     }
 
-    const transferId = randomUUID();
+    const transferId = existingTransferId ?? randomUUID();
     const fileName = basename(filePath);
     const fileSize = statSync(filePath).size;
     const meta: OutboundTransferMeta = {
@@ -159,6 +165,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       fileName,
       fileSize,
       peerDeviceName: device.name,
+      peerDeviceId: device.deviceId,
       localPath: filePath
     };
 
@@ -182,6 +189,19 @@ export function registerIpcHandlers(context: IpcContext): void {
       })
       .catch((error: Error) => {
         const currentMeta = outboundTransfers.get(transferId) ?? meta;
+        const wasCancelled =
+          cancellingOutboundTransfers.has(transferId) || error.message.includes('transfer cancelled');
+
+        if (wasCancelled) {
+          sendToRenderer(
+            IpcChannels.TransferProgress,
+            makeOutboundProgress(currentMeta, 0, 'cancelled')
+          );
+          cancellingOutboundTransfers.delete(transferId);
+          outboundTransfers.delete(transferId);
+          return;
+        }
+
         sendToRenderer(
           IpcChannels.TransferProgress,
           makeOutboundProgress(currentMeta, 0, 'failed', error.message)
@@ -190,6 +210,29 @@ export function registerIpcHandlers(context: IpcContext): void {
       });
 
     return { value: transferId };
+  });
+
+  ipcMain.handle(IpcChannels.CancelTransfer, (_event, transferId: string): void => {
+    const outbound = outboundTransfers.get(transferId);
+    if (outbound) {
+      const cancelled = context.tcpClient.cancel(transferId);
+      if (!cancelled) {
+        throw new Error(`transfer ${transferId} not found`);
+      }
+      cancellingOutboundTransfers.add(transferId);
+      return;
+    }
+
+    const inbound = completedOrAcceptedOffers.get(transferId);
+    if (inbound) {
+      const cancelled = context.tcpServer.cancel(transferId);
+      if (!cancelled) {
+        throw new Error(`transfer ${transferId} not found`);
+      }
+      return;
+    }
+
+    throw new Error(`transfer ${transferId} not found`);
   });
 
   ipcMain.handle(IpcChannels.AcceptIncoming, (_event, offerId: string): void => {
@@ -334,6 +377,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       fileSize: meta?.info.fileSize ?? info.bytesReceived,
       bytesTransferred: info.bytesReceived,
       peerDeviceName: info.fromDevice.name,
+      peerDeviceId: info.fromDevice.deviceId,
       status: 'completed',
       receiveMode: meta?.receiveMode ?? 'manual',
       localPath: info.savedPath
@@ -353,6 +397,15 @@ export function registerIpcHandlers(context: IpcContext): void {
       IpcChannels.TransferProgress,
       makeInboundProgress(info, info.bytesReceived, 'in-progress', receiveMode)
     );
+  });
+
+  context.tcpServer.on('transfer-cancelled', (info) => {
+    const receiveMode = completedOrAcceptedOffers.get(info.offerId)?.receiveMode ?? 'manual';
+    sendToRenderer(
+      IpcChannels.TransferProgress,
+      makeInboundProgress(info, info.bytesReceived, 'cancelled', receiveMode)
+    );
+    completedOrAcceptedOffers.delete(info.offerId);
   });
 
   context.tcpServer.on('transfer-error', (error) => {
@@ -375,6 +428,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       fileName: progress.fileName,
       fileSize: progress.totalBytes,
       peerDeviceName: meta?.peerDeviceName ?? '',
+      peerDeviceId: meta?.peerDeviceId ?? '',
       localPath: meta?.localPath ?? ''
     };
     const currentMeta = meta ?? fallbackMeta;

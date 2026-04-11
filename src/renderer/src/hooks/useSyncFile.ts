@@ -21,7 +21,9 @@ interface UseSyncFileResult {
   isLoading: boolean;
   errorMessage: string | null;
   clearError: () => void;
-  sendFile: (deviceId: string, filePath: string) => Promise<TransferId>;
+  sendFile: (deviceId: string, filePath: string, existingTransferId?: string) => Promise<TransferId>;
+  cancelTransfer: (transferId: string) => Promise<void>;
+  retryTransfer: (transferId: string) => Promise<TransferId>;
   acceptOffer: (offerId: string) => Promise<void>;
   rejectOffer: (offerId: string, reason?: RejectReason) => Promise<void>;
   openSandbox: () => Promise<void>;
@@ -43,6 +45,7 @@ function buildTransferFromEvent(
   const fallbackFileName = previous?.fileName ?? 'unknown-file';
   const fallbackFileSize = previous?.fileSize ?? 0;
   const fallbackPeerDeviceName = previous?.peerDeviceName ?? 'Unknown device';
+  const fallbackPeerDeviceId = previous?.peerDeviceId ?? '';
 
   return {
     transferId: incoming.transferId,
@@ -52,6 +55,7 @@ function buildTransferFromEvent(
     bytesTransferred:
       incoming.bytesTransferred >= 0 ? incoming.bytesTransferred : previous?.bytesTransferred ?? 0,
     peerDeviceName: incoming.peerDeviceName || fallbackPeerDeviceName,
+    peerDeviceId: incoming.peerDeviceId || fallbackPeerDeviceId,
     status: incoming.status ?? previous?.status ?? 'pending',
     receiveMode: incoming.receiveMode ?? previous?.receiveMode,
     localPath: incoming.localPath ?? previous?.localPath,
@@ -142,24 +146,26 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
 
   const transfers = Object.values(transferMap).sort((a, b) => b.updatedAt - a.updatedAt);
 
-  async function sendFile(deviceId: string, filePath: string): Promise<TransferId> {
+  async function sendFile(
+    deviceId: string,
+    filePath: string,
+    existingTransferId?: string
+  ): Promise<TransferId> {
     try {
-      const transferId = await window.syncFile.sendFile(deviceId, filePath);
+      const transferId = await window.syncFile.sendFile(deviceId, filePath, existingTransferId);
       const target = devices.find((device) => device.deviceId === deviceId);
       setTransferMap((prev) => {
-        if (prev[transferId.value]) {
-          return prev;
-        }
-
+        const previous = prev[transferId.value];
         return {
           ...prev,
           [transferId.value]: {
             transferId: transferId.value,
             direction: 'send',
             fileName: basename(filePath),
-            fileSize: 0,
-            bytesTransferred: 0,
+            fileSize: previous?.fileSize ?? 0,
+            bytesTransferred: previous?.bytesTransferred ?? 0,
             peerDeviceName: target?.name ?? 'Unknown device',
+            peerDeviceId: target?.deviceId ?? '',
             status: 'pending',
             localPath: filePath,
             updatedAt: Date.now()
@@ -181,6 +187,23 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       setErrorMessage(localizeError(error, messages) || messages.failedToAcceptIncomingFile);
       throw error;
     }
+  }
+
+  async function cancelTransfer(transferId: string): Promise<void> {
+    try {
+      await window.syncFile.cancelTransfer(transferId);
+    } catch (error) {
+      setErrorMessage(localizeError(error, messages) || messages.sendFailed);
+      throw error;
+    }
+  }
+
+  async function retryTransfer(transferId: string): Promise<TransferId> {
+    const transfer = transferMap[transferId];
+    if (!transfer || transfer.direction !== 'send' || !transfer.localPath || !transfer.peerDeviceId) {
+      throw new Error('transfer retry is not available');
+    }
+    return sendFile(transfer.peerDeviceId, transfer.localPath, transferId);
   }
 
   async function rejectOffer(offerId: string, reason: RejectReason = 'user-declined'): Promise<void> {
@@ -211,6 +234,8 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     errorMessage,
     clearError: () => setErrorMessage(null),
     sendFile,
+    cancelTransfer,
+    retryTransfer,
     acceptOffer,
     rejectOffer,
     openSandbox

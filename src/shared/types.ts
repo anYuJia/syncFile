@@ -22,7 +22,8 @@ export type TransferStatus =
   | 'in-progress'
   | 'completed'
   | 'failed'
-  | 'rejected';
+  | 'rejected'
+  | 'cancelled';
 
 export interface TransferProgress {
   transferId: string;
@@ -31,6 +32,7 @@ export interface TransferProgress {
   fileSize: number;
   bytesTransferred: number;
   peerDeviceName: string;
+  peerDeviceId?: string;
   status: TransferStatus;
   receiveMode?: 'manual' | 'trusted-device' | 'auto-accept';
   localPath?: string;

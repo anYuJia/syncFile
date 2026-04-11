@@ -73,4 +73,16 @@ describe('Sandbox', () => {
     expect(deviceDir).toContain('device-a');
     expect(existsSync(deviceDir)).toBe(true);
   });
+
+  it('persists and completes incoming resume state', () => {
+    const prepared = sandbox.prepareIncomingResume('file-1', 'device-a', 'hello.txt', 5);
+    writeFileSync(prepared.partialPath, 'hello');
+
+    expect(sandbox.incomingResumeOffset('file-1')).toBe(5);
+    const finalPath = sandbox.completeIncomingResume('file-1');
+
+    expect(finalPath).toBe(prepared.finalPath);
+    expect(existsSync(finalPath)).toBe(true);
+    expect(readFileSync(finalPath, 'utf8')).toBe('hello');
+  });
 });

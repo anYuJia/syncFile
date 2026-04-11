@@ -45,10 +45,13 @@ export interface Messages {
   transferStatusCompleted: string;
   transferStatusFailed: string;
   transferStatusRejected: string;
+  transferStatusCancelled: string;
   transferReceiveModeTrusted: string;
   transferReceiveModeAuto: string;
   transferOpenFile: string;
   transferRevealFile: string;
+  transferCancel: string;
+  transferRetry: string;
   incomingFileRequest: string;
   incomingFileRequestAriaLabel: string;
   wantsToSend: string;
@@ -156,10 +159,13 @@ const zh: Messages = {
   transferStatusCompleted: '已完成',
   transferStatusFailed: '失败',
   transferStatusRejected: '已拒绝',
+  transferStatusCancelled: '已取消',
   transferReceiveModeTrusted: '来自已信任设备',
   transferReceiveModeAuto: '自动接受',
   transferOpenFile: '打开文件',
   transferRevealFile: '在文件夹中显示',
+  transferCancel: '取消',
+  transferRetry: '重试',
   incomingFileRequest: '收到文件请求',
   incomingFileRequestAriaLabel: '收到文件请求',
   wantsToSend: '想要发送给你：',
@@ -265,10 +271,13 @@ const en: Messages = {
   transferStatusCompleted: 'Completed',
   transferStatusFailed: 'Failed',
   transferStatusRejected: 'Rejected',
+  transferStatusCancelled: 'Cancelled',
   transferReceiveModeTrusted: 'Trusted device',
   transferReceiveModeAuto: 'Auto-accepted',
   transferOpenFile: 'Open file',
   transferRevealFile: 'Reveal in folder',
+  transferCancel: 'Cancel',
+  transferRetry: 'Retry',
   incomingFileRequest: 'Incoming file request',
   incomingFileRequestAriaLabel: 'Incoming file offer',
   wantsToSend: 'wants to send:',

@@ -23,8 +23,10 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 const api = {
   getDevices: (): Promise<Device[]> => ipcRenderer.invoke(IpcChannels.GetDevices),
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
-  sendFile: (deviceId: string, filePath: string): Promise<TransferId> =>
-    ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath),
+  sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
+    ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
+  cancelTransfer: (transferId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.CancelTransfer, transferId),
   acceptIncoming: (offerId: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.AcceptIncoming, offerId),
   rejectIncoming: (offerId: string, reason?: RejectReason): Promise<void> =>

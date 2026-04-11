@@ -20,6 +20,7 @@ export interface FileOfferMessage {
 export interface FileAcceptMessage {
   type: 'file-accept';
   fileId: string;
+  startOffset?: number;
 }
 
 export interface FileRejectMessage {
@@ -34,11 +35,18 @@ export interface FileCompleteMessage {
   bytesSent: number;
 }
 
+export interface FileCancelMessage {
+  type: 'file-cancel';
+  fileId: string;
+  reason: 'sender-cancelled' | 'receiver-cancelled';
+}
+
 export type ProtocolMessage =
   | FileOfferMessage
   | FileAcceptMessage
   | FileRejectMessage
-  | FileCompleteMessage;
+  | FileCompleteMessage
+  | FileCancelMessage;
 
 export function isFileOffer(msg: ProtocolMessage): msg is FileOfferMessage {
   return msg.type === 'file-offer';
@@ -54,4 +62,8 @@ export function isFileReject(msg: ProtocolMessage): msg is FileRejectMessage {
 
 export function isFileComplete(msg: ProtocolMessage): msg is FileCompleteMessage {
   return msg.type === 'file-complete';
+}
+
+export function isFileCancel(msg: ProtocolMessage): msg is FileCancelMessage {
+  return msg.type === 'file-cancel';
 }

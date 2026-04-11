@@ -6,6 +6,7 @@ export const IpcChannels = {
   GetDevices: 'syncfile:get-devices',
   GetSelfDevice: 'syncfile:get-self-device',
   SendFile: 'syncfile:send-file',
+  CancelTransfer: 'syncfile:cancel-transfer',
   AcceptIncoming: 'syncfile:accept-incoming',
   RejectIncoming: 'syncfile:reject-incoming',
   OpenSandbox: 'syncfile:open-sandbox',
