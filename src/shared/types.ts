@@ -4,6 +4,7 @@
 export interface Device {
   deviceId: string;
   name: string;
+  trustFingerprint: string;
   host: string;
   address: string; // resolved IP address
   port: number;
@@ -36,6 +37,7 @@ export interface TransferProgress {
   status: TransferStatus;
   receiveMode?: 'manual' | 'trusted-device' | 'auto-accept';
   localPath?: string;
+  sourceFileModifiedAt?: number;
   error?: string;
 }
 
@@ -48,6 +50,7 @@ export interface IncomingOffer {
   fromDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
   fileName: string;
   fileSize: number;
@@ -61,6 +64,7 @@ export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed';
 export interface TrustedDevice {
   deviceId: string;
   name: string;
+  trustFingerprint: string;
   trustedAt: number;
 }
 

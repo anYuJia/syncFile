@@ -56,7 +56,7 @@ describe('TcpServer', () => {
       fileId: 'f1',
       fileName: 'hello.txt',
       fileSize: 5,
-      fromDevice: { deviceId: 'dev-a', name: 'A' }
+      fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
     };
 
     socket.write(encodeMessage(offer));
@@ -95,7 +95,7 @@ describe('TcpServer', () => {
         fileId: 'f2',
         fileName: 'x.bin',
         fileSize: 10,
-        fromDevice: { deviceId: 'dev-a', name: 'A' }
+        fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
       })
     );
 
@@ -140,7 +140,7 @@ describe('TcpServer', () => {
         fileId: 'f3',
         fileName: 'x.bin',
         fileSize: 100,
-        fromDevice: { deviceId: 'dev-a', name: 'A' }
+        fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
       })
     );
 

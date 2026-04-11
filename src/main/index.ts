@@ -12,6 +12,7 @@ import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
 import { SettingsStore } from './storage/settings';
 import { TransferHistoryStore } from './storage/transfer-history';
+import { recoverTransferState } from './storage/transfer-recovery';
 import { TcpClient } from './transfer/tcp-client';
 import { TcpServer } from './transfer/tcp-server';
 
@@ -63,6 +64,7 @@ async function bootstrap(): Promise<void> {
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const settingsStore = new SettingsStore(userDataDir);
   const transferHistoryStore = new TransferHistoryStore(userDataDir);
+  recoverTransferState(transferHistoryStore, sandbox);
   const registry = new DeviceRegistry();
 
   tcpServer = new TcpServer({ sandbox });
@@ -73,7 +75,8 @@ async function bootstrap(): Promise<void> {
   const tcpClient = new TcpClient({
     selfDevice: {
       deviceId: identity.deviceId,
-      name: identity.name
+      name: identity.name,
+      trustFingerprint: identity.trustFingerprint
     }
   });
 
@@ -82,6 +85,7 @@ async function bootstrap(): Promise<void> {
     self: {
       deviceId: identity.deviceId,
       name: identity.name,
+      trustFingerprint: identity.trustFingerprint,
       port: actualPort,
       platform: getPlatform()
     }
@@ -93,6 +97,7 @@ async function bootstrap(): Promise<void> {
   const getSelfDevice = (): Device => ({
     deviceId: identity.deviceId,
     name: identity.name,
+    trustFingerprint: identity.trustFingerprint,
     host: 'localhost',
     address: '127.0.0.1',
     port: actualPort,

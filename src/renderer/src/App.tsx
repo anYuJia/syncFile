@@ -51,7 +51,9 @@ export function App(): JSX.Element {
   });
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
-  const trustedDeviceIds = new Set(trustedDevices.map((device) => device.deviceId));
+  const trustedDeviceKeys = new Set(
+    trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)
+  );
 
   useEffect(() => {
     void refreshTrustedDevices();
@@ -215,6 +217,7 @@ export function App(): JSX.Element {
           {
             deviceId: offer.fromDevice.deviceId,
             name: offer.fromDevice.name,
+            trustFingerprint: offer.fromDevice.trustFingerprint,
             trustedAt: Date.now()
           }
         ]);
@@ -318,7 +321,7 @@ export function App(): JSX.Element {
           <DeviceList
             devices={devices}
             selectedDeviceId={selectedDeviceId}
-            trustedDeviceIds={trustedDeviceIds}
+            trustedDeviceKeys={trustedDeviceKeys}
             onSelect={(deviceId) => setSelectedDeviceId(deviceId)}
             messages={messages}
           />
@@ -371,7 +374,9 @@ export function App(): JSX.Element {
         <ReceivePrompt
           offer={currentOffer}
           queueCount={pendingOffers.length}
-          trustedSender={trustedDeviceIds.has(currentOffer.fromDevice.deviceId)}
+          trustedSender={trustedDeviceKeys.has(
+            `${currentOffer.fromDevice.deviceId}:${currentOffer.fromDevice.trustFingerprint}`
+          )}
           busy={busyOfferId === currentOffer.offerId}
           onAccept={handleAccept}
           onTrustAndAccept={handleTrustAndAccept}
@@ -395,7 +400,7 @@ export function App(): JSX.Element {
 function dedupeTrustedDevices(devices: TrustedDevice[]): TrustedDevice[] {
   const deduped = new Map<string, TrustedDevice>();
   for (const device of devices) {
-    deduped.set(device.deviceId, device);
+    deduped.set(`${device.deviceId}:${device.trustFingerprint}`, device);
   }
   return [...deduped.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -4,6 +4,7 @@ import { basename, join } from 'path';
 interface IncomingResumeMeta {
   fileId: string;
   deviceId: string;
+  deviceName: string;
   fileName: string;
   fileSize: number;
   finalPath: string;
@@ -13,6 +14,17 @@ interface IncomingResumeMeta {
 export interface ResumeCacheSummary {
   count: number;
   bytes: number;
+}
+
+export interface ResumeCacheEntry {
+  fileId: string;
+  deviceId: string;
+  deviceName: string;
+  fileName: string;
+  fileSize: number;
+  partialPath: string;
+  finalPath: string;
+  bytesReceived: number;
 }
 
 export class Sandbox {
@@ -45,7 +57,7 @@ export class Sandbox {
     return join(deviceDir, `${stamp}_${safeName}`);
   }
 
-  prepareIncomingResume(fileId: string, deviceId: string, fileName: string, fileSize: number): {
+  prepareIncomingResume(fileId: string, deviceId: string, deviceName: string, fileName: string, fileSize: number): {
     finalPath: string;
     partialPath: string;
     bytesReceived: number;
@@ -54,6 +66,7 @@ export class Sandbox {
     if (
       existing &&
       existing.deviceId === deviceId &&
+      existing.deviceName === deviceName &&
       existing.fileName === fileName &&
       existing.fileSize === fileSize &&
       existsSync(existing.partialPath)
@@ -70,6 +83,7 @@ export class Sandbox {
     const meta: IncomingResumeMeta = {
       fileId,
       deviceId,
+      deviceName,
       fileName,
       fileSize,
       finalPath,
@@ -114,44 +128,48 @@ export class Sandbox {
   }
 
   resumeCacheSummary(): ResumeCacheSummary {
+    const entries = this.listResumeEntries();
+    return {
+      count: entries.length,
+      bytes: entries.reduce((total, entry) => total + entry.bytesReceived, 0)
+    };
+  }
+
+  clearResumeCache(): void {
+    for (const entry of this.listResumeEntries()) {
+      this.discardIncomingResume(entry.fileId, true);
+    }
+  }
+
+  listResumeEntries(): ResumeCacheEntry[] {
     const resumeDir = this.resumeDirectoryPath();
     if (!existsSync(resumeDir)) {
-      return { count: 0, bytes: 0 };
+      return [];
     }
 
-    let count = 0;
-    let bytes = 0;
+    const entries: ResumeCacheEntry[] = [];
     for (const entry of readdirSync(resumeDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) {
         continue;
       }
       const fileId = entry.name.slice(0, -5);
       const meta = this.readIncomingResumeMeta(fileId);
-      if (!meta) {
+      if (!meta || !existsSync(meta.partialPath)) {
         continue;
       }
-      count += 1;
-      if (existsSync(meta.partialPath)) {
-        bytes += statSync(meta.partialPath).size;
-      }
+      entries.push({
+        fileId: meta.fileId,
+        deviceId: meta.deviceId,
+        deviceName: meta.deviceName,
+        fileName: meta.fileName,
+        fileSize: meta.fileSize,
+        partialPath: meta.partialPath,
+        finalPath: meta.finalPath,
+        bytesReceived: statSync(meta.partialPath).size
+      });
     }
 
-    return { count, bytes };
-  }
-
-  clearResumeCache(): void {
-    const resumeDir = this.resumeDirectoryPath();
-    if (!existsSync(resumeDir)) {
-      return;
-    }
-
-    for (const entry of readdirSync(resumeDir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue;
-      }
-      const fileId = entry.name.slice(0, -5);
-      this.discardIncomingResume(fileId, true);
-    }
+    return entries;
   }
 
   private resumeMetaPath(fileId: string): string {
@@ -173,8 +191,27 @@ export class Sandbox {
 
     try {
       const raw = readFileSync(metaPath, 'utf8');
-      const parsed = JSON.parse(raw) as IncomingResumeMeta;
-      return parsed;
+      const parsed = JSON.parse(raw) as Partial<IncomingResumeMeta>;
+      if (
+        typeof parsed.fileId !== 'string' ||
+        typeof parsed.deviceId !== 'string' ||
+        typeof parsed.fileName !== 'string' ||
+        typeof parsed.fileSize !== 'number' ||
+        typeof parsed.finalPath !== 'string' ||
+        typeof parsed.partialPath !== 'string'
+      ) {
+        return null;
+      }
+      const normalized: IncomingResumeMeta = {
+        fileId: parsed.fileId,
+        deviceId: parsed.deviceId,
+        deviceName: typeof parsed.deviceName === 'string' && parsed.deviceName.length > 0 ? parsed.deviceName : parsed.deviceId,
+        fileName: parsed.fileName,
+        fileSize: parsed.fileSize,
+        finalPath: parsed.finalPath,
+        partialPath: parsed.partialPath
+      };
+      return normalized;
     } catch {
       return null;
     }

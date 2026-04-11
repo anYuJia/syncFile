@@ -6,6 +6,7 @@ export interface Messages {
   loadingLocalDevice: string;
   appNotReady: string;
   trustedDeviceLabel: string;
+  deviceFingerprintLabel: string;
   heroEyebrow: string;
   heroLead: string;
   heroStamp: string;
@@ -69,6 +70,7 @@ export interface Messages {
   errorOfferNotFound: string;
   errorPeerDeclined: string;
   errorPeerDeclinedTooLarge: string;
+  errorSourceFileChanged: string;
   errorPeerClosedBeforeAccept: string;
   errorPeerClosedBeforeComplete: string;
   errorSocketClosedBeforeComplete: string;
@@ -127,6 +129,7 @@ const zh: Messages = {
   loadingLocalDevice: '正在加载本机设备信息...',
   appNotReady: '应用尚未就绪',
   trustedDeviceLabel: '已信任',
+  deviceFingerprintLabel: '指纹',
   heroEyebrow: '局域网即时投递',
   heroLead: '把此刻需要的文件，像一张被盖章的航空托运单那样，直接送往下一台设备。',
   heroStamp: 'AIR DESK',
@@ -190,6 +193,7 @@ const zh: Messages = {
   errorOfferNotFound: '未找到对应的接收请求。',
   errorPeerDeclined: '对方拒绝了这次传输。',
   errorPeerDeclinedTooLarge: '对方因接收容量限制拒绝了这次传输。',
+  errorSourceFileChanged: '源文件已发生变化，无法继续续传，请重新选择文件后再发送。',
   errorPeerClosedBeforeAccept: '对方在接受前关闭了连接。',
   errorPeerClosedBeforeComplete: '对方在传输完成前关闭了连接。',
   errorSocketClosedBeforeComplete: '连接在传输完成前被关闭。',
@@ -246,6 +250,7 @@ const en: Messages = {
   loadingLocalDevice: 'Loading local device...',
   appNotReady: 'Not ready',
   trustedDeviceLabel: 'Trusted',
+  deviceFingerprintLabel: 'Fingerprint',
   heroEyebrow: 'LAN EXPRESS DESK',
   heroLead: 'Hand off the file you need right now like a stamped local airmail packet.',
   heroStamp: 'LOCAL AIRMAIL',
@@ -309,6 +314,7 @@ const en: Messages = {
   errorOfferNotFound: 'Incoming offer not found.',
   errorPeerDeclined: 'The peer declined this transfer.',
   errorPeerDeclinedTooLarge: 'The peer rejected this transfer because its receive limit was reached.',
+  errorSourceFileChanged: 'The source file changed, so this transfer cannot be resumed. Select the file again.',
   errorPeerClosedBeforeAccept: 'The peer closed the connection before accepting.',
   errorPeerClosedBeforeComplete: 'The peer closed the connection before completion.',
   errorSocketClosedBeforeComplete: 'The connection closed before transfer completion.',

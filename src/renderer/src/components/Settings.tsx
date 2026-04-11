@@ -234,7 +234,9 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                       <div key={device.deviceId} className="settings-trusted-item">
                         <div className="settings-trusted-copy">
                           <span className="settings-trusted-name">{device.name}</span>
-                          <span className="settings-trusted-id">{device.deviceId.slice(0, 8)}</span>
+                          <span className="settings-trusted-id">
+                            ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint}
+                          </span>
                         </div>
                         <button
                           type="button"

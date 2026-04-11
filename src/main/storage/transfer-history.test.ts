@@ -55,4 +55,23 @@ describe('TransferHistoryStore', () => {
     expect(store.list()).toEqual([]);
     expect(store.count()).toBe(0);
   });
+
+  it('marks unfinished send records as recoverable failures', () => {
+    const store = new TransferHistoryStore(root);
+    store.upsert({
+      transferId: 't2',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 40,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+
+    store.markInterruptedSends();
+
+    const [record] = store.list();
+    expect(record.status).toBe('failed');
+    expect(record.error).toContain('Retry to continue');
+  });
 });

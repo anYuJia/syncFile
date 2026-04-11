@@ -77,6 +77,8 @@ function isTrustedDeviceRecord(value: unknown): value is Settings['trustedDevice
     candidate.deviceId.length > 0 &&
     typeof candidate.name === 'string' &&
     candidate.name.length > 0 &&
+    typeof candidate.trustFingerprint === 'string' &&
+    candidate.trustFingerprint.length > 0 &&
     typeof candidate.trustedAt === 'number'
   );
 }

@@ -24,6 +24,10 @@ export class TransferHistoryStore {
     return this.records.size;
   }
 
+  get(transferId: string): TransferRecord | undefined {
+    return this.records.get(transferId);
+  }
+
   upsert(progress: TransferProgress): TransferRecord {
     const previous = this.records.get(progress.transferId);
     const record: TransferRecord = {
@@ -40,6 +44,24 @@ export class TransferHistoryStore {
   clear(): void {
     this.records.clear();
     this.persist();
+  }
+
+  markInterruptedSends(): void {
+    let changed = false;
+    for (const record of this.records.values()) {
+      if (
+        record.direction === 'send' &&
+        (record.status === 'pending' || record.status === 'in-progress')
+      ) {
+        record.status = 'failed';
+        record.error = 'App restarted before transfer completion. Retry to continue.';
+        record.updatedAt = Date.now();
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.persist();
+    }
   }
 
   private trim(): void {

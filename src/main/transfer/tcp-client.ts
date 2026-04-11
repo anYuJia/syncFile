@@ -17,6 +17,7 @@ export interface TcpClientOptions {
   selfDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
 }
 

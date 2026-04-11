@@ -48,6 +48,9 @@ export function ReceivePrompt({
         <p className="receive-prompt-from">
           <strong>{offer.fromDevice.name}</strong> {messages.wantsToSend}
         </p>
+        <p className="receive-prompt-fingerprint">
+          {messages.deviceFingerprintLabel}: {offer.fromDevice.trustFingerprint}
+        </p>
         {trustedSender && <p className="receive-prompt-trusted">{messages.trustedDeviceLabel}</p>}
         <div className="receive-prompt-file">
           <p className="receive-prompt-file-name">{offer.fileName}</p>

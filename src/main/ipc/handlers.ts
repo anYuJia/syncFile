@@ -25,6 +25,27 @@ import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
 import type { IncomingOfferInfo, OfferResponder, TcpServer } from '../transfer/tcp-server';
 
+export function sourceFileCanResume(
+  previous: Partial<TransferProgress> | undefined,
+  filePath: string,
+  fileSize: number,
+  modifiedAt: number
+): boolean {
+  if (!previous) {
+    return true;
+  }
+  if (previous.direction !== 'send') {
+    return true;
+  }
+  if (previous.localPath !== filePath) {
+    return true;
+  }
+  if (typeof previous.sourceFileModifiedAt !== 'number') {
+    return true;
+  }
+  return previous.fileSize === fileSize && previous.sourceFileModifiedAt === modifiedAt;
+}
+
 interface PendingOffer {
   info: IncomingOfferInfo;
   responder: OfferResponder;
@@ -44,6 +65,7 @@ interface OutboundTransferMeta {
   peerDeviceName: string;
   peerDeviceId: string;
   localPath: string;
+  sourceFileModifiedAt: number;
 }
 
 export interface IpcContext {
@@ -93,6 +115,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     peerDeviceName: meta.peerDeviceName,
     peerDeviceId: meta.peerDeviceId,
     localPath: meta.localPath,
+    sourceFileModifiedAt: meta.sourceFileModifiedAt,
     status,
     error
   });
@@ -140,12 +163,18 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.sandbox.currentUsageBytes() + fileSize > sandboxLimitBytes(settings);
   };
 
-  const isTrustedDevice = (deviceId: string, settings: Settings): boolean => {
-    return settings.trustedDevices.some((device) => device.deviceId === deviceId);
+  const isTrustedDevice = (
+    deviceId: string,
+    trustFingerprint: string,
+    settings: Settings
+  ): boolean => {
+    return settings.trustedDevices.some(
+      (device) => device.deviceId === deviceId && device.trustFingerprint === trustFingerprint
+    );
   };
 
   const resolveReceiveMode = (info: IncomingOfferInfo, settings: Settings): ReceiveMode => {
-    if (isTrustedDevice(info.fromDevice.deviceId, settings)) {
+    if (isTrustedDevice(info.fromDevice.deviceId, info.fromDevice.trustFingerprint, settings)) {
       return 'trusted-device';
     }
     if (settings.autoAccept) {
@@ -183,14 +212,22 @@ export function registerIpcHandlers(context: IpcContext): void {
 
     const transferId = existingTransferId ?? randomUUID();
     const fileName = basename(filePath);
-    const fileSize = statSync(filePath).size;
+    const fileStats = statSync(filePath);
+    const fileSize = fileStats.size;
+    if (existingTransferId) {
+      const previous = context.transferHistoryStore.get(existingTransferId);
+      if (!sourceFileCanResume(previous, filePath, fileSize, fileStats.mtimeMs)) {
+        throw new Error('source file changed; cannot resume transfer');
+      }
+    }
     const meta: OutboundTransferMeta = {
       transferId,
       fileName,
       fileSize,
       peerDeviceName: device.name,
       peerDeviceId: device.deviceId,
-      localPath: filePath
+      localPath: filePath,
+      sourceFileModifiedAt: fileStats.mtimeMs
     };
 
     outboundTransfers.set(transferId, meta);
@@ -462,7 +499,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       fileSize: progress.totalBytes,
       peerDeviceName: meta?.peerDeviceName ?? '',
       peerDeviceId: meta?.peerDeviceId ?? '',
-      localPath: meta?.localPath ?? ''
+      localPath: meta?.localPath ?? '',
+      sourceFileModifiedAt: meta?.sourceFileModifiedAt ?? 0
     };
     const currentMeta = meta ?? fallbackMeta;
     publishTransferEvent(

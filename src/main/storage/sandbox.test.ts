@@ -75,7 +75,7 @@ describe('Sandbox', () => {
   });
 
   it('persists and completes incoming resume state', () => {
-    const prepared = sandbox.prepareIncomingResume('file-1', 'device-a', 'hello.txt', 5);
+    const prepared = sandbox.prepareIncomingResume('file-1', 'device-a', 'Alice MacBook', 'hello.txt', 5);
     writeFileSync(prepared.partialPath, 'hello');
 
     expect(sandbox.incomingResumeOffset('file-1')).toBe(5);
@@ -87,8 +87,8 @@ describe('Sandbox', () => {
   });
 
   it('reports and clears resume cache', () => {
-    const first = sandbox.prepareIncomingResume('file-1', 'device-a', 'hello.txt', 5);
-    const second = sandbox.prepareIncomingResume('file-2', 'device-b', 'world.txt', 3);
+    const first = sandbox.prepareIncomingResume('file-1', 'device-a', 'Alice MacBook', 'hello.txt', 5);
+    const second = sandbox.prepareIncomingResume('file-2', 'device-b', 'Bob PC', 'world.txt', 3);
     writeFileSync(first.partialPath, 'hello');
     writeFileSync(second.partialPath, 'abc');
 
@@ -97,5 +97,23 @@ describe('Sandbox', () => {
     sandbox.clearResumeCache();
 
     expect(sandbox.resumeCacheSummary()).toEqual({ count: 0, bytes: 0 });
+  });
+
+  it('lists resumable cache entries with device metadata', () => {
+    const prepared = sandbox.prepareIncomingResume('file-3', 'device-c', 'Carol Linux', 'draft.txt', 4);
+    writeFileSync(prepared.partialPath, 'data');
+
+    expect(sandbox.listResumeEntries()).toEqual([
+      {
+        fileId: 'file-3',
+        deviceId: 'device-c',
+        deviceName: 'Carol Linux',
+        fileName: 'draft.txt',
+        fileSize: 4,
+        partialPath: prepared.partialPath,
+        finalPath: prepared.finalPath,
+        bytesReceived: 4
+      }
+    ]);
   });
 });

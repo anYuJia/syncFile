@@ -1122,6 +1122,13 @@ body {
   font-size: 12px;
 }
 
+.receive-prompt-fingerprint {
+  margin: 6px 0 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
 .receive-prompt-trusted {
   margin: 8px 0 0;
   display: inline-flex;

@@ -28,6 +28,7 @@ export interface IncomingOfferInfo {
   fromDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
 }
 
@@ -44,6 +45,7 @@ export interface TransferCompleteInfo {
   fromDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
 }
 
@@ -55,6 +57,7 @@ export interface ReceiveProgressInfo {
   fromDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
 }
 
@@ -318,6 +321,7 @@ export class TcpServer extends EventEmitter {
         const prepared = this.options.sandbox.prepareIncomingResume(
           offer.fileId,
           offer.fromDevice.deviceId,
+          offer.fromDevice.name,
           offer.fileName,
           offer.fileSize
         );

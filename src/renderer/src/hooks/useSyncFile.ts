@@ -60,6 +60,7 @@ function buildTransferFromEvent(
     status: incoming.status ?? previous?.status ?? 'pending',
     receiveMode: incoming.receiveMode ?? previous?.receiveMode,
     localPath: incoming.localPath ?? previous?.localPath,
+    sourceFileModifiedAt: incoming.sourceFileModifiedAt ?? previous?.sourceFileModifiedAt,
     error: incoming.error ?? previous?.error,
     updatedAt: Date.now()
   };
@@ -182,6 +183,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
             peerDeviceId: target?.deviceId ?? '',
             status: 'pending',
             localPath: filePath,
+            sourceFileModifiedAt: previous?.sourceFileModifiedAt,
             updatedAt: Date.now()
           }
         };
@@ -270,6 +272,9 @@ function localizeError(error: unknown, messages: Messages): string | null {
   }
   if (message.includes('peer declined transfer: too-large')) {
     return messages.errorPeerDeclinedTooLarge;
+  }
+  if (message.includes('source file changed')) {
+    return messages.errorSourceFileChanged;
   }
   if (message.includes('peer declined')) {
     return messages.errorPeerDeclined;

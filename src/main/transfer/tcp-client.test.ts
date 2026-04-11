@@ -31,7 +31,7 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, 'hello world');
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client' }
+      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
     });
 
     const progressEvents: number[] = [];
@@ -63,7 +63,7 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, 'data');
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'cli', name: 'cli' }
+      selfDevice: { deviceId: 'cli', name: 'cli', trustFingerprint: '1111-2222-3333-4444' }
     });
 
     await expect(
@@ -76,7 +76,7 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 7));
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client' }
+      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
     });
 
     let cancelled = false;
@@ -102,7 +102,7 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 9));
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client' }
+      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
     });
 
     let cancelled = false;

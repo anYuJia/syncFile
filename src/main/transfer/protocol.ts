@@ -14,6 +14,7 @@ export interface FileOfferMessage {
   fromDevice: {
     deviceId: string;
     name: string;
+    trustFingerprint: string;
   };
 }
 

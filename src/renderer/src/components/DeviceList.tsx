@@ -4,7 +4,7 @@ import type { Messages } from '../i18n';
 interface DeviceListProps {
   devices: Device[];
   selectedDeviceId: string | null;
-  trustedDeviceIds?: Set<string>;
+  trustedDeviceKeys?: Set<string>;
   onSelect: (deviceId: string) => void;
   messages: Messages;
 }
@@ -19,7 +19,7 @@ function formatPlatform(platform: string): string {
 export function DeviceList({
   devices,
   selectedDeviceId,
-  trustedDeviceIds,
+  trustedDeviceKeys,
   onSelect,
   messages
 }: DeviceListProps): JSX.Element {
@@ -36,7 +36,7 @@ export function DeviceList({
     <ul className="device-list" role="listbox" aria-label={messages.onlineDevicesAriaLabel}>
       {devices.map((device, index) => {
         const selected = device.deviceId === selectedDeviceId;
-        const trusted = trustedDeviceIds?.has(device.deviceId) ?? false;
+        const trusted = trustedDeviceKeys?.has(`${device.deviceId}:${device.trustFingerprint}`) ?? false;
         return (
           <li key={device.deviceId}>
             <button
@@ -60,7 +60,7 @@ export function DeviceList({
                   {device.address}:{device.port}
                 </span>
                 <span className="device-item-submeta">
-                  ID {device.deviceId.slice(0, 8)} · v{device.version}
+                  ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint} · v{device.version}
                 </span>
               </span>
             </button>
