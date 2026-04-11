@@ -5,6 +5,7 @@ import type {
   IncomingOffer,
   RejectReason,
   TransferId,
+  TransferRecord,
   TransferProgress
 } from '@shared/types';
 import type { Messages } from '../i18n';
@@ -64,6 +65,17 @@ function buildTransferFromEvent(
   };
 }
 
+function buildTransferMap(records: TransferRecord[]): Record<string, TransferWithTimestamp> {
+  const map: Record<string, TransferWithTimestamp> = {};
+  for (const record of records) {
+    map[record.transferId] = {
+      ...record,
+      updatedAt: record.updatedAt
+    };
+  }
+  return map;
+}
+
 export function useSyncFile(messages: Messages): UseSyncFileResult {
   const [selfDevice, setSelfDevice] = useState<Device | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -77,15 +89,17 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
 
     const init = async (): Promise<void> => {
       try {
-        const [self, list] = await Promise.all([
+        const [self, list, history] = await Promise.all([
           window.syncFile.getSelfDevice(),
-          window.syncFile.getDevices()
+          window.syncFile.getDevices(),
+          window.syncFile.getTransferHistory()
         ]);
         if (!active) {
           return;
         }
         setSelfDevice(self);
         setDevices(list);
+        setTransferMap(buildTransferMap(history));
       } catch (error) {
         if (!active) {
           return;

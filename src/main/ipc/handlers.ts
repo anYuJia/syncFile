@@ -13,12 +13,14 @@ import type {
   Settings,
   SettingsPayload,
   TransferId,
+  TransferRecord,
   TransferProgress
 } from '../../shared/types';
 import type { DeviceRegistry } from '../discovery/device-registry';
 import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
 import type { SettingsStore } from '../storage/settings';
+import type { TransferHistoryStore } from '../storage/transfer-history';
 import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
 import type { IncomingOfferInfo, OfferResponder, TcpServer } from '../transfer/tcp-server';
@@ -51,6 +53,7 @@ export interface IpcContext {
   sandbox: Sandbox;
   sandboxLocation: SandboxLocationStore;
   settingsStore: SettingsStore;
+  transferHistoryStore: TransferHistoryStore;
   identity: DeviceIdentity;
   getSelfDevice: () => Device;
   getWindow: () => BrowserWindow | null;
@@ -66,6 +69,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     const window = context.getWindow();
     if (!window || window.isDestroyed()) return;
     window.webContents.send(channel, payload);
+  };
+
+  const publishTransferEvent = (
+    channel: typeof IpcChannels.TransferProgress | typeof IpcChannels.TransferComplete,
+    progress: TransferProgress
+  ): void => {
+    context.transferHistoryStore.upsert(progress);
+    sendToRenderer(channel, progress);
   };
 
   const makeOutboundProgress = (
@@ -149,6 +160,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.getSelfDevice();
   });
 
+  ipcMain.handle(IpcChannels.GetTransferHistory, (): TransferRecord[] => {
+    return context.transferHistoryStore.list();
+  });
+
   ipcMain.handle(
     IpcChannels.SendFile,
     (_event, deviceId: string, filePath: string, existingTransferId?: string): TransferId => {
@@ -170,7 +185,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     };
 
     outboundTransfers.set(transferId, meta);
-    sendToRenderer(IpcChannels.TransferProgress, makeOutboundProgress(meta, 0, 'pending'));
+    publishTransferEvent(IpcChannels.TransferProgress, makeOutboundProgress(meta, 0, 'pending'));
 
     void context.tcpClient
       .sendFile({
@@ -181,7 +196,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       })
       .then(() => {
         const currentMeta = outboundTransfers.get(transferId) ?? meta;
-        sendToRenderer(
+        publishTransferEvent(
           IpcChannels.TransferComplete,
           makeOutboundProgress(currentMeta, currentMeta.fileSize, 'completed')
         );
@@ -193,7 +208,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           cancellingOutboundTransfers.has(transferId) || error.message.includes('transfer cancelled');
 
         if (wasCancelled) {
-          sendToRenderer(
+          publishTransferEvent(
             IpcChannels.TransferProgress,
             makeOutboundProgress(currentMeta, 0, 'cancelled')
           );
@@ -202,7 +217,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           return;
         }
 
-        sendToRenderer(
+        publishTransferEvent(
           IpcChannels.TransferProgress,
           makeOutboundProgress(currentMeta, 0, 'failed', error.message)
         );
@@ -244,7 +259,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     completedOrAcceptedOffers.set(offerId, { info: pending.info, receiveMode });
     pending.responder.accept();
     pendingOffers.delete(offerId);
-    sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending', receiveMode));
+    publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending', receiveMode));
   });
 
   ipcMain.handle(
@@ -256,7 +271,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
       pending.responder.reject(reason);
       pendingOffers.delete(offerId);
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected', 'manual'));
+      publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected', 'manual'));
     }
   );
 
@@ -341,7 +356,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     const settings = context.settingsStore.get();
     if (exceedsSandboxLimit(info.fileSize, settings)) {
       responder.reject('too-large');
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
+      publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
       return;
     }
 
@@ -349,7 +364,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const receiveMode = resolveReceiveMode(info, settings);
       completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
       responder.accept();
-      sendToRenderer(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
+      publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
       return;
     }
 
@@ -384,7 +399,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     };
 
     completedOrAcceptedOffers.delete(info.offerId);
-    sendToRenderer(IpcChannels.TransferComplete, progress);
+    publishTransferEvent(IpcChannels.TransferComplete, progress);
 
     if (context.settingsStore.get().openReceivedFolder) {
       shell.showItemInFolder(info.savedPath);
@@ -393,7 +408,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   context.tcpServer.on('progress', (info) => {
     const receiveMode = completedOrAcceptedOffers.get(info.offerId)?.receiveMode ?? 'manual';
-    sendToRenderer(
+    publishTransferEvent(
       IpcChannels.TransferProgress,
       makeInboundProgress(info, info.bytesReceived, 'in-progress', receiveMode)
     );
@@ -401,7 +416,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   context.tcpServer.on('transfer-cancelled', (info) => {
     const receiveMode = completedOrAcceptedOffers.get(info.offerId)?.receiveMode ?? 'manual';
-    sendToRenderer(
+    publishTransferEvent(
       IpcChannels.TransferProgress,
       makeInboundProgress(info, info.bytesReceived, 'cancelled', receiveMode)
     );
@@ -409,7 +424,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.tcpServer.on('transfer-error', (error) => {
-    sendToRenderer(IpcChannels.TransferProgress, {
+    publishTransferEvent(IpcChannels.TransferProgress, {
       transferId: randomUUID(),
       direction: 'receive',
       fileName: 'incoming file',
@@ -432,7 +447,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       localPath: meta?.localPath ?? ''
     };
     const currentMeta = meta ?? fallbackMeta;
-    sendToRenderer(
+    publishTransferEvent(
       IpcChannels.TransferProgress,
       makeOutboundProgress(
         currentMeta,

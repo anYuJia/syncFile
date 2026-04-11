@@ -9,6 +9,7 @@ import type {
   Settings,
   SettingsPayload,
   TransferId,
+  TransferRecord,
   TransferProgress
 } from '../shared/types';
 
@@ -23,6 +24,7 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 const api = {
   getDevices: (): Promise<Device[]> => ipcRenderer.invoke(IpcChannels.GetDevices),
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
+  getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
     ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
   cancelTransfer: (transferId: string): Promise<void> =>

@@ -11,6 +11,7 @@ import { loadOrCreateIdentity } from './storage/device-identity';
 import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
 import { SettingsStore } from './storage/settings';
+import { TransferHistoryStore } from './storage/transfer-history';
 import { TcpClient } from './transfer/tcp-client';
 import { TcpServer } from './transfer/tcp-server';
 
@@ -61,6 +62,7 @@ async function bootstrap(): Promise<void> {
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const settingsStore = new SettingsStore(userDataDir);
+  const transferHistoryStore = new TransferHistoryStore(userDataDir);
   const registry = new DeviceRegistry();
 
   tcpServer = new TcpServer({ sandbox });
@@ -106,6 +108,7 @@ async function bootstrap(): Promise<void> {
       sandbox,
       sandboxLocation,
       settingsStore,
+      transferHistoryStore,
       identity,
       getSelfDevice,
       getWindow: () => mainWindow

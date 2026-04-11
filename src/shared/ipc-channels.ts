@@ -5,6 +5,7 @@ export const IpcChannels = {
   // Renderer -> Main (invoke)
   GetDevices: 'syncfile:get-devices',
   GetSelfDevice: 'syncfile:get-self-device',
+  GetTransferHistory: 'syncfile:get-transfer-history',
   SendFile: 'syncfile:send-file',
   CancelTransfer: 'syncfile:cancel-transfer',
   AcceptIncoming: 'syncfile:accept-incoming',

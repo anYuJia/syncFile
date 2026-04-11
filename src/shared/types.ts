@@ -39,6 +39,10 @@ export interface TransferProgress {
   error?: string;
 }
 
+export interface TransferRecord extends TransferProgress {
+  updatedAt: number;
+}
+
 export interface IncomingOffer {
   offerId: string;
   fromDevice: {
