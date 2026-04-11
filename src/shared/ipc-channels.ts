@@ -9,6 +9,8 @@ export const IpcChannels = {
   AcceptIncoming: 'syncfile:accept-incoming',
   RejectIncoming: 'syncfile:reject-incoming',
   OpenSandbox: 'syncfile:open-sandbox',
+  OpenTransferPath: 'syncfile:open-transfer-path',
+  RevealTransferPath: 'syncfile:reveal-transfer-path',
   GetSandboxLocation: 'syncfile:get-sandbox-location',
   ChooseSandboxLocation: 'syncfile:choose-sandbox-location',
   SelectFile: 'syncfile:select-file',

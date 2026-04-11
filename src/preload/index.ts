@@ -30,6 +30,8 @@ const api = {
   rejectIncoming: (offerId: string, reason?: RejectReason): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.RejectIncoming, offerId, reason),
   openSandbox: (): Promise<void> => ipcRenderer.invoke(IpcChannels.OpenSandbox),
+  openTransferPath: (path: string): Promise<void> => ipcRenderer.invoke(IpcChannels.OpenTransferPath, path),
+  revealTransferPath: (path: string): Promise<void> => ipcRenderer.invoke(IpcChannels.RevealTransferPath, path),
   getSandboxLocation: (): Promise<SandboxLocationInfo> => ipcRenderer.invoke(IpcChannels.GetSandboxLocation),
   chooseSandboxLocation: (): Promise<SandboxLocationInfo | null> =>
     ipcRenderer.invoke(IpcChannels.ChooseSandboxLocation),

@@ -64,6 +64,22 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
     return <div className="transfer-list-empty">{messages.transferEmpty}</div>;
   }
 
+  const handleOpenPath = async (path: string): Promise<void> => {
+    try {
+      await window.syncFile.openTransferPath(path);
+    } catch {
+      // Transfer list is best-effort only.
+    }
+  };
+
+  const handleRevealPath = async (path: string): Promise<void> => {
+    try {
+      await window.syncFile.revealTransferPath(path);
+    } catch {
+      // Transfer list is best-effort only.
+    }
+  };
+
   return (
     <ul className="transfer-list">
       {transfers.map((item) => {
@@ -94,6 +110,24 @@ export function TransferList({ transfers, messages }: TransferListProps): JSX.El
               </span>
               <span>{item.peerDeviceName || messages.unknownDevice}</span>
             </div>
+            {item.status === 'completed' && item.localPath && (
+              <div className="transfer-item-actions">
+                <button
+                  type="button"
+                  className="button button-ghost transfer-item-action"
+                  onClick={() => void handleOpenPath(item.localPath!)}
+                >
+                  {messages.transferOpenFile}
+                </button>
+                <button
+                  type="button"
+                  className="button button-ghost transfer-item-action"
+                  onClick={() => void handleRevealPath(item.localPath!)}
+                >
+                  {messages.transferRevealFile}
+                </button>
+              </div>
+            )}
             {item.error && <div className="transfer-item-error">{item.error}</div>}
           </li>
         );

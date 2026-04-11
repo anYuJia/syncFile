@@ -33,6 +33,7 @@ export interface TransferProgress {
   peerDeviceName: string;
   status: TransferStatus;
   receiveMode?: 'manual' | 'trusted-device' | 'auto-accept';
+  localPath?: string;
   error?: string;
 }
 

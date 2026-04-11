@@ -40,6 +40,7 @@ interface OutboundTransferMeta {
   fileName: string;
   fileSize: number;
   peerDeviceName: string;
+  localPath: string;
 }
 
 export interface IpcContext {
@@ -77,6 +78,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     fileSize: meta.fileSize,
     bytesTransferred,
     peerDeviceName: meta.peerDeviceName,
+    localPath: meta.localPath,
     status,
     error
   });
@@ -86,6 +88,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     bytesTransferred: number,
     status: TransferProgress['status'],
     receiveMode: ReceiveMode,
+    localPath?: string,
     error?: string
   ): TransferProgress => ({
     transferId: offer.offerId,
@@ -94,6 +97,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     fileSize: offer.fileSize,
     bytesTransferred,
     peerDeviceName: offer.fromDevice.name,
+    localPath,
     status,
     receiveMode,
     error
@@ -154,7 +158,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       transferId,
       fileName,
       fileSize,
-      peerDeviceName: device.name
+      peerDeviceName: device.name,
+      localPath: filePath
     };
 
     outboundTransfers.set(transferId, meta);
@@ -217,6 +222,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (result.length > 0) {
       throw new Error(result);
     }
+  });
+
+  ipcMain.handle(IpcChannels.OpenTransferPath, async (_event, path: string): Promise<void> => {
+    const result = await shell.openPath(path);
+    if (result.length > 0) {
+      throw new Error(result);
+    }
+  });
+
+  ipcMain.handle(IpcChannels.RevealTransferPath, (_event, path: string): void => {
+    shell.showItemInFolder(path);
   });
 
   ipcMain.handle(IpcChannels.GetSandboxLocation, (): SandboxLocationInfo => {
@@ -319,7 +335,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       bytesTransferred: info.bytesReceived,
       peerDeviceName: info.fromDevice.name,
       status: 'completed',
-      receiveMode: meta?.receiveMode ?? 'manual'
+      receiveMode: meta?.receiveMode ?? 'manual',
+      localPath: info.savedPath
     };
 
     completedOrAcceptedOffers.delete(info.offerId);
@@ -357,7 +374,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       transferId: progress.fileId,
       fileName: progress.fileName,
       fileSize: progress.totalBytes,
-      peerDeviceName: meta?.peerDeviceName ?? ''
+      peerDeviceName: meta?.peerDeviceName ?? '',
+      localPath: meta?.localPath ?? ''
     };
     const currentMeta = meta ?? fallbackMeta;
     sendToRenderer(

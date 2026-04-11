@@ -1039,6 +1039,17 @@ body {
   gap: 8px;
 }
 
+.transfer-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.transfer-item-action {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
 .transfer-item-error {
   color: var(--danger);
   font-size: 10px;

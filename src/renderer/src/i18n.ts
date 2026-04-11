@@ -47,6 +47,8 @@ export interface Messages {
   transferStatusRejected: string;
   transferReceiveModeTrusted: string;
   transferReceiveModeAuto: string;
+  transferOpenFile: string;
+  transferRevealFile: string;
   incomingFileRequest: string;
   incomingFileRequestAriaLabel: string;
   wantsToSend: string;
@@ -156,6 +158,8 @@ const zh: Messages = {
   transferStatusRejected: '已拒绝',
   transferReceiveModeTrusted: '来自已信任设备',
   transferReceiveModeAuto: '自动接受',
+  transferOpenFile: '打开文件',
+  transferRevealFile: '在文件夹中显示',
   incomingFileRequest: '收到文件请求',
   incomingFileRequestAriaLabel: '收到文件请求',
   wantsToSend: '想要发送给你：',
@@ -263,6 +267,8 @@ const en: Messages = {
   transferStatusRejected: 'Rejected',
   transferReceiveModeTrusted: 'Trusted device',
   transferReceiveModeAuto: 'Auto-accepted',
+  transferOpenFile: 'Open file',
+  transferRevealFile: 'Reveal in folder',
   incomingFileRequest: 'Incoming file request',
   incomingFileRequestAriaLabel: 'Incoming file offer',
   wantsToSend: 'wants to send:',

@@ -54,6 +54,7 @@ function buildTransferFromEvent(
     peerDeviceName: incoming.peerDeviceName || fallbackPeerDeviceName,
     status: incoming.status ?? previous?.status ?? 'pending',
     receiveMode: incoming.receiveMode ?? previous?.receiveMode,
+    localPath: incoming.localPath ?? previous?.localPath,
     error: incoming.error ?? previous?.error,
     updatedAt: Date.now()
   };
@@ -160,6 +161,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
             bytesTransferred: 0,
             peerDeviceName: target?.name ?? 'Unknown device',
             status: 'pending',
+            localPath: filePath,
             updatedAt: Date.now()
           }
         };
