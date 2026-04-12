@@ -25,7 +25,8 @@ import type { TransferHistoryStore } from '../storage/transfer-history';
 import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
 import { sha256File } from '../transfer/file-hash';
-import type { IncomingOfferInfo, OfferResponder, TcpServer, TransferErrorInfo } from '../transfer/tcp-server';
+import type { IncomingOfferInfo, OfferResponder, PairResponder, TcpServer, TransferErrorInfo } from '../transfer/tcp-server';
+import type { PairRequestMessage } from '../transfer/protocol';
 
 export function sourceFileCanResume(
   previous: Partial<TransferProgress> | undefined,
@@ -75,6 +76,11 @@ interface PendingOffer {
   responder: OfferResponder;
 }
 
+interface PendingPairRequest {
+  request: PairRequestMessage;
+  responder: PairResponder;
+}
+
 type ReceiveMode = 'manual' | 'trusted-device' | 'auto-accept';
 
 interface AcceptedInboundMeta {
@@ -109,6 +115,7 @@ export interface IpcContext {
 
 export function registerIpcHandlers(context: IpcContext): void {
   const pendingOffers = new Map<string, PendingOffer>();
+  const pendingPairRequests = new Map<string, PendingPairRequest>();
   const completedOrAcceptedOffers = new Map<string, AcceptedInboundMeta>();
   const outboundTransfers = new Map<string, OutboundTransferMeta>();
   const cancellingOutboundTransfers = new Set<string>();
@@ -233,6 +240,26 @@ export function registerIpcHandlers(context: IpcContext): void {
     );
   };
 
+  const upsertTrustedDevice = (
+    device: { deviceId: string; name: string; trustFingerprint: string; trustPublicKey: string }
+  ): Settings => {
+    const current = context.settingsStore.get();
+    const trustedDevices = [
+      ...current.trustedDevices.filter(
+        (item) =>
+          !(item.deviceId === device.deviceId && item.trustFingerprint === device.trustFingerprint)
+      ),
+      {
+        deviceId: device.deviceId,
+        name: device.name,
+        trustFingerprint: device.trustFingerprint,
+        trustPublicKey: device.trustPublicKey,
+        trustedAt: Date.now()
+      }
+    ].sort((a, b) => a.name.localeCompare(b.name));
+    return context.settingsStore.save({ trustedDevices });
+  };
+
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
     return context.registry.list();
   });
@@ -243,6 +270,37 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(IpcChannels.GetTransferHistory, (): TransferRecord[] => {
     return context.transferHistoryStore.list();
+  });
+
+  ipcMain.handle(IpcChannels.PairDevice, async (_event, deviceId: string): Promise<void> => {
+    const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
+    if (!device) {
+      throw new Error(`device ${deviceId} not found`);
+    }
+    const accepted = await context.tcpClient.pairWithPeer(device.address, device.port);
+    if (!accepted) {
+      throw new Error('peer declined pairing');
+    }
+    upsertTrustedDevice(device);
+  });
+
+  ipcMain.handle(IpcChannels.AcceptPairRequest, (_event, requestId: string): void => {
+    const pending = pendingPairRequests.get(requestId);
+    if (!pending) {
+      throw new Error(`pair request ${requestId} not found`);
+    }
+    upsertTrustedDevice(pending.request.fromDevice);
+    pending.responder.accept();
+    pendingPairRequests.delete(requestId);
+  });
+
+  ipcMain.handle(IpcChannels.RejectPairRequest, (_event, requestId: string): void => {
+    const pending = pendingPairRequests.get(requestId);
+    if (!pending) {
+      throw new Error(`pair request ${requestId} not found`);
+    }
+    pending.responder.reject();
+    pendingPairRequests.delete(requestId);
   });
 
   ipcMain.handle(IpcChannels.GetPendingOffers, (): IncomingOffer[] => {
@@ -520,6 +578,15 @@ export function registerIpcHandlers(context: IpcContext): void {
 
     context.pendingOfferStore.upsert(offer);
     sendToRenderer(IpcChannels.IncomingOffer, offer);
+  });
+
+  context.tcpServer.on('pair-request', (request, responder) => {
+    pendingPairRequests.set(request.requestId, { request, responder });
+    sendToRenderer(IpcChannels.IncomingPairRequest, {
+      requestId: request.requestId,
+      fromDevice: request.fromDevice,
+      receivedAt: Date.now()
+    });
   });
 
   context.tcpServer.on('transfer-complete', (info) => {

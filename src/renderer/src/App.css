@@ -964,6 +964,12 @@ body {
   padding: 6px 10px;
 }
 
+.transfer-bulk-action {
+  padding: 5px 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .transfer-list {
   margin: 0;
   padding: 4px 10px 10px;

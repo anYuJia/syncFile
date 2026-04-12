@@ -7,6 +7,9 @@ export const IpcChannels = {
   GetSelfDevice: 'syncfile:get-self-device',
   GetTransferHistory: 'syncfile:get-transfer-history',
   GetPendingOffers: 'syncfile:get-pending-offers',
+  PairDevice: 'syncfile:pair-device',
+  AcceptPairRequest: 'syncfile:accept-pair-request',
+  RejectPairRequest: 'syncfile:reject-pair-request',
   SendFile: 'syncfile:send-file',
   PauseTransfer: 'syncfile:pause-transfer',
   CancelTransfer: 'syncfile:cancel-transfer',
@@ -29,7 +32,8 @@ export const IpcChannels = {
   TransferProgress: 'syncfile:transfer-progress',
   TransferComplete: 'syncfile:transfer-complete',
   TransferHistoryReset: 'syncfile:transfer-history-reset',
-  IncomingOffer: 'syncfile:incoming-offer'
+  IncomingOffer: 'syncfile:incoming-offer',
+  IncomingPairRequest: 'syncfile:incoming-pair-request'
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

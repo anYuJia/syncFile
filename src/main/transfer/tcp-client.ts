@@ -6,12 +6,14 @@ import { connect, type Socket } from 'net';
 import type { ReadStream } from 'fs';
 
 import { MessageDecoder, encodeMessage } from './codec';
-import { signFileOffer } from '../security/trust';
+import { signFileOffer, signPairRequest } from '../security/trust';
 import {
   isFileAccept,
   isFileCancel,
+  isPairResponse,
   isFileReject,
-  type FileOfferMessage
+  type FileOfferMessage,
+  type PairRequestMessage
 } from './protocol';
 
 export interface TcpClientOptions {
@@ -216,6 +218,61 @@ export class TcpClient extends EventEmitter {
       fileName,
       totalBytes: stats.size
     };
+  }
+
+  async pairWithPeer(host: string, port: number): Promise<boolean> {
+    const socket = await openSocket(host, port);
+    const decoder = new MessageDecoder();
+    const unsignedRequest: Omit<PairRequestMessage, 'signature'> = {
+      type: 'pair-request',
+      version: 1,
+      requestId: randomUUID(),
+      timestamp: Date.now(),
+      fromDevice: this.options.selfDevice
+    };
+    const request: PairRequestMessage = {
+      ...unsignedRequest,
+      signature: signPairRequest(unsignedRequest, this.options.selfDevice.trustPrivateKey)
+    };
+
+    return await new Promise<boolean>((resolve, reject) => {
+      const cleanup = (): void => {
+        socket.off('data', onData);
+        socket.off('error', onError);
+        socket.off('close', onClose);
+      };
+
+      const onData = (chunk: Buffer): void => {
+        try {
+          const messages = decoder.push(chunk);
+          for (const message of messages) {
+            if (isPairResponse(message) && message.requestId === request.requestId) {
+              cleanup();
+              socket.end(() => resolve(message.accepted));
+              return;
+            }
+          }
+        } catch (error) {
+          cleanup();
+          socket.destroy();
+          reject(error as Error);
+        }
+      };
+
+      const onError = (error: Error): void => {
+        cleanup();
+        reject(error);
+      };
+
+      const onClose = (): void => {
+        cleanup();
+      };
+
+      socket.on('data', onData);
+      socket.once('error', onError);
+      socket.once('close', onClose);
+      socket.write(encodeMessage(request));
+    });
   }
 
   private streamFile(

@@ -8,7 +8,7 @@ import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
-import type { Device, IncomingOffer, TrustedDevice } from '@shared/types';
+import type { Device, IncomingOffer, PairRequest, TrustedDevice } from '@shared/types';
 
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
 const MIN_RIGHT_PANE_SECTION_HEIGHT = 180;
@@ -39,6 +39,7 @@ export function App(): JSX.Element {
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
+  const [pendingPairRequests, setPendingPairRequests] = useState<PairRequest[]>([]);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
@@ -61,6 +62,13 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshTrustedDevices();
+  }, []);
+
+  useEffect(() => {
+    const offIncomingPairRequest = window.syncFile.onIncomingPairRequest((request) => {
+      setPendingPairRequests((prev) => [...prev, request]);
+    });
+    return () => offIncomingPairRequest();
   }, []);
 
   useEffect(() => {
@@ -251,27 +259,35 @@ export function App(): JSX.Element {
 
   async function handlePairDevice(device: Device): Promise<void> {
     try {
-      const currentSettings = await window.syncFile.getSettings();
-      const trustedDevices = dedupeTrustedDevices([
-        ...currentSettings.trustedDevices,
-        {
-          deviceId: device.deviceId,
-          name: device.name,
-          trustFingerprint: device.trustFingerprint,
-          trustPublicKey: device.trustPublicKey,
-          trustedAt: Date.now()
-        }
-      ]);
-
-      await window.syncFile.saveSettings({ trustedDevices });
-      setTrustedDevices(trustedDevices);
+      await window.syncFile.pairDevice(device.deviceId);
+      await refreshTrustedDevices();
       setPairingDeviceId(null);
     } catch {
       // Best effort; settings error remains in UI elsewhere.
     }
   }
 
+  async function handleAcceptPairRequest(requestId: string): Promise<void> {
+    try {
+      await window.syncFile.acceptPairRequest(requestId);
+      setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
+      await refreshTrustedDevices();
+    } catch {
+      // Best effort only.
+    }
+  }
+
+  async function handleRejectPairRequest(requestId: string): Promise<void> {
+    try {
+      await window.syncFile.rejectPairRequest(requestId);
+      setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
+    } catch {
+      // Best effort only.
+    }
+  }
+
   const currentOffer = pendingOffers[0] ?? null;
+  const currentPairRequest = pendingPairRequests[0] ?? null;
   const dispatchCardStyle =
     rightPaneSplit === null
       ? undefined
@@ -439,6 +455,22 @@ export function App(): JSX.Element {
           selfFingerprint={selfDevice.trustFingerprint}
           onConfirm={handlePairDevice}
           onClose={() => setPairingDeviceId(null)}
+          messages={messages}
+        />
+      )}
+      {currentPairRequest && selfDevice && (
+        <PairDevicePrompt
+          device={{
+            ...currentPairRequest.fromDevice,
+            host: '',
+            address: '',
+            port: 0,
+            platform: '',
+            version: ''
+          }}
+          selfFingerprint={selfDevice.trustFingerprint}
+          onConfirm={() => handleAcceptPairRequest(currentPairRequest.requestId)}
+          onClose={() => void handleRejectPairRequest(currentPairRequest.requestId)}
           messages={messages}
         />
       )}

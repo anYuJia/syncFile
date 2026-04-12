@@ -4,16 +4,18 @@ import { EventEmitter } from 'events';
 
 import type { Sandbox } from '../storage/sandbox';
 import { sha256File } from './file-hash';
-import { verifyFileOffer } from '../security/trust';
+import { verifyFileOffer, verifyPairRequest } from '../security/trust';
 import { MessageDecoder, encodeMessage } from './codec';
 import {
   isFileCancel,
   isFileComplete,
   isFileOffer,
+  isPairRequest,
   type FileCancelMessage,
   type FileCompleteMessage,
   type FileOfferMessage,
-  type FileRejectMessage
+  type FileRejectMessage,
+  type PairRequestMessage
 } from './protocol';
 
 type RejectReason = FileRejectMessage['reason'];
@@ -40,6 +42,11 @@ export interface OfferResponder {
   accept(): void;
   reject(reason: RejectReason): void;
   cancel(reason: 'receiver-cancelled'): void;
+}
+
+export interface PairResponder {
+  accept(): void;
+  reject(): void;
 }
 
 export interface TransferCompleteInfo {
@@ -83,6 +90,7 @@ export interface TransferErrorInfo {
 
 export interface TcpServerEvents {
   'incoming-offer': (offer: IncomingOfferInfo, respond: OfferResponder) => void;
+  'pair-request': (request: PairRequestMessage, respond: PairResponder) => void;
   progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
   'transfer-cancelled': (info: ReceiveProgressInfo & { reason: 'sender-cancelled' | 'receiver-cancelled' }) => void;
@@ -439,6 +447,36 @@ export class TcpServer extends EventEmitter {
             return;
           }
           const [first, ...rest] = messages;
+          if (isPairRequest(first)) {
+            if (!verifyPairRequest(first)) {
+              socket.end();
+              return;
+            }
+            const pairResponder: PairResponder = {
+              accept: () => {
+                socket.write(
+                  encodeMessage({
+                    type: 'pair-response',
+                    requestId: first.requestId,
+                    accepted: true
+                  }),
+                  () => socket.end()
+                );
+              },
+              reject: () => {
+                socket.write(
+                  encodeMessage({
+                    type: 'pair-response',
+                    requestId: first.requestId,
+                    accepted: false
+                  }),
+                  () => socket.end()
+                );
+              }
+            };
+            this.emit('pair-request', first, pairResponder);
+            return;
+          }
           if (!isFileOffer(first)) {
             fail(new Error('expected file-offer as the first message'));
             return;

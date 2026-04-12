@@ -168,4 +168,22 @@ describe('TcpClient', () => {
     const savedPath = await savedPathPromise;
     expect(Buffer.compare(readFileSync(savedPath), readFileSync(sourcePath))).toBe(0);
   });
+
+  it('completes a pairing request handshake', async () => {
+    const client = new TcpClient({
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
+    });
+
+    server.once('pair-request', (_request, respond) => {
+      respond.accept();
+    });
+
+    await expect(client.pairWithPeer('127.0.0.1', port)).resolves.toBe(true);
+  });
 });

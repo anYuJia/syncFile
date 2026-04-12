@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, sign, verify, createPrivateKey, createPublicKey } from 'crypto';
 
-import type { FileOfferMessage } from '../transfer/protocol';
+import type { FileOfferMessage, PairRequestMessage } from '../transfer/protocol';
 
 export interface TrustKeypair {
   publicKey: string;
@@ -60,6 +60,41 @@ export function verifyFileOffer(offer: FileOfferMessage): boolean {
   );
 }
 
+export function signPairRequest(
+  request: Omit<PairRequestMessage, 'signature'>,
+  privateKey: string
+): string {
+  const key = createPrivateKey({
+    key: Buffer.from(privateKey, 'base64'),
+    format: 'der',
+    type: 'pkcs8'
+  });
+  return sign(null, Buffer.from(pairRequestPayload(request), 'utf8'), key).toString('base64');
+}
+
+export function verifyPairRequest(request: PairRequestMessage): boolean {
+  if (!request.signature) {
+    return false;
+  }
+
+  if (fingerprintForPublicKey(request.fromDevice.trustPublicKey) !== request.fromDevice.trustFingerprint) {
+    return false;
+  }
+
+  const key = createPublicKey({
+    key: Buffer.from(request.fromDevice.trustPublicKey, 'base64'),
+    format: 'der',
+    type: 'spki'
+  });
+
+  return verify(
+    null,
+    Buffer.from(pairRequestPayload(request), 'utf8'),
+    key,
+    Buffer.from(request.signature, 'base64')
+  );
+}
+
 function fileOfferPayload(offer: Omit<FileOfferMessage, 'signature'>): string {
   return JSON.stringify({
     version: offer.version,
@@ -73,6 +108,20 @@ function fileOfferPayload(offer: Omit<FileOfferMessage, 'signature'>): string {
       name: offer.fromDevice.name,
       trustFingerprint: offer.fromDevice.trustFingerprint,
       trustPublicKey: offer.fromDevice.trustPublicKey
+    }
+  });
+}
+
+function pairRequestPayload(request: Omit<PairRequestMessage, 'signature'>): string {
+  return JSON.stringify({
+    version: request.version,
+    requestId: request.requestId,
+    timestamp: request.timestamp,
+    fromDevice: {
+      deviceId: request.fromDevice.deviceId,
+      name: request.fromDevice.name,
+      trustFingerprint: request.fromDevice.trustFingerprint,
+      trustPublicKey: request.fromDevice.trustPublicKey
     }
   });
 }

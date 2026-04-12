@@ -130,6 +130,33 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
             </button>
           ))}
         </div>
+        {visibleTransfers.some(
+          (item) =>
+            item.direction === 'send' &&
+            ['failed', 'rejected', 'cancelled', 'paused'].includes(item.status) &&
+            Boolean(item.localPath) &&
+            Boolean(item.peerDeviceId)
+        ) && (
+          <button
+            type="button"
+            className="button button-ghost transfer-bulk-action"
+            onClick={() => {
+              void Promise.all(
+                visibleTransfers
+                  .filter(
+                    (item) =>
+                      item.direction === 'send' &&
+                      ['failed', 'rejected', 'cancelled', 'paused'].includes(item.status) &&
+                      Boolean(item.localPath) &&
+                      Boolean(item.peerDeviceId)
+                  )
+                  .map((item) => onRetry(item.transferId))
+              );
+            }}
+          >
+            {messages.taskRetryVisible}
+          </button>
+        )}
         <input
           type="search"
           className="transfer-search"

@@ -44,12 +44,34 @@ export interface FileCancelMessage {
   reason: 'sender-cancelled' | 'receiver-cancelled';
 }
 
+export interface PairRequestMessage {
+  type: 'pair-request';
+  version: typeof PROTOCOL_VERSION;
+  requestId: string;
+  timestamp: number;
+  fromDevice: {
+    deviceId: string;
+    name: string;
+    trustFingerprint: string;
+    trustPublicKey: string;
+  };
+  signature?: string;
+}
+
+export interface PairResponseMessage {
+  type: 'pair-response';
+  requestId: string;
+  accepted: boolean;
+}
+
 export type ProtocolMessage =
   | FileOfferMessage
   | FileAcceptMessage
   | FileRejectMessage
   | FileCompleteMessage
-  | FileCancelMessage;
+  | FileCancelMessage
+  | PairRequestMessage
+  | PairResponseMessage;
 
 export function isFileOffer(msg: ProtocolMessage): msg is FileOfferMessage {
   return msg.type === 'file-offer';
@@ -69,4 +91,12 @@ export function isFileComplete(msg: ProtocolMessage): msg is FileCompleteMessage
 
 export function isFileCancel(msg: ProtocolMessage): msg is FileCancelMessage {
   return msg.type === 'file-cancel';
+}
+
+export function isPairRequest(msg: ProtocolMessage): msg is PairRequestMessage {
+  return msg.type === 'pair-request';
+}
+
+export function isPairResponse(msg: ProtocolMessage): msg is PairResponseMessage {
+  return msg.type === 'pair-response';
 }

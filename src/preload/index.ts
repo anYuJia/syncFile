@@ -4,6 +4,7 @@ import { IpcChannels } from '../shared/ipc-channels';
 import type {
   Device,
   IncomingOffer,
+  PairRequest,
   RejectReason,
   SandboxLocationInfo,
   Settings,
@@ -26,6 +27,9 @@ const api = {
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
   getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
   getPendingOffers: (): Promise<IncomingOffer[]> => ipcRenderer.invoke(IpcChannels.GetPendingOffers),
+  pairDevice: (deviceId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.PairDevice, deviceId),
+  acceptPairRequest: (requestId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.AcceptPairRequest, requestId),
+  rejectPairRequest: (requestId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.RejectPairRequest, requestId),
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
     ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
   pauseTransfer: (transferId: string): Promise<void> =>
@@ -59,7 +63,9 @@ const api = {
   onTransferHistoryReset: (callback: (items: TransferRecord[]) => void): (() => void) =>
     subscribe(IpcChannels.TransferHistoryReset, callback),
   onIncomingOffer: (callback: (offer: IncomingOffer) => void): (() => void) =>
-    subscribe(IpcChannels.IncomingOffer, callback)
+    subscribe(IpcChannels.IncomingOffer, callback),
+  onIncomingPairRequest: (callback: (request: PairRequest) => void): (() => void) =>
+    subscribe(IpcChannels.IncomingPairRequest, callback)
 };
 
 export type SyncFileAPI = typeof api;

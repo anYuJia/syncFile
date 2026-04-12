@@ -61,6 +61,18 @@ export interface IncomingOffer {
   mimeType?: string;
   receivedAt: number;
   saveDirectory: string;
+  stale?: boolean;
+}
+
+export interface PairRequest {
+  requestId: string;
+  fromDevice: {
+    deviceId: string;
+    name: string;
+    trustFingerprint: string;
+    trustPublicKey: string;
+  };
+  receivedAt: number;
 }
 
 export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed' | 'identity-mismatch';
