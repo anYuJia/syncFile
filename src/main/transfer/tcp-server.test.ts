@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { connect } from 'net';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs';
@@ -8,12 +9,14 @@ import { Sandbox } from '../storage/sandbox';
 import { MessageDecoder, encodeMessage } from './codec';
 import type { FileOfferMessage } from './protocol';
 import { isFileCancel, isFileReject } from './protocol';
+import { createTrustKeypair, signFileOffer } from '../security/trust';
 import { TcpServer } from './tcp-server';
 
 describe('TcpServer', () => {
   let root: string;
   let sandbox: Sandbox;
   let server: TcpServer;
+  const senderIdentity = createTrustKeypair();
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'syncfile-srv-'));
@@ -50,13 +53,23 @@ describe('TcpServer', () => {
     const socket = connect(port, '127.0.0.1');
     await new Promise<void>((resolve) => socket.once('connect', resolve));
 
-    const offer: FileOfferMessage = {
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',
       version: 1,
       fileId: 'f1',
       fileName: 'hello.txt',
       fileSize: 5,
-      fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+      sha256: createHash('sha256').update('hello').digest('hex'),
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+    const offer: FileOfferMessage = {
+      ...unsignedOffer,
+      signature: signFileOffer(unsignedOffer, senderIdentity.privateKey)
     };
 
     socket.write(encodeMessage(offer));
@@ -88,14 +101,23 @@ describe('TcpServer', () => {
     const socket = connect(port, '127.0.0.1');
     await new Promise<void>((resolve) => socket.once('connect', resolve));
 
-    socket.write(
-      encodeMessage({
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
         type: 'file-offer',
         version: 1,
         fileId: 'f2',
         fileName: 'x.bin',
         fileSize: 10,
-        fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+        fromDevice: {
+          deviceId: 'dev-a',
+          name: 'A',
+          trustFingerprint: senderIdentity.fingerprint,
+          trustPublicKey: senderIdentity.publicKey
+        }
+      };
+    socket.write(
+      encodeMessage({
+        ...unsignedOffer,
+        signature: signFileOffer(unsignedOffer, senderIdentity.privateKey)
       })
     );
 
@@ -133,14 +155,23 @@ describe('TcpServer', () => {
     const socket = connect(port, '127.0.0.1');
     await new Promise<void>((resolve) => socket.once('connect', resolve));
 
-    socket.write(
-      encodeMessage({
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
         type: 'file-offer',
         version: 1,
         fileId: 'f3',
         fileName: 'x.bin',
         fileSize: 100,
-        fromDevice: { deviceId: 'dev-a', name: 'A', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+        fromDevice: {
+          deviceId: 'dev-a',
+          name: 'A',
+          trustFingerprint: senderIdentity.fingerprint,
+          trustPublicKey: senderIdentity.publicKey
+        }
+      };
+    socket.write(
+      encodeMessage({
+        ...unsignedOffer,
+        signature: signFileOffer(unsignedOffer, senderIdentity.privateKey)
       })
     );
 
@@ -156,5 +187,47 @@ describe('TcpServer', () => {
     });
 
     expect(cancelReason).toBe('receiver-cancelled');
+  });
+
+  it('rejects offers with invalid signatures', async () => {
+    const port = await server.listen(0);
+    const decoder = new MessageDecoder();
+
+    const socket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
+      type: 'file-offer',
+      version: 1,
+      fileId: 'f4',
+      fileName: 'evil.bin',
+      fileSize: 10,
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+
+    socket.write(
+      encodeMessage({
+        ...unsignedOffer,
+        signature: 'broken-signature'
+      })
+    );
+
+    const rejected = await new Promise<string | null>((resolve) => {
+      socket.on('data', (chunk) => {
+        const messages = decoder.push(chunk);
+        const reject = messages.find((message) => isFileReject(message));
+        if (reject && isFileReject(reject)) {
+          resolve(reject.reason);
+        }
+      });
+      setTimeout(() => resolve(null), 1000);
+    });
+
+    expect(rejected).toBe('identity-mismatch');
   });
 });

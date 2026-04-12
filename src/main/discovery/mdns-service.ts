@@ -11,6 +11,7 @@ export interface MdnsServiceOptions {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
     port: number;
     platform: string;
   };
@@ -40,6 +41,7 @@ export class MdnsService {
         deviceId: this.opts.self.deviceId,
         displayName: this.opts.self.name,
         trustFingerprint: this.opts.self.trustFingerprint,
+        trustPublicKey: this.opts.self.trustPublicKey,
         platform: this.opts.self.platform,
         version: MDNS_PROTOCOL_VERSION
       }
@@ -100,6 +102,7 @@ export class MdnsService {
       deviceId,
       name: this.readTxtValue(service.txt, 'displayName') || service.name,
       trustFingerprint: this.readTxtValue(service.txt, 'trustFingerprint') || 'UNKNOWN',
+      trustPublicKey: this.readTxtValue(service.txt, 'trustPublicKey') || '',
       host,
       address,
       port: service.port,

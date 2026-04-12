@@ -11,10 +11,12 @@ export interface FileOfferMessage {
   fileSize: number;
   mimeType?: string;
   sha256?: string;
+  signature?: string;
   fromDevice: {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
   };
 }
 
@@ -27,7 +29,7 @@ export interface FileAcceptMessage {
 export interface FileRejectMessage {
   type: 'file-reject';
   fileId: string;
-  reason: 'user-declined' | 'too-large' | 'type-not-allowed';
+  reason: 'user-declined' | 'too-large' | 'type-not-allowed' | 'identity-mismatch';
 }
 
 export interface FileCompleteMessage {

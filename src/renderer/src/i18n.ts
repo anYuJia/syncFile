@@ -88,6 +88,7 @@ export interface Messages {
   errorOfferNotFound: string;
   errorPeerDeclined: string;
   errorPeerDeclinedTooLarge: string;
+  errorPeerIdentityMismatch: string;
   errorSourceFileChanged: string;
   errorPeerClosedBeforeAccept: string;
   errorPeerClosedBeforeComplete: string;
@@ -229,6 +230,7 @@ const zh: Messages = {
   errorOfferNotFound: '未找到对应的接收请求。',
   errorPeerDeclined: '对方拒绝了这次传输。',
   errorPeerDeclinedTooLarge: '对方因接收容量限制拒绝了这次传输。',
+  errorPeerIdentityMismatch: '对方的设备身份校验失败，这次传输未被接受。',
   errorSourceFileChanged: '源文件已发生变化，无法继续续传，请重新选择文件后再发送。',
   errorPeerClosedBeforeAccept: '对方在接受前关闭了连接。',
   errorPeerClosedBeforeComplete: '对方在传输完成前关闭了连接。',
@@ -368,6 +370,7 @@ const en: Messages = {
   errorOfferNotFound: 'Incoming offer not found.',
   errorPeerDeclined: 'The peer declined this transfer.',
   errorPeerDeclinedTooLarge: 'The peer rejected this transfer because its receive limit was reached.',
+  errorPeerIdentityMismatch: 'The peer identity verification failed and the transfer was rejected.',
   errorSourceFileChanged: 'The source file changed, so this transfer cannot be resumed. Select the file again.',
   errorPeerClosedBeforeAccept: 'The peer closed the connection before accepting.',
   errorPeerClosedBeforeComplete: 'The peer closed the connection before completion.',

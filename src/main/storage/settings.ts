@@ -57,7 +57,9 @@ export class SettingsStore {
               : DEFAULT_SETTINGS.openReceivedFolder,
         trustedDevices:
           Array.isArray(parsed.trustedDevices)
-            ? parsed.trustedDevices.filter(isTrustedDeviceRecord)
+            ? parsed.trustedDevices
+                .map(normalizeTrustedDeviceRecord)
+                .filter((device): device is Settings['trustedDevices'][number] => device !== null)
             : DEFAULT_SETTINGS.trustedDevices
       };
     } catch {
@@ -81,4 +83,21 @@ function isTrustedDeviceRecord(value: unknown): value is Settings['trustedDevice
     candidate.trustFingerprint.length > 0 &&
     typeof candidate.trustedAt === 'number'
   );
+}
+
+function normalizeTrustedDeviceRecord(
+  value: unknown
+): Settings['trustedDevices'][number] | null {
+  if (!isTrustedDeviceRecord(value)) {
+    return null;
+  }
+
+  const candidate = value as Partial<Settings['trustedDevices'][number]>;
+  return {
+    deviceId: candidate.deviceId!,
+    name: candidate.name!,
+    trustFingerprint: candidate.trustFingerprint!,
+    trustPublicKey: typeof candidate.trustPublicKey === 'string' ? candidate.trustPublicKey : '',
+    trustedAt: candidate.trustedAt!
+  };
 }

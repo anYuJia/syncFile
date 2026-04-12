@@ -8,6 +8,7 @@ const MAX_HISTORY = 200;
 export class TransferHistoryStore {
   private readonly configPath: string;
   private readonly records = new Map<string, TransferRecord>();
+  private persistTimer: NodeJS.Timeout | null = null;
 
   constructor(userDataDir: string) {
     this.configPath = join(userDataDir, 'transfer-history.json');
@@ -37,13 +38,17 @@ export class TransferHistoryStore {
     };
     this.records.set(record.transferId, record);
     this.trim();
-    this.persist();
+    if (progress.status === 'pending' || progress.status === 'in-progress') {
+      this.schedulePersist();
+    } else {
+      this.flush();
+    }
     return record;
   }
 
   clear(): void {
     this.records.clear();
-    this.persist();
+    this.flush();
   }
 
   markInterruptedSends(): void {
@@ -60,8 +65,16 @@ export class TransferHistoryStore {
       }
     }
     if (changed) {
-      this.persist();
+      this.flush();
     }
+  }
+
+  flush(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
+    this.persist();
   }
 
   private trim(): void {
@@ -72,6 +85,16 @@ export class TransferHistoryStore {
     for (const record of sorted.slice(MAX_HISTORY)) {
       this.records.delete(record.transferId);
     }
+  }
+
+  private schedulePersist(): void {
+    if (this.persistTimer) {
+      return;
+    }
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.persist();
+    }, 100);
   }
 
   private persist(): void {

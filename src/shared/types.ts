@@ -5,6 +5,7 @@ export interface Device {
   deviceId: string;
   name: string;
   trustFingerprint: string;
+  trustPublicKey: string;
   host: string;
   address: string; // resolved IP address
   port: number;
@@ -39,6 +40,7 @@ export interface TransferProgress {
   receiveMode?: 'manual' | 'trusted-device' | 'auto-accept';
   localPath?: string;
   sourceFileModifiedAt?: number;
+  sourceFileSha256?: string;
   error?: string;
 }
 
@@ -52,6 +54,7 @@ export interface IncomingOffer {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
   };
   fileName: string;
   fileSize: number;
@@ -60,12 +63,13 @@ export interface IncomingOffer {
   saveDirectory: string;
 }
 
-export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed';
+export type RejectReason = 'user-declined' | 'too-large' | 'type-not-allowed' | 'identity-mismatch';
 
 export interface TrustedDevice {
   deviceId: string;
   name: string;
   trustFingerprint: string;
+  trustPublicKey: string;
   trustedAt: number;
 }
 

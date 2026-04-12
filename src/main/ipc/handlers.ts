@@ -23,7 +23,8 @@ import type { SettingsStore } from '../storage/settings';
 import type { TransferHistoryStore } from '../storage/transfer-history';
 import type { DeviceIdentity } from '../storage/device-identity';
 import type { TcpClient } from '../transfer/tcp-client';
-import type { IncomingOfferInfo, OfferResponder, TcpServer } from '../transfer/tcp-server';
+import { sha256File } from '../transfer/file-hash';
+import type { IncomingOfferInfo, OfferResponder, TcpServer, TransferErrorInfo } from '../transfer/tcp-server';
 
 export function sourceFileCanResume(
   previous: Partial<TransferProgress> | undefined,
@@ -46,6 +47,28 @@ export function sourceFileCanResume(
   return previous.fileSize === fileSize && previous.sourceFileModifiedAt === modifiedAt;
 }
 
+export function sourceFileHashCanResume(
+  previous: Partial<TransferProgress> | undefined,
+  filePath: string,
+  fileSize: number,
+  modifiedAt: number,
+  sha256: string
+): boolean {
+  if (!previous) {
+    return true;
+  }
+  if (previous.direction !== 'send') {
+    return true;
+  }
+  if (previous.localPath !== filePath) {
+    return false;
+  }
+  if (typeof previous.sourceFileSha256 === 'string' && previous.sourceFileSha256.length > 0) {
+    return previous.sourceFileSha256 === sha256;
+  }
+  return sourceFileCanResume(previous, filePath, fileSize, modifiedAt);
+}
+
 interface PendingOffer {
   info: IncomingOfferInfo;
   responder: OfferResponder;
@@ -66,6 +89,7 @@ interface OutboundTransferMeta {
   peerDeviceId: string;
   localPath: string;
   sourceFileModifiedAt: number;
+  sourceFileSha256: string;
 }
 
 export interface IpcContext {
@@ -117,6 +141,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     peerDeviceId: meta.peerDeviceId,
     localPath: meta.localPath,
     sourceFileModifiedAt: meta.sourceFileModifiedAt,
+    sourceFileSha256: meta.sourceFileSha256,
     status,
     error
   });
@@ -167,15 +192,26 @@ export function registerIpcHandlers(context: IpcContext): void {
   const isTrustedDevice = (
     deviceId: string,
     trustFingerprint: string,
+    trustPublicKey: string,
     settings: Settings
   ): boolean => {
     return settings.trustedDevices.some(
-      (device) => device.deviceId === deviceId && device.trustFingerprint === trustFingerprint
+      (device) =>
+        device.deviceId === deviceId &&
+        device.trustFingerprint === trustFingerprint &&
+        (device.trustPublicKey.length === 0 || device.trustPublicKey === trustPublicKey)
     );
   };
 
   const resolveReceiveMode = (info: IncomingOfferInfo, settings: Settings): ReceiveMode => {
-    if (isTrustedDevice(info.fromDevice.deviceId, info.fromDevice.trustFingerprint, settings)) {
+    if (
+      isTrustedDevice(
+        info.fromDevice.deviceId,
+        info.fromDevice.trustFingerprint,
+        info.fromDevice.trustPublicKey,
+        settings
+      )
+    ) {
       return 'trusted-device';
     }
     if (settings.autoAccept) {
@@ -205,7 +241,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(
     IpcChannels.SendFile,
-    (_event, deviceId: string, filePath: string, existingTransferId?: string): TransferId => {
+    async (_event, deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> => {
     const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
     if (!device) {
       throw new Error(`device ${deviceId} not found`);
@@ -215,9 +251,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     const fileName = basename(filePath);
     const fileStats = statSync(filePath);
     const fileSize = fileStats.size;
+    const fileSha256 = await sha256File(filePath);
     if (existingTransferId) {
       const previous = context.transferHistoryStore.get(existingTransferId);
-      if (!sourceFileCanResume(previous, filePath, fileSize, fileStats.mtimeMs)) {
+      if (!sourceFileHashCanResume(previous, filePath, fileSize, fileStats.mtimeMs, fileSha256)) {
         throw new Error('source file changed; cannot resume transfer');
       }
     }
@@ -228,7 +265,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       peerDeviceName: device.name,
       peerDeviceId: device.deviceId,
       localPath: filePath,
-      sourceFileModifiedAt: fileStats.mtimeMs
+      sourceFileModifiedAt: fileStats.mtimeMs,
+      sourceFileSha256: fileSha256
     };
 
     outboundTransfers.set(transferId, meta);
@@ -239,7 +277,8 @@ export function registerIpcHandlers(context: IpcContext): void {
         host: device.address,
         port: device.port,
         filePath,
-        fileId: transferId
+        fileId: transferId,
+        sha256: fileSha256
       })
       .then(() => {
         const currentMeta = outboundTransfers.get(transferId) ?? meta;
@@ -503,16 +542,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     completedOrAcceptedOffers.delete(info.offerId);
   });
 
-  context.tcpServer.on('transfer-error', (error) => {
+  context.tcpServer.on('transfer-error', (info: TransferErrorInfo) => {
     publishTransferEvent(IpcChannels.TransferProgress, {
-      transferId: randomUUID(),
+      transferId: info.offerId ?? randomUUID(),
       direction: 'receive',
-      fileName: 'incoming file',
-      fileSize: 0,
-      bytesTransferred: 0,
-      peerDeviceName: '',
+      fileName: info.fileName ?? 'incoming file',
+      fileSize: info.fileSize ?? 0,
+      bytesTransferred: info.bytesReceived ?? 0,
+      peerDeviceName: info.fromDevice?.name ?? '',
+      peerDeviceId: info.fromDevice?.deviceId,
       status: 'failed',
-      error: error.message
+      error: info.error.message
     } satisfies TransferProgress);
   });
 
@@ -525,7 +565,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       peerDeviceName: meta?.peerDeviceName ?? '',
       peerDeviceId: meta?.peerDeviceId ?? '',
       localPath: meta?.localPath ?? '',
-      sourceFileModifiedAt: meta?.sourceFileModifiedAt ?? 0
+      sourceFileModifiedAt: meta?.sourceFileModifiedAt ?? 0,
+      sourceFileSha256: meta?.sourceFileSha256 ?? ''
     };
     const currentMeta = meta ?? fallbackMeta;
     publishTransferEvent(

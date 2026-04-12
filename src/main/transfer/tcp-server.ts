@@ -1,8 +1,10 @@
-import { createWriteStream, type WriteStream } from 'fs';
+import { createWriteStream, rmSync, type WriteStream } from 'fs';
 import { createServer, type Server, type Socket } from 'net';
 import { EventEmitter } from 'events';
 
 import type { Sandbox } from '../storage/sandbox';
+import { sha256File } from './file-hash';
+import { verifyFileOffer } from '../security/trust';
 import { MessageDecoder, encodeMessage } from './codec';
 import {
   isFileCancel,
@@ -29,6 +31,7 @@ export interface IncomingOfferInfo {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
   };
 }
 
@@ -46,6 +49,7 @@ export interface TransferCompleteInfo {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
   };
 }
 
@@ -58,7 +62,22 @@ export interface ReceiveProgressInfo {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
   };
+}
+
+export interface TransferErrorInfo {
+  error: Error;
+  offerId?: string;
+  fileName?: string;
+  fileSize?: number;
+  fromDevice?: {
+    deviceId: string;
+    name: string;
+    trustFingerprint: string;
+    trustPublicKey: string;
+  };
+  bytesReceived?: number;
 }
 
 export interface TcpServerEvents {
@@ -66,7 +85,7 @@ export interface TcpServerEvents {
   progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
   'transfer-cancelled': (info: ReceiveProgressInfo & { reason: 'sender-cancelled' | 'receiver-cancelled' }) => void;
-  'transfer-error': (error: Error) => void;
+  'transfer-error': (info: TransferErrorInfo) => void;
 }
 
 export declare interface TcpServer {
@@ -171,7 +190,14 @@ export class TcpServer extends EventEmitter {
         this.activeReceives.delete(offer.fileId);
         this.options.sandbox.discardIncomingResume(offer.fileId, true);
       }
-      this.emit('transfer-error', error);
+      this.emit('transfer-error', {
+        error,
+        offerId: offer?.fileId,
+        fileName: offer?.fileName,
+        fileSize: offer?.fileSize,
+        fromDevice: offer?.fromDevice,
+        bytesReceived
+      });
       socket.destroy();
     };
 
@@ -192,18 +218,46 @@ export class TcpServer extends EventEmitter {
       }
       if (settled) return;
 
-      settled = true;
       phase = 'completed';
       const finalOffer = offer;
       writeStream.end(() => {
         this.activeReceives.delete(finalOffer.fileId);
         const savedPath = this.options.sandbox.completeIncomingResume(finalOffer.fileId);
-        this.emit('transfer-complete', {
-          offerId: finalOffer.fileId,
-          savedPath,
-          bytesReceived,
-          fromDevice: finalOffer.fromDevice
-        });
+        void sha256File(savedPath)
+          .then((digest) => {
+            if (finalOffer.sha256 && finalOffer.sha256 !== digest) {
+              rmSync(savedPath, { force: true });
+              settled = true;
+              this.emit('transfer-error', {
+                error: new Error('received file failed integrity verification'),
+                offerId: finalOffer.fileId,
+                fileName: finalOffer.fileName,
+                fileSize: finalOffer.fileSize,
+                fromDevice: finalOffer.fromDevice,
+                bytesReceived
+              });
+              return;
+            }
+            settled = true;
+            this.emit('transfer-complete', {
+              offerId: finalOffer.fileId,
+              savedPath,
+              bytesReceived,
+              fromDevice: finalOffer.fromDevice
+            });
+          })
+          .catch((error) => {
+            rmSync(savedPath, { force: true });
+            settled = true;
+            this.emit('transfer-error', {
+              error: error as Error,
+              offerId: finalOffer.fileId,
+              fileName: finalOffer.fileName,
+              fileSize: finalOffer.fileSize,
+              fromDevice: finalOffer.fromDevice,
+              bytesReceived
+            });
+          });
       });
     };
 
@@ -385,6 +439,19 @@ export class TcpServer extends EventEmitter {
             fail(new Error('expected file-offer as the first message'));
             return;
           }
+          if (!verifyFileOffer(first)) {
+            settled = true;
+            phase = 'rejected';
+            socket.write(
+              encodeMessage({
+                type: 'file-reject',
+                fileId: first.fileId,
+                reason: 'identity-mismatch'
+              })
+            );
+            socket.destroySoon();
+            return;
+          }
           if (rest.length > 0) {
             fail(new Error('unexpected extra control messages before file transfer'));
             return;
@@ -443,7 +510,14 @@ export class TcpServer extends EventEmitter {
 
     socket.on('error', (error) => {
       if (!settled) {
-        this.emit('transfer-error', error);
+        this.emit('transfer-error', {
+          error,
+          offerId: offer?.fileId,
+          fileName: offer?.fileName,
+          fileSize: offer?.fileSize,
+          fromDevice: offer?.fromDevice,
+          bytesReceived
+        });
       }
     });
 
@@ -461,7 +535,10 @@ export class TcpServer extends EventEmitter {
             reason: 'sender-cancelled'
           });
         } else {
-          this.emit('transfer-error', new Error('socket closed before transfer completed'));
+          this.emit('transfer-error', {
+            error: new Error('socket closed before transfer completed'),
+            bytesReceived
+          });
         }
         writeStream?.end();
       }

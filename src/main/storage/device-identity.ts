@@ -1,12 +1,16 @@
-import { randomBytes, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { hostname } from 'os';
 import { dirname, join } from 'path';
+
+import { createTrustKeypair } from '../security/trust';
 
 export interface DeviceIdentity {
   deviceId: string;
   name: string;
   trustFingerprint: string;
+  trustPublicKey: string;
+  trustPrivateKey: string;
 }
 
 /**
@@ -21,15 +25,27 @@ export function loadOrCreateIdentity(userDataDir: string): DeviceIdentity {
       const raw = readFileSync(identityPath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<DeviceIdentity>;
       if (parsed.deviceId && parsed.name) {
+        const keypair =
+          typeof parsed.trustPublicKey === 'string' &&
+          parsed.trustPublicKey.length > 0 &&
+          typeof parsed.trustPrivateKey === 'string' &&
+          parsed.trustPrivateKey.length > 0 &&
+          typeof parsed.trustFingerprint === 'string' &&
+          parsed.trustFingerprint.length > 0
+            ? {
+                publicKey: parsed.trustPublicKey,
+                privateKey: parsed.trustPrivateKey,
+                fingerprint: parsed.trustFingerprint
+              }
+            : createTrustKeypair();
         const identity: DeviceIdentity = {
           deviceId: parsed.deviceId,
           name: parsed.name,
-          trustFingerprint:
-            typeof parsed.trustFingerprint === 'string' && parsed.trustFingerprint.length > 0
-              ? parsed.trustFingerprint
-              : createTrustFingerprint()
+          trustFingerprint: keypair.fingerprint,
+          trustPublicKey: keypair.publicKey,
+          trustPrivateKey: keypair.privateKey
         };
-        if (!parsed.trustFingerprint) {
+        if (!parsed.trustFingerprint || !parsed.trustPublicKey || !parsed.trustPrivateKey) {
           mkdirSync(dirname(identityPath), { recursive: true });
           writeFileSync(identityPath, JSON.stringify(identity, null, 2), 'utf8');
         }
@@ -40,18 +56,16 @@ export function loadOrCreateIdentity(userDataDir: string): DeviceIdentity {
     }
   }
 
+  const keypair = createTrustKeypair();
   const identity: DeviceIdentity = {
     deviceId: randomUUID(),
     name: hostname(),
-    trustFingerprint: createTrustFingerprint()
+    trustFingerprint: keypair.fingerprint,
+    trustPublicKey: keypair.publicKey,
+    trustPrivateKey: keypair.privateKey
   };
 
   mkdirSync(dirname(identityPath), { recursive: true });
   writeFileSync(identityPath, JSON.stringify(identity, null, 2), 'utf8');
   return identity;
-}
-
-function createTrustFingerprint(): string {
-  const hex = randomBytes(8).toString('hex').toUpperCase();
-  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
 }

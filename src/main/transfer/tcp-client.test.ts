@@ -4,6 +4,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { Sandbox } from '../storage/sandbox';
+import { createTrustKeypair } from '../security/trust';
+import { sha256File } from './file-hash';
 import { TcpClient } from './tcp-client';
 import { TcpServer } from './tcp-server';
 
@@ -12,6 +14,7 @@ describe('TcpClient', () => {
   let sandbox: Sandbox;
   let server: TcpServer;
   let port: number;
+  const clientIdentity = createTrustKeypair();
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'syncfile-cli-'));
@@ -31,7 +34,13 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, 'hello world');
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
     });
 
     const progressEvents: number[] = [];
@@ -46,7 +55,8 @@ describe('TcpClient', () => {
     await client.sendFile({
       host: '127.0.0.1',
       port,
-      filePath: sourcePath
+      filePath: sourcePath,
+      sha256: await sha256File(sourcePath)
     });
 
     const savedPath = await savedPathPromise;
@@ -63,11 +73,17 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, 'data');
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'cli', name: 'cli', trustFingerprint: '1111-2222-3333-4444' }
+      selfDevice: {
+        deviceId: 'cli',
+        name: 'cli',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
     });
 
     await expect(
-      client.sendFile({ host: '127.0.0.1', port, filePath: sourcePath })
+      client.sendFile({ host: '127.0.0.1', port, filePath: sourcePath, sha256: await sha256File(sourcePath) })
     ).rejects.toThrow(/declined/i);
   });
 
@@ -76,7 +92,13 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 7));
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
     });
 
     let cancelled = false;
@@ -91,7 +113,8 @@ describe('TcpClient', () => {
         host: '127.0.0.1',
         port,
         filePath: sourcePath,
-        fileId: 'cancel-me'
+        fileId: 'cancel-me',
+        sha256: await sha256File(sourcePath)
       })
     ).rejects.toThrow(/cancelled/i);
     expect(cancelled).toBe(true);
@@ -102,7 +125,13 @@ describe('TcpClient', () => {
     writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 9));
 
     const client = new TcpClient({
-      selfDevice: { deviceId: 'client-device', name: 'Client', trustFingerprint: 'AAAA-BBBB-CCCC-DDDD' }
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
     });
 
     let cancelled = false;
@@ -117,7 +146,8 @@ describe('TcpClient', () => {
         host: '127.0.0.1',
         port,
         filePath: sourcePath,
-        fileId: 'resume-me'
+        fileId: 'resume-me',
+        sha256: await sha256File(sourcePath)
       })
     ).rejects.toThrow(/cancelled/i);
 
@@ -131,7 +161,8 @@ describe('TcpClient', () => {
       host: '127.0.0.1',
       port,
       filePath: sourcePath,
-      fileId: 'resume-me'
+      fileId: 'resume-me',
+      sha256: await sha256File(sourcePath)
     });
 
     const savedPath = await savedPathPromise;

@@ -230,6 +230,7 @@ export function App(): JSX.Element {
             deviceId: offer.fromDevice.deviceId,
             name: offer.fromDevice.name,
             trustFingerprint: offer.fromDevice.trustFingerprint,
+            trustPublicKey: offer.fromDevice.trustPublicKey,
             trustedAt: Date.now()
           }
         ]);
@@ -257,6 +258,7 @@ export function App(): JSX.Element {
           deviceId: device.deviceId,
           name: device.name,
           trustFingerprint: device.trustFingerprint,
+          trustPublicKey: device.trustPublicKey,
           trustedAt: Date.now()
         }
       ]);

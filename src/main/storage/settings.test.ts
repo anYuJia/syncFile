@@ -59,7 +59,7 @@ describe('SettingsStore', () => {
         autoAcceptMaxSizeMB: 32,
         openReceivedFolder: false,
         trustedDevices: [
-          { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustedAt: 1234567890 }
+          { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 }
         ]
       }),
       'utf8'
@@ -68,7 +68,7 @@ describe('SettingsStore', () => {
     const store = new SettingsStore(root);
 
     expect(store.get().trustedDevices).toEqual([
-      { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustedAt: 1234567890 }
+      { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 }
     ]);
   });
 
@@ -77,8 +77,8 @@ describe('SettingsStore', () => {
       join(root, 'settings.json'),
       JSON.stringify({
         trustedDevices: [
-          { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustedAt: 1234567890 },
-          { deviceId: '', name: 'bad', trustFingerprint: 'FFFF-FFFF-FFFF-FFFF', trustedAt: 1 },
+          { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 },
+          { deviceId: '', name: 'bad', trustFingerprint: 'FFFF-FFFF-FFFF-FFFF', trustPublicKey: 'PUBKEY2', trustedAt: 1 },
           { deviceId: 'dev-2', name: 'missing-time' }
         ]
       }),
@@ -88,7 +88,25 @@ describe('SettingsStore', () => {
     const store = new SettingsStore(root);
 
     expect(store.get().trustedDevices).toEqual([
-      { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustedAt: 1234567890 }
+      { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 }
+    ]);
+  });
+
+  it('migrates trusted devices without public keys', () => {
+    writeFileSync(
+      join(root, 'settings.json'),
+      JSON.stringify({
+        trustedDevices: [
+          { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustedAt: 1234567890 }
+        ]
+      }),
+      'utf8'
+    );
+
+    const store = new SettingsStore(root);
+
+    expect(store.get().trustedDevices).toEqual([
+      { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: '', trustedAt: 1234567890 }
     ]);
   });
 });

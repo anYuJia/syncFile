@@ -23,7 +23,12 @@ describe('encodeMessage', () => {
       fileId: 'id-unicode',
       fileName: '报告📄.pdf',
       fileSize: 10,
-      fromDevice: { deviceId: 'd-1', name: '测试设备', trustFingerprint: 'ABCD-1234-5678-90EF' }
+      fromDevice: {
+        deviceId: 'd-1',
+        name: '测试设备',
+        trustFingerprint: 'ABCD-1234-5678-90EF',
+        trustPublicKey: 'PUBKEY1'
+      }
     } as const;
 
     const encoded = encodeMessage(message);
@@ -56,7 +61,12 @@ describe('MessageDecoder', () => {
       fileId: 'split',
       fileName: '报告.pdf',
       fileSize: 123,
-      fromDevice: { deviceId: 'dev-a', name: '设备A', trustFingerprint: 'ABCD-1234-5678-90EF' }
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: '设备A',
+        trustFingerprint: 'ABCD-1234-5678-90EF',
+        trustPublicKey: 'PUBKEY1'
+      }
     });
 
     const c1 = encoded.subarray(0, 2);
@@ -76,7 +86,12 @@ describe('MessageDecoder', () => {
       fileId: 'split',
       fileName: '报告.pdf',
       fileSize: 123,
-      fromDevice: { deviceId: 'dev-a', name: '设备A', trustFingerprint: 'ABCD-1234-5678-90EF' }
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: '设备A',
+        trustFingerprint: 'ABCD-1234-5678-90EF',
+        trustPublicKey: 'PUBKEY1'
+      }
     });
   });
 

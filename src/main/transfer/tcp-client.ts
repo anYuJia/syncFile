@@ -6,6 +6,7 @@ import { connect, type Socket } from 'net';
 import type { ReadStream } from 'fs';
 
 import { MessageDecoder, encodeMessage } from './codec';
+import { signFileOffer } from '../security/trust';
 import {
   isFileAccept,
   isFileCancel,
@@ -18,6 +19,8 @@ export interface TcpClientOptions {
     deviceId: string;
     name: string;
     trustFingerprint: string;
+    trustPublicKey: string;
+    trustPrivateKey: string;
   };
 }
 
@@ -26,6 +29,7 @@ export interface SendFileParams {
   port: number;
   filePath: string;
   fileId?: string;
+  sha256: string;
 }
 
 export interface SendFileResult {
@@ -101,13 +105,18 @@ export class TcpClient extends EventEmitter {
     const socket = await openSocket(params.host, params.port);
     const decoder = new MessageDecoder();
 
-    const offer: FileOfferMessage = {
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',
       version: 1,
       fileId,
       fileName,
       fileSize: stats.size,
+      sha256: params.sha256,
       fromDevice: this.options.selfDevice
+    };
+    const offer: FileOfferMessage = {
+      ...unsignedOffer,
+      signature: signFileOffer(unsignedOffer, this.options.selfDevice.trustPrivateKey)
     };
 
     await new Promise<void>((resolve, reject) => {

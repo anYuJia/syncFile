@@ -21,6 +21,7 @@ const DEFAULT_TRANSFER_PORT = 43434;
 let mainWindow: BrowserWindow | null = null;
 let tcpServer: TcpServer | null = null;
 let mdnsService: MdnsService | null = null;
+let transferHistoryStore: TransferHistoryStore | null = null;
 let cleanupPromise: Promise<void> | null = null;
 let ipcRegistered = false;
 
@@ -63,7 +64,7 @@ async function bootstrap(): Promise<void> {
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const settingsStore = new SettingsStore(userDataDir);
-  const transferHistoryStore = new TransferHistoryStore(userDataDir);
+  transferHistoryStore = new TransferHistoryStore(userDataDir);
   recoverTransferState(transferHistoryStore, sandbox);
   const registry = new DeviceRegistry();
 
@@ -76,7 +77,9 @@ async function bootstrap(): Promise<void> {
     selfDevice: {
       deviceId: identity.deviceId,
       name: identity.name,
-      trustFingerprint: identity.trustFingerprint
+      trustFingerprint: identity.trustFingerprint,
+      trustPublicKey: identity.trustPublicKey,
+      trustPrivateKey: identity.trustPrivateKey
     }
   });
 
@@ -86,6 +89,7 @@ async function bootstrap(): Promise<void> {
       deviceId: identity.deviceId,
       name: identity.name,
       trustFingerprint: identity.trustFingerprint,
+      trustPublicKey: identity.trustPublicKey,
       port: actualPort,
       platform: getPlatform()
     }
@@ -98,6 +102,7 @@ async function bootstrap(): Promise<void> {
     deviceId: identity.deviceId,
     name: identity.name,
     trustFingerprint: identity.trustFingerprint,
+    trustPublicKey: identity.trustPublicKey,
     host: 'localhost',
     address: '127.0.0.1',
     port: actualPort,
@@ -147,6 +152,8 @@ async function cleanup(): Promise<void> {
       await mdnsService.stop();
       mdnsService = null;
     }
+
+    transferHistoryStore?.flush();
 
     if (tcpServer) {
       await tcpServer.close();
