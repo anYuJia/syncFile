@@ -230,4 +230,46 @@ describe('TcpServer', () => {
 
     expect(rejected).toBe('identity-mismatch');
   });
+
+  it('emits a paused event when the sender disconnects mid-transfer', async () => {
+    const port = await server.listen(0);
+
+    server.on('incoming-offer', (_offer, respond) => {
+      respond.accept();
+    });
+
+    const pausedPromise = new Promise<number>((resolve) => {
+      server.once('transfer-paused', (info) => resolve(info.bytesReceived));
+    });
+
+    const socket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
+      type: 'file-offer',
+      version: 1,
+      fileId: 'f5',
+      fileName: 'partial.bin',
+      fileSize: 16,
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+
+    socket.write(
+      encodeMessage({
+        ...unsignedOffer,
+        signature: signFileOffer(unsignedOffer, senderIdentity.privateKey)
+      })
+    );
+
+    await new Promise<void>((resolve) => socket.once('data', () => resolve()));
+    socket.write(Buffer.from('partial-data'));
+    socket.destroy();
+
+    await expect(pausedPromise).resolves.toBeGreaterThan(0);
+  });
 });

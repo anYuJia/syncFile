@@ -109,4 +109,29 @@ describe('SettingsStore', () => {
       { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: '', trustedAt: 1234567890 }
     ]);
   });
+
+  it('normalizes saved values and deduplicates trusted devices', () => {
+    const store = new SettingsStore(root);
+
+    const saved = store.save({
+      maxSandboxSizeMB: 1,
+      autoAcceptMaxSizeMB: 999999,
+      trustedDevices: [
+        { deviceId: 'dev-2', name: 'Beta', trustFingerprint: 'FFFF-0000-AAAA-BBBB', trustPublicKey: 'PUB2', trustedAt: 2 },
+        { deviceId: 'dev-1', name: 'Alpha', trustFingerprint: 'AAAA-0000-BBBB-CCCC', trustPublicKey: 'PUB1', trustedAt: 1 },
+        { deviceId: 'dev-1', name: 'Alpha', trustFingerprint: 'AAAA-0000-BBBB-CCCC', trustPublicKey: 'PUB1', trustedAt: 3 }
+      ]
+    });
+
+    expect(saved).toEqual({
+      maxSandboxSizeMB: 64,
+      autoAccept: false,
+      autoAcceptMaxSizeMB: 102400,
+      openReceivedFolder: false,
+      trustedDevices: [
+        { deviceId: 'dev-1', name: 'Alpha', trustFingerprint: 'AAAA-0000-BBBB-CCCC', trustPublicKey: 'PUB1', trustedAt: 3 },
+        { deviceId: 'dev-2', name: 'Beta', trustFingerprint: 'FFFF-0000-AAAA-BBBB', trustPublicKey: 'PUB2', trustedAt: 2 }
+      ]
+    });
+  });
 });

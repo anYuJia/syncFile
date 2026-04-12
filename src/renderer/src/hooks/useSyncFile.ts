@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { startTransition, useEffect, useMemo, useState } from 'react';
 
 import type {
   Device,
@@ -150,7 +150,9 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     };
 
     const offTransferProgress = window.syncFile.onTransferProgress((progress) => {
-      applyTransferEvent(progress);
+      startTransition(() => {
+        applyTransferEvent(progress);
+      });
     });
 
     const offTransferComplete = window.syncFile.onTransferComplete((progress) => {
@@ -168,7 +170,10 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     };
   }, [messages]);
 
-  const transfers = Object.values(transferMap).sort((a, b) => b.updatedAt - a.updatedAt);
+  const transfers = useMemo(
+    () => Object.values(transferMap).sort((a, b) => b.updatedAt - a.updatedAt),
+    [transferMap]
+  );
 
   async function sendFile(
     deviceId: string,
@@ -298,6 +303,15 @@ function localizeError(error: unknown, messages: Messages): string | null {
   }
   if (message.includes('source file changed')) {
     return messages.errorSourceFileChanged;
+  }
+  if (message.includes('connection timed out')) {
+    return messages.errorConnectionTimedOut;
+  }
+  if (message.includes('did not respond in time')) {
+    return messages.errorPeerNoResponse;
+  }
+  if (message.includes('transfer timed out')) {
+    return messages.errorTransferTimedOut;
   }
   if (message.includes('peer declined')) {
     return messages.errorPeerDeclined;

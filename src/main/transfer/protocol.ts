@@ -41,7 +41,7 @@ export interface FileCompleteMessage {
 export interface FileCancelMessage {
   type: 'file-cancel';
   fileId: string;
-  reason: 'sender-cancelled' | 'receiver-cancelled';
+  reason: 'sender-cancelled' | 'sender-paused' | 'receiver-cancelled';
 }
 
 export interface PairRequestMessage {

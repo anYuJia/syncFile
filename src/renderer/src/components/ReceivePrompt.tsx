@@ -1,5 +1,6 @@
 import type { IncomingOffer } from '@shared/types';
 import type { Messages } from '../i18n';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ReceivePromptProps {
   offer: IncomingOffer;
@@ -35,13 +36,21 @@ export function ReceivePrompt({
   onReject,
   messages
 }: ReceivePromptProps): JSX.Element {
+  const dialogRef = useDialogA11y(() => {
+    if (!busy) {
+      void onReject(offer.offerId);
+    }
+  });
+
   return (
     <div className="receive-prompt-overlay" role="presentation">
       <div
+        ref={dialogRef}
         className="receive-prompt"
         role="dialog"
         aria-modal="true"
         aria-label={messages.incomingFileRequestAriaLabel}
+        tabIndex={-1}
       >
         <div className="receive-prompt-stamp">{messages.incomingFileRequest}</div>
         <h3 className="receive-prompt-title">{offer.fileName}</h3>

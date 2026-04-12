@@ -16,6 +16,10 @@ import {
   type PairRequestMessage
 } from './protocol';
 
+const DEFAULT_CONNECT_TIMEOUT_MS = 8000;
+const DEFAULT_RESPONSE_TIMEOUT_MS = 15000;
+const DEFAULT_IDLE_TIMEOUT_MS = 30000;
+
 export interface TcpClientOptions {
   selfDevice: {
     deviceId: string;
@@ -24,6 +28,9 @@ export interface TcpClientOptions {
     trustPublicKey: string;
     trustPrivateKey: string;
   };
+  connectTimeoutMs?: number;
+  responseTimeoutMs?: number;
+  idleTimeoutMs?: number;
 }
 
 export interface SendFileParams {
@@ -48,9 +55,9 @@ export interface ProgressEvent {
 }
 
 interface ActiveTransfer {
-  socket: Socket;
+  socket: Socket | null;
   stream: ReadStream | null;
-  cancelled: boolean;
+  intent: 'pause' | 'cancel' | null;
   accepted: boolean;
 }
 
@@ -69,21 +76,33 @@ export class TcpClient extends EventEmitter {
   }
 
   cancel(fileId: string): boolean {
+    return this.interrupt(fileId, 'cancel');
+  }
+
+  pause(fileId: string): boolean {
+    return this.interrupt(fileId, 'pause');
+  }
+
+  private interrupt(fileId: string, intent: ActiveTransfer['intent']): boolean {
     const transfer = this.activeTransfers.get(fileId);
     if (!transfer) {
       return false;
     }
 
-    transfer.cancelled = true;
+    transfer.intent = intent;
+    if (!transfer.socket) {
+      return true;
+    }
+
     if (!transfer.accepted) {
       try {
         transfer.socket.write(
           encodeMessage({
             type: 'file-cancel',
             fileId,
-            reason: 'sender-cancelled'
+            reason: intent === 'pause' ? 'sender-paused' : 'sender-cancelled'
           }),
-          () => transfer.socket.end()
+          () => transfer.socket?.end()
         );
       } catch {
         // Best effort only.
@@ -91,9 +110,9 @@ export class TcpClient extends EventEmitter {
     } else {
       transfer.socket.destroy();
     }
-    transfer.stream?.destroy(new Error('transfer cancelled'));
+    transfer.stream?.destroy(new Error(intent === 'pause' ? 'transfer paused' : 'transfer cancelled'));
     setTimeout(() => {
-      if (!transfer.socket.destroyed) {
+      if (transfer.socket && !transfer.socket.destroyed) {
         transfer.socket.destroy();
       }
     }, 200);
@@ -104,8 +123,14 @@ export class TcpClient extends EventEmitter {
     const stats = statSync(params.filePath);
     const fileId = params.fileId ?? randomUUID();
     const fileName = basename(params.filePath);
-    const socket = await openSocket(params.host, params.port);
     const decoder = new MessageDecoder();
+    const activeTransfer: ActiveTransfer = {
+      socket: null,
+      stream: null,
+      intent: null,
+      accepted: false
+    };
+    this.activeTransfers.set(fileId, activeTransfer);
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',
@@ -121,97 +146,129 @@ export class TcpClient extends EventEmitter {
       signature: signFileOffer(unsignedOffer, this.options.selfDevice.trustPrivateKey)
     };
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const activeTransfer: ActiveTransfer = {
-        socket,
-        stream: null,
-        cancelled: false,
-        accepted: false
-      };
-      this.activeTransfers.set(fileId, activeTransfer);
+    try {
+      const socket = await openSocket(
+        params.host,
+        params.port,
+        this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
+      );
+      activeTransfer.socket = socket;
+      socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
 
-      const cleanup = (): void => {
-        this.activeTransfers.delete(fileId);
-        socket.off('data', onData);
-        socket.off('error', onError);
-        socket.off('close', onClose);
-      };
-
-      const fail = (error: Error): void => {
-        if (settled) return;
-        settled = true;
-        cleanup();
+      if (activeTransfer.intent) {
         socket.destroy();
-        reject(activeTransfer.cancelled ? new Error('transfer cancelled') : error);
-      };
+        throw new Error(intentErrorMessage(activeTransfer.intent));
+      }
 
-      const finish = (): void => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        socket.end(() => resolve());
-      };
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let responseTimer: NodeJS.Timeout | null = setTimeout(() => {
+          responseTimer = null;
+          fail(new Error('peer did not respond in time'));
+        }, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
 
-      const onData = (chunk: Buffer): void => {
-        try {
-          const messages = decoder.push(chunk);
-          for (const message of messages) {
-            if (isFileAccept(message) && message.fileId === fileId) {
-              activeTransfer.accepted = true;
-              this.streamFile(
-                socket,
-                params.filePath,
-                fileId,
-                fileName,
-                stats.size,
-                message.startOffset ?? 0
-              )
-                .then(finish)
-                .catch((error) => fail(error as Error));
-              return;
-            }
-
-            if (isFileCancel(message) && message.fileId === fileId) {
-              activeTransfer.cancelled = true;
-              fail(new Error(`peer cancelled transfer: ${message.reason}`));
-              return;
-            }
-
-            if (isFileReject(message) && message.fileId === fileId) {
-              fail(new Error(`peer declined transfer: ${message.reason}`));
-              return;
-            }
-
-            fail(new Error(`unexpected message from peer: ${message.type}`));
-            return;
+        const cleanup = (): void => {
+          if (responseTimer) {
+            clearTimeout(responseTimer);
+            responseTimer = null;
           }
-        } catch (error) {
-          fail(error as Error);
-        }
-      };
+          socket.off('data', onData);
+          socket.off('error', onError);
+          socket.off('close', onClose);
+          socket.off('timeout', onTimeout);
+          socket.setTimeout(0);
+        };
 
-      const onError = (error: Error): void => {
-        fail(error);
-      };
+        const fail = (error: Error): void => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          socket.destroy();
+          reject(errorForTransferIntent(activeTransfer.intent, error));
+        };
 
-      const onClose = (): void => {
-        if (!settled) {
-          fail(
-            new Error(
-              activeTransfer.accepted
-                ? 'peer closed connection before transfer completed'
-                : 'peer closed connection before accepting the offer'
-            )
-          );
-        }
-      };
+        const finish = (): void => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          socket.end(() => resolve());
+        };
 
-      socket.on('data', onData);
-      socket.once('error', onError);
-      socket.once('close', onClose);
-      socket.write(encodeMessage(offer));
-    });
+        const onData = (chunk: Buffer): void => {
+          try {
+            const messages = decoder.push(chunk);
+            for (const message of messages) {
+              if (isFileAccept(message) && message.fileId === fileId) {
+                activeTransfer.accepted = true;
+                if (responseTimer) {
+                  clearTimeout(responseTimer);
+                  responseTimer = null;
+                }
+                if (activeTransfer.intent) {
+                  socket.destroy();
+                  fail(new Error(intentErrorMessage(activeTransfer.intent)));
+                  return;
+                }
+                this.streamFile(
+                  socket,
+                  params.filePath,
+                  fileId,
+                  fileName,
+                  stats.size,
+                  message.startOffset ?? 0
+                )
+                  .then(finish)
+                  .catch((error) => fail(error as Error));
+                return;
+              }
+
+              if (isFileCancel(message) && message.fileId === fileId) {
+                fail(new Error(`peer cancelled transfer: ${message.reason}`));
+                return;
+              }
+
+              if (isFileReject(message) && message.fileId === fileId) {
+                fail(new Error(`peer declined transfer: ${message.reason}`));
+                return;
+              }
+
+              fail(new Error(`unexpected message from peer: ${message.type}`));
+              return;
+            }
+          } catch (error) {
+            fail(error as Error);
+          }
+        };
+
+        const onError = (error: Error): void => {
+          fail(error);
+        };
+
+        const onClose = (): void => {
+          if (!settled) {
+            fail(
+              new Error(
+                activeTransfer.accepted
+                  ? 'peer closed connection before transfer completed'
+                  : 'peer closed connection before accepting the offer'
+              )
+            );
+          }
+        };
+
+        const onTimeout = (): void => {
+          fail(new Error('transfer timed out'));
+        };
+
+        socket.on('data', onData);
+        socket.once('error', onError);
+        socket.once('close', onClose);
+        socket.once('timeout', onTimeout);
+        socket.write(encodeMessage(offer));
+      });
+    } finally {
+      this.activeTransfers.delete(fileId);
+    }
 
     return {
       fileId,
@@ -221,7 +278,11 @@ export class TcpClient extends EventEmitter {
   }
 
   async pairWithPeer(host: string, port: number): Promise<boolean> {
-    const socket = await openSocket(host, port);
+    const socket = await openSocket(
+      host,
+      port,
+      this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
+    );
     const decoder = new MessageDecoder();
     const unsignedRequest: Omit<PairRequestMessage, 'signature'> = {
       type: 'pair-request',
@@ -236,10 +297,32 @@ export class TcpClient extends EventEmitter {
     };
 
     return await new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      let responseTimer: NodeJS.Timeout | null = setTimeout(() => {
+        responseTimer = null;
+        fail(new Error('pairing timed out'));
+      }, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
+
       const cleanup = (): void => {
+        if (responseTimer) {
+          clearTimeout(responseTimer);
+          responseTimer = null;
+        }
         socket.off('data', onData);
         socket.off('error', onError);
         socket.off('close', onClose);
+        socket.off('timeout', onTimeout);
+        socket.setTimeout(0);
+      };
+
+      const fail = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        socket.destroy();
+        reject(error);
       };
 
       const onData = (chunk: Buffer): void => {
@@ -247,30 +330,39 @@ export class TcpClient extends EventEmitter {
           const messages = decoder.push(chunk);
           for (const message of messages) {
             if (isPairResponse(message) && message.requestId === request.requestId) {
+              if (settled) {
+                return;
+              }
+              settled = true;
               cleanup();
               socket.end(() => resolve(message.accepted));
               return;
             }
           }
         } catch (error) {
-          cleanup();
-          socket.destroy();
-          reject(error as Error);
+          fail(error as Error);
         }
       };
 
       const onError = (error: Error): void => {
-        cleanup();
-        reject(error);
+        fail(error);
       };
 
       const onClose = (): void => {
-        cleanup();
+        if (!settled) {
+          fail(new Error('peer closed connection before pairing completed'));
+        }
       };
 
+      const onTimeout = (): void => {
+        fail(new Error('pairing timed out'));
+      };
+
+      socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
       socket.on('data', onData);
       socket.once('error', onError);
       socket.once('close', onClose);
+      socket.once('timeout', onTimeout);
       socket.write(encodeMessage(request));
     });
   }
@@ -314,7 +406,7 @@ export class TcpClient extends EventEmitter {
         if (settled) return;
         settled = true;
         stream.destroy();
-        reject(activeTransfer?.cancelled ? new Error('transfer cancelled') : error);
+        reject(errorForTransferIntent(activeTransfer?.intent ?? null, error));
       };
 
       stream.on('data', (chunk) => {
@@ -359,10 +451,49 @@ export class TcpClient extends EventEmitter {
   }
 }
 
-function openSocket(host: string, port: number): Promise<Socket> {
+function openSocket(host: string, port: number, timeoutMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = connect(port, host);
-    socket.once('connect', () => resolve(socket));
-    socket.once('error', reject);
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const onTimeout = (): void => {
+      cleanup();
+      socket.destroy();
+      reject(new Error('connection timed out'));
+    };
+    const onConnect = (): void => {
+      cleanup();
+      resolve(socket);
+    };
+    const cleanup = (): void => {
+      socket.off('error', onError);
+      socket.off('timeout', onTimeout);
+      socket.off('connect', onConnect);
+      socket.setTimeout(0);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', onConnect);
+    socket.once('error', onError);
+    socket.once('timeout', onTimeout);
   });
+}
+
+function intentErrorMessage(intent: ActiveTransfer['intent']): string {
+  return intent === 'pause' ? 'transfer paused' : 'transfer cancelled';
+}
+
+function errorForTransferIntent(
+  intent: ActiveTransfer['intent'],
+  fallback: Error
+): Error {
+  if (intent === 'pause') {
+    return new Error('transfer paused');
+  }
+  if (intent === 'cancel') {
+    return new Error('transfer cancelled');
+  }
+  return fallback;
 }

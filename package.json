@@ -1,7 +1,7 @@
 {
   "name": "syncfile",
   "productName": "syncFile",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "LAN P2P file transfer tool",
   "main": "./out/main/index.js",
   "author": "",
@@ -32,14 +32,14 @@
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.73",
     "@types/react-dom": "^18.2.23",
-    "@vitejs/plugin-react": "^4.2.1",
-    "electron": "^30.0.0",
-    "electron-builder": "^24.13.3",
-    "electron-vite": "^2.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^39.8.5",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "typescript": "^5.4.3",
-    "vite": "^5.2.6",
-    "vitest": "^1.4.0"
+    "vite": "^7.3.2",
+    "vitest": "^4.1.4"
   }
 }

@@ -31,13 +31,18 @@ async function createWindow(): Promise<BrowserWindow> {
   const window = new BrowserWindow({
     width: 960,
     height: 720,
+    minWidth: 880,
+    minHeight: 620,
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true,
+      webSecurity: true,
+      webviewTag: false,
+      safeDialogs: true
     }
   });
 

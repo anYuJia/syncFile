@@ -21,51 +21,83 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return { ...this.settings };
+    return cloneSettings(this.settings);
   }
 
   save(partial: Partial<Settings>): Settings {
-    this.settings = { ...this.settings, ...partial };
+    this.settings = normalizeSettings({ ...this.settings, ...partial });
     mkdirSync(dirname(this.configPath), { recursive: true });
     writeFileSync(this.configPath, JSON.stringify(this.settings, null, 2), 'utf8');
-    return { ...this.settings };
+    return cloneSettings(this.settings);
   }
 
   private load(): Settings {
     if (!existsSync(this.configPath)) {
-      return { ...DEFAULT_SETTINGS };
+      return cloneSettings(DEFAULT_SETTINGS);
     }
 
     try {
       const raw = readFileSync(this.configPath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<Settings>;
-      return {
-        maxSandboxSizeMB:
-          typeof parsed.maxSandboxSizeMB === 'number' && parsed.maxSandboxSizeMB > 0
-            ? parsed.maxSandboxSizeMB
-            : DEFAULT_SETTINGS.maxSandboxSizeMB,
-        autoAccept: typeof parsed.autoAccept === 'boolean' ? parsed.autoAccept : DEFAULT_SETTINGS.autoAccept,
-        autoAcceptMaxSizeMB:
-          typeof parsed.autoAcceptMaxSizeMB === 'number' && parsed.autoAcceptMaxSizeMB > 0
-            ? parsed.autoAcceptMaxSizeMB
-            : DEFAULT_SETTINGS.autoAcceptMaxSizeMB,
-        openReceivedFolder:
-          typeof parsed.openReceivedFolder === 'boolean'
-            ? parsed.openReceivedFolder
-            : typeof (parsed as { autoDownload?: boolean }).autoDownload === 'boolean'
-              ? Boolean((parsed as { autoDownload?: boolean }).autoDownload)
-              : DEFAULT_SETTINGS.openReceivedFolder,
-        trustedDevices:
-          Array.isArray(parsed.trustedDevices)
-            ? parsed.trustedDevices
-                .map(normalizeTrustedDeviceRecord)
-                .filter((device): device is Settings['trustedDevices'][number] => device !== null)
-            : DEFAULT_SETTINGS.trustedDevices
-      };
+      return normalizeSettings(parsed);
     } catch {
-      return { ...DEFAULT_SETTINGS };
+      return cloneSettings(DEFAULT_SETTINGS);
     }
   }
+}
+
+function normalizeSettings(input: Partial<Settings>): Settings {
+  const openReceivedFolder =
+    typeof input.openReceivedFolder === 'boolean'
+      ? input.openReceivedFolder
+      : typeof (input as { autoDownload?: boolean }).autoDownload === 'boolean'
+        ? Boolean((input as { autoDownload?: boolean }).autoDownload)
+        : DEFAULT_SETTINGS.openReceivedFolder;
+
+  return {
+    maxSandboxSizeMB: clampInteger(input.maxSandboxSizeMB, 64, 102400, DEFAULT_SETTINGS.maxSandboxSizeMB),
+    autoAccept: typeof input.autoAccept === 'boolean' ? input.autoAccept : DEFAULT_SETTINGS.autoAccept,
+    autoAcceptMaxSizeMB: clampInteger(
+      input.autoAcceptMaxSizeMB,
+      1,
+      102400,
+      DEFAULT_SETTINGS.autoAcceptMaxSizeMB
+    ),
+    openReceivedFolder,
+    trustedDevices: normalizeTrustedDevices(input.trustedDevices)
+  };
+}
+
+function normalizeTrustedDevices(value: unknown): Settings['trustedDevices'] {
+  if (!Array.isArray(value)) {
+    return cloneSettings(DEFAULT_SETTINGS).trustedDevices;
+  }
+
+  const deduped = new Map<string, Settings['trustedDevices'][number]>();
+  for (const item of value) {
+    const normalized = normalizeTrustedDeviceRecord(item);
+    if (!normalized) {
+      continue;
+    }
+    deduped.set(`${normalized.deviceId}:${normalized.trustFingerprint}`, normalized);
+  }
+
+  return [...deduped.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function cloneSettings(settings: Settings): Settings {
+  return {
+    ...settings,
+    trustedDevices: settings.trustedDevices.map((device) => ({ ...device }))
+  };
 }
 
 function isTrustedDeviceRecord(value: unknown): value is Settings['trustedDevices'][number] {

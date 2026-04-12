@@ -1,5 +1,6 @@
 import type { Device } from '@shared/types';
 import type { Messages } from '../i18n';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface PairDevicePromptProps {
   device: Device;
@@ -18,13 +19,21 @@ export function PairDevicePrompt({
   onClose,
   messages
 }: PairDevicePromptProps): JSX.Element {
+  const dialogRef = useDialogA11y(() => {
+    if (!busy) {
+      onClose();
+    }
+  });
+
   return (
     <div className="receive-prompt-overlay" role="presentation">
       <div
+        ref={dialogRef}
         className="receive-prompt pair-prompt"
         role="dialog"
         aria-modal="true"
         aria-label={messages.pairPromptTitle}
+        tabIndex={-1}
       >
         <div className="receive-prompt-stamp">{messages.pairDevice}</div>
         <h3 className="receive-prompt-title">{device.name}</h3>

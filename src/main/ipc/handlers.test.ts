@@ -1,4 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  BrowserWindow: class {},
+  dialog: {},
+  ipcMain: {
+    handle: vi.fn()
+  },
+  shell: {}
+}));
 
 import { sourceFileCanResume, sourceFileHashCanResume } from './handlers';
 

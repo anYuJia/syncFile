@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface SettingsModalProps {
   messages: Messages;
@@ -36,10 +37,18 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   });
   const [saving, setSaving] = useState(false);
   const [choosingSandbox, setChoosingSandbox] = useState(false);
+  const [inlineError, setInlineError] = useState<string | null>(null);
   const api = window.syncFile as typeof window.syncFile & {
     getSandboxLocation?: () => Promise<SandboxLocationInfo>;
     chooseSandboxLocation?: () => Promise<SandboxLocationInfo | null>;
   };
+  const busy = saving || choosingSandbox;
+  const handleClose = (): void => {
+    if (!busy) {
+      onClose();
+    }
+  };
+  const dialogRef = useDialogA11y(handleClose, true);
 
   useEffect(() => {
     void refreshSettings();
@@ -47,6 +56,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
   const refreshSettings = async (): Promise<void> => {
     try {
+      setInlineError(null);
       const nextSettings = await window.syncFile.getSettings();
       setSettings(nextSettings);
       if (hasSandboxLocation(nextSettings)) {
@@ -58,16 +68,19 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         const nextSandboxLocation = await api.getSandboxLocation();
         setSandboxLocation(nextSandboxLocation);
       }
-    } catch {
-      // Keep defaults if IPC not available
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.failedToLoadDeviceInformation);
     }
   };
 
   const handleOpenSandbox = async (): Promise<void> => {
     setChoosingSandbox(true);
     try {
+      setInlineError(null);
       await window.syncFile.openSandbox();
       await refreshSettings();
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.failedToOpenSandbox);
     } finally {
       setChoosingSandbox(false);
     }
@@ -76,6 +89,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const handleSave = async (): Promise<void> => {
     setSaving(true);
     try {
+      setInlineError(null);
       const normalized: Settings = {
         ...settings,
         maxSandboxSizeMB: Math.min(102400, Math.max(64, Math.round(settings.maxSandboxSizeMB) || 1024)),
@@ -83,9 +97,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       };
       await window.syncFile.saveSettings(normalized);
       onClose();
-    } catch {
-      // Settings will be saved next time
-      onClose();
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.settings);
     } finally {
       setSaving(false);
     }
@@ -97,16 +110,19 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
     setChoosingSandbox(true);
     try {
-      const selected = await api.chooseSandboxLocation().catch(() => null);
+      setInlineError(null);
+      const selected = await api.chooseSandboxLocation();
       if (selected) {
         setSandboxLocation(selected);
+        await refreshSettings();
       }
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.settingsSandboxFolder);
     } finally {
       setChoosingSandbox(false);
     }
   };
 
-  const busy = saving || choosingSandbox;
   const maxBytes = settings.maxSandboxSizeMB * 1024 * 1024;
   const usedBytes = sandboxLocation?.usageBytes ?? 0;
   const remainingBytes = Math.max(0, maxBytes - usedBytes);
@@ -126,8 +142,11 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const handleClearTransferHistory = async (): Promise<void> => {
     setChoosingSandbox(true);
     try {
+      setInlineError(null);
       await window.syncFile.clearTransferHistory();
       await refreshSettings();
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.settingsClearTransferHistory);
     } finally {
       setChoosingSandbox(false);
     }
@@ -136,26 +155,39 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const handleClearResumeCache = async (): Promise<void> => {
     setChoosingSandbox(true);
     try {
+      setInlineError(null);
       await window.syncFile.clearResumeCache();
       await refreshSettings();
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.settingsClearResumeCache);
     } finally {
       setChoosingSandbox(false);
     }
   };
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="settings-overlay" onClick={handleClose}>
+      <div
+        ref={dialogRef}
+        className="settings-panel"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        tabIndex={-1}
+      >
         <div className="settings-header">
-          <button type="button" className="settings-back" onClick={onClose} aria-label={messages.dismiss}>
+          <button type="button" className="settings-back" onClick={handleClose} aria-label={messages.dismiss}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
-          <h2 className="settings-title">{messages.settings}</h2>
+          <h2 id="settings-title" className="settings-title">{messages.settings}</h2>
         </div>
 
         <div className="settings-body">
+          {inlineError && <div className="settings-error-banner">{inlineError}</div>}
+
           <section className="settings-section">
             <div className="settings-section-head">
               <h3 className="settings-section-title">{messages.settingsReceiveSection}</h3>
@@ -383,7 +415,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         </div>
 
         <div className="settings-actions">
-          <button type="button" className="button button-muted" onClick={onClose} disabled={busy}>
+          <button type="button" className="button button-muted" onClick={handleClose} disabled={busy}>
             {messages.settingsCancel}
           </button>
           <button

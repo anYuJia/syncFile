@@ -74,6 +74,11 @@ export interface ReceiveProgressInfo {
   };
 }
 
+export interface ReceiveInterruptedInfo extends ReceiveProgressInfo {
+  reason: 'sender-paused' | 'sender-disconnected';
+  localPath?: string;
+}
+
 export interface TransferErrorInfo {
   error: Error;
   offerId?: string;
@@ -86,6 +91,7 @@ export interface TransferErrorInfo {
     trustPublicKey: string;
   };
   bytesReceived?: number;
+  localPath?: string;
 }
 
 export interface TcpServerEvents {
@@ -93,6 +99,7 @@ export interface TcpServerEvents {
   'pair-request': (request: PairRequestMessage, respond: PairResponder) => void;
   progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
+  'transfer-paused': (info: ReceiveInterruptedInfo) => void;
   'transfer-cancelled': (info: ReceiveProgressInfo & { reason: 'sender-cancelled' | 'receiver-cancelled' }) => void;
   'transfer-error': (info: TransferErrorInfo) => void;
 }
@@ -189,6 +196,7 @@ export class TcpServer extends EventEmitter {
     let bytesReceived = 0;
     let bufferedData = Buffer.alloc(0);
     let settled = false;
+    let socketError: Error | null = null;
 
     const fail = (error: Error): void => {
       if (settled) return;
@@ -205,7 +213,8 @@ export class TcpServer extends EventEmitter {
         fileName: offer?.fileName,
         fileSize: offer?.fileSize,
         fromDevice: offer?.fromDevice,
-        bytesReceived
+        bytesReceived,
+        localPath: partialPath ?? undefined
       });
       socket.destroy();
     };
@@ -292,8 +301,23 @@ export class TcpServer extends EventEmitter {
       }
       settled = true;
       phase = 'rejected';
-      writeStream?.destroy();
       this.activeReceives.delete(offer.fileId);
+      if (message.reason === 'sender-paused') {
+        writeStream?.end();
+        this.emit('transfer-paused', {
+          offerId: offer.fileId,
+          fileName: offer.fileName,
+          fileSize: offer.fileSize,
+          bytesReceived,
+          fromDevice: offer.fromDevice,
+          reason: 'sender-paused',
+          localPath: partialPath ?? undefined
+        });
+        socket.destroy();
+        return;
+      }
+      writeStream?.destroy();
+      this.options.sandbox.discardIncomingResume(offer.fileId, true);
       this.emit('transfer-cancelled', {
         offerId: offer.fileId,
         fileName: offer.fileName,
@@ -434,6 +458,7 @@ export class TcpServer extends EventEmitter {
         phase = 'rejected';
         writeStream?.destroy();
         this.activeReceives.delete(offer.fileId);
+        this.options.sandbox.discardIncomingResume(offer.fileId, true);
         socket.write(encodeMessage({ type: 'file-cancel', fileId: offer.fileId, reason }));
         socket.destroySoon();
       }
@@ -551,17 +576,14 @@ export class TcpServer extends EventEmitter {
       }
     });
 
+    socket.setTimeout(30000);
+    socket.on('timeout', () => {
+      socketError = new Error('transfer timed out');
+      socket.destroy();
+    });
+
     socket.on('error', (error) => {
-      if (!settled) {
-        this.emit('transfer-error', {
-          error,
-          offerId: offer?.fileId,
-          fileName: offer?.fileName,
-          fileSize: offer?.fileSize,
-          fromDevice: offer?.fromDevice,
-          bytesReceived
-        });
-      }
+      socketError = error;
     });
 
     socket.on('close', () => {
@@ -569,18 +591,36 @@ export class TcpServer extends EventEmitter {
         settled = true;
         if (offer) {
           this.activeReceives.delete(offer.fileId);
+          if (
+            (phase === 'receiving-file' || phase === 'awaiting-complete') &&
+            bytesReceived < offer.fileSize
+          ) {
+            writeStream?.end();
+            this.emit('transfer-paused', {
+              offerId: offer.fileId,
+              fileName: offer.fileName,
+              fileSize: offer.fileSize,
+              bytesReceived,
+              fromDevice: offer.fromDevice,
+              reason: 'sender-disconnected',
+              localPath: partialPath ?? undefined
+            });
+            return;
+          }
           this.emit('transfer-error', {
-            error: new Error('sender disconnected before transfer completed'),
+            error: socketError ?? new Error('sender disconnected before transfer completed'),
             offerId: offer.fileId,
             fileName: offer.fileName,
             fileSize: offer.fileSize,
             bytesReceived,
-            fromDevice: offer.fromDevice
+            fromDevice: offer.fromDevice,
+            localPath: partialPath ?? undefined
           });
         } else {
           this.emit('transfer-error', {
-            error: new Error('socket closed before transfer completed'),
-            bytesReceived
+            error: socketError ?? new Error('socket closed before transfer completed'),
+            bytesReceived,
+            localPath: partialPath ?? undefined
           });
         }
         writeStream?.end();
@@ -595,6 +635,7 @@ export class TcpServer extends EventEmitter {
     }
 
     active.writeStream?.destroy();
+    this.options.sandbox.discardIncomingResume(offerId, true);
     try {
       active.socket.write(
         encodeMessage({

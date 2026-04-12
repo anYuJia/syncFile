@@ -95,6 +95,9 @@ export interface Messages {
   errorPeerClosedBeforeAccept: string;
   errorPeerClosedBeforeComplete: string;
   errorSocketClosedBeforeComplete: string;
+  errorConnectionTimedOut: string;
+  errorPeerNoResponse: string;
+  errorTransferTimedOut: string;
   settings: string;
   settingsReceiveSection: string;
   settingsReceiveSectionDesc: string;
@@ -239,6 +242,9 @@ const zh: Messages = {
   errorPeerClosedBeforeAccept: '对方在接受前关闭了连接。',
   errorPeerClosedBeforeComplete: '对方在传输完成前关闭了连接。',
   errorSocketClosedBeforeComplete: '连接在传输完成前被关闭。',
+  errorConnectionTimedOut: '连接目标设备超时。',
+  errorPeerNoResponse: '对方长时间没有响应这次请求。',
+  errorTransferTimedOut: '传输超时，已停止等待。',
   settings: '设置',
   settingsReceiveSection: '接收策略',
   settingsReceiveSectionDesc: '控制传入文件如何进入当前设备。',
@@ -381,6 +387,9 @@ const en: Messages = {
   errorPeerClosedBeforeAccept: 'The peer closed the connection before accepting.',
   errorPeerClosedBeforeComplete: 'The peer closed the connection before completion.',
   errorSocketClosedBeforeComplete: 'The connection closed before transfer completion.',
+  errorConnectionTimedOut: 'Connecting to the peer timed out.',
+  errorPeerNoResponse: 'The peer did not respond in time.',
+  errorTransferTimedOut: 'The transfer timed out.',
   settings: 'Settings',
   settingsReceiveSection: 'Receive behavior',
   settingsReceiveSectionDesc: 'Control how incoming files enter this device.',

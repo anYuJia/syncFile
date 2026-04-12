@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import type { TransferProgress } from '@shared/types';
 import type { Messages } from '../i18n';
 
@@ -73,22 +73,26 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
   const [filter, setFilter] = useState<'all' | 'active' | 'done' | 'issues'>('all');
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const deferredQuery = useDeferredValue(query);
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
+  const visibleTransfers = useMemo(
+    () =>
+      transfers.filter((item) => {
+        const matchesFilter =
+          filter === 'all' ||
+          (filter === 'active' && ['pending', 'in-progress', 'paused'].includes(item.status)) ||
+          (filter === 'done' && item.status === 'completed') ||
+          (filter === 'issues' && ['failed', 'rejected', 'cancelled'].includes(item.status));
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleTransfers = transfers.filter((item) => {
-    const matchesFilter =
-      filter === 'all' ||
-      (filter === 'active' && ['pending', 'in-progress', 'paused'].includes(item.status)) ||
-      (filter === 'done' && item.status === 'completed') ||
-      (filter === 'issues' && ['failed', 'rejected', 'cancelled'].includes(item.status));
+        const matchesQuery =
+          normalizedQuery.length === 0 ||
+          item.fileName.toLowerCase().includes(normalizedQuery) ||
+          item.peerDeviceName.toLowerCase().includes(normalizedQuery);
 
-    const matchesQuery =
-      normalizedQuery.length === 0 ||
-      item.fileName.toLowerCase().includes(normalizedQuery) ||
-      item.peerDeviceName.toLowerCase().includes(normalizedQuery);
-
-    return matchesFilter && matchesQuery;
-  });
+        return matchesFilter && matchesQuery;
+      }),
+    [filter, normalizedQuery, transfers]
+  );
 
   if (transfers.length === 0) {
     return <div className="transfer-list-empty">{messages.transferEmpty}</div>;

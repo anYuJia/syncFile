@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { createServer, type Server, type Socket } from 'net';
 
 import { Sandbox } from '../storage/sandbox';
 import { createTrustKeypair } from '../security/trust';
@@ -186,4 +187,98 @@ describe('TcpClient', () => {
 
     await expect(client.pairWithPeer('127.0.0.1', port)).resolves.toBe(true);
   });
+
+  it('pauses an in-progress transfer and allows it to resume later', async () => {
+    const sourcePath = join(root, 'pause.bin');
+    writeFileSync(sourcePath, Buffer.alloc(512 * 1024, 5));
+
+    const client = new TcpClient({
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      }
+    });
+
+    const pausedPromise = new Promise<number>((resolve) => {
+      server.once('transfer-paused', (info) => resolve(info.bytesReceived));
+    });
+
+    let paused = false;
+    client.on('progress', (progress) => {
+      if (!paused && progress.fileId === 'pause-me' && progress.bytesTransferred > 0) {
+        paused = client.pause('pause-me');
+      }
+    });
+
+    await expect(
+      client.sendFile({
+        host: '127.0.0.1',
+        port,
+        filePath: sourcePath,
+        fileId: 'pause-me',
+        sha256: await sha256File(sourcePath)
+      })
+    ).rejects.toThrow(/paused/i);
+
+    await expect(pausedPromise).resolves.toBeGreaterThan(0);
+
+    const savedPathPromise = new Promise<string>((resolve) => {
+      server.once('transfer-complete', (info) => resolve(info.savedPath));
+    });
+
+    await client.sendFile({
+      host: '127.0.0.1',
+      port,
+      filePath: sourcePath,
+      fileId: 'pause-me',
+      sha256: await sha256File(sourcePath)
+    });
+
+    const savedPath = await savedPathPromise;
+    expect(Buffer.compare(readFileSync(savedPath), readFileSync(sourcePath))).toBe(0);
+  });
+
+  it('times out pairing when the peer never responds', async () => {
+    const idleConnections = new Set<Socket>();
+    let idleServer: Server | null = createServer((socket) => {
+      idleConnections.add(socket);
+      socket.once('close', () => {
+        idleConnections.delete(socket);
+      });
+      // Intentionally keep the socket open without replying.
+    });
+    const idlePort = await new Promise<number>((resolve, reject) => {
+      idleServer!.once('error', reject);
+      idleServer!.listen(0, '127.0.0.1', () => {
+        const address = idleServer!.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('unexpected address'));
+          return;
+        }
+        resolve(address.port);
+      });
+    });
+
+    const client = new TcpClient({
+      selfDevice: {
+        deviceId: 'client-device',
+        name: 'Client',
+        trustFingerprint: clientIdentity.fingerprint,
+        trustPublicKey: clientIdentity.publicKey,
+        trustPrivateKey: clientIdentity.privateKey
+      },
+      responseTimeoutMs: 1000,
+      idleTimeoutMs: 50
+    });
+
+    await expect(client.pairWithPeer('127.0.0.1', idlePort)).rejects.toThrow(/timed out/i);
+    for (const socket of idleConnections) {
+      socket.destroy();
+    }
+    await new Promise<void>((resolve) => idleServer!.close(() => resolve()));
+    idleServer = null;
+  }, 2000);
 });
