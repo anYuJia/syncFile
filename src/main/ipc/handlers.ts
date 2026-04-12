@@ -17,6 +17,7 @@ import type {
   TransferProgress
 } from '../../shared/types';
 import type { DeviceRegistry } from '../discovery/device-registry';
+import type { PendingOfferStore } from '../storage/pending-offers';
 import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
 import type { SettingsStore } from '../storage/settings';
@@ -98,6 +99,7 @@ export interface IpcContext {
   tcpClient: TcpClient;
   sandbox: Sandbox;
   sandboxLocation: SandboxLocationStore;
+  pendingOfferStore: PendingOfferStore;
   settingsStore: SettingsStore;
   transferHistoryStore: TransferHistoryStore;
   identity: DeviceIdentity;
@@ -124,6 +126,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   ): void => {
     context.transferHistoryStore.upsert(progress);
     sendToRenderer(channel, progress);
+  };
+
+  const publishTransferHistoryReset = (): void => {
+    sendToRenderer(IpcChannels.TransferHistoryReset, context.transferHistoryStore.list());
   };
 
   const makeOutboundProgress = (
@@ -237,6 +243,10 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(IpcChannels.GetTransferHistory, (): TransferRecord[] => {
     return context.transferHistoryStore.list();
+  });
+
+  ipcMain.handle(IpcChannels.GetPendingOffers, (): IncomingOffer[] => {
+    return context.pendingOfferStore.list();
   });
 
   ipcMain.handle(
@@ -369,6 +379,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     completedOrAcceptedOffers.set(offerId, { info: pending.info, receiveMode });
     pending.responder.accept();
     pendingOffers.delete(offerId);
+    context.pendingOfferStore.remove(offerId);
     publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'pending', receiveMode));
   });
 
@@ -381,6 +392,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
       pending.responder.reject(reason);
       pendingOffers.delete(offerId);
+      context.pendingOfferStore.remove(offerId);
       publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(pending.info, 0, 'rejected', 'manual'));
     }
   );
@@ -404,11 +416,17 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   ipcMain.handle(IpcChannels.ClearTransferHistory, (): void => {
-    context.transferHistoryStore.clear();
+    context.transferHistoryStore.clearFinished();
+    publishTransferHistoryReset();
   });
 
   ipcMain.handle(IpcChannels.ClearResumeCache, (): void => {
-    context.sandbox.clearResumeCache();
+    const activeReceiveIds = new Set(completedOrAcceptedOffers.keys());
+    const clearedIds = context.sandbox.clearResumeCache(activeReceiveIds);
+    for (const id of clearedIds) {
+      context.transferHistoryStore.remove(id);
+    }
+    publishTransferHistoryReset();
   });
 
   ipcMain.handle(IpcChannels.GetSandboxLocation, (): SandboxLocationInfo => {
@@ -483,6 +501,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       const receiveMode = resolveReceiveMode(info, settings);
       completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
       responder.accept();
+      context.pendingOfferStore.remove(info.offerId);
       publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
       return;
     }
@@ -499,6 +518,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       saveDirectory: context.sandbox.directoryForIncoming(info.fromDevice.deviceId)
     };
 
+    context.pendingOfferStore.upsert(offer);
     sendToRenderer(IpcChannels.IncomingOffer, offer);
   });
 

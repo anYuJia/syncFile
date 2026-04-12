@@ -140,7 +140,11 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
       </div>
 
       {visibleTransfers.length === 0 ? (
-        <div className="transfer-list-empty">{messages.transferEmpty}</div>
+        <div className="transfer-list-empty">
+          {filter === 'all' && normalizedQuery.length === 0
+            ? messages.transferEmpty
+            : messages.taskNoMatches}
+        </div>
       ) : (
       <ul className="transfer-list">
       {visibleTransfers.map((item) => {

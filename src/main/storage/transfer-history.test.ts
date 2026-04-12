@@ -74,4 +74,31 @@ describe('TransferHistoryStore', () => {
     expect(record.status).toBe('failed');
     expect(record.error).toContain('Retry to continue');
   });
+
+  it('clears only finished records when requested', () => {
+    const store = new TransferHistoryStore(root);
+    store.upsert({
+      transferId: 'active-1',
+      direction: 'send',
+      fileName: 'active.txt',
+      fileSize: 100,
+      bytesTransferred: 20,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+    store.upsert({
+      transferId: 'done-1',
+      direction: 'send',
+      fileName: 'done.txt',
+      fileSize: 100,
+      bytesTransferred: 100,
+      peerDeviceName: 'Peer',
+      status: 'completed'
+    });
+
+    const remaining = store.clearFinished();
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].transferId).toBe('active-1');
+  });
 });

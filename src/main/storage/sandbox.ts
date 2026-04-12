@@ -5,8 +5,11 @@ interface IncomingResumeMeta {
   fileId: string;
   deviceId: string;
   deviceName: string;
+  trustFingerprint: string;
+  trustPublicKey: string;
   fileName: string;
   fileSize: number;
+  sha256: string;
   finalPath: string;
   partialPath: string;
 }
@@ -20,8 +23,11 @@ export interface ResumeCacheEntry {
   fileId: string;
   deviceId: string;
   deviceName: string;
+  trustFingerprint: string;
+  trustPublicKey: string;
   fileName: string;
   fileSize: number;
+  sha256: string;
   partialPath: string;
   finalPath: string;
   bytesReceived: number;
@@ -57,7 +63,16 @@ export class Sandbox {
     return join(deviceDir, `${stamp}_${safeName}`);
   }
 
-  prepareIncomingResume(fileId: string, deviceId: string, deviceName: string, fileName: string, fileSize: number): {
+  prepareIncomingResume(
+    fileId: string,
+    deviceId: string,
+    deviceName: string,
+    trustFingerprint: string,
+    trustPublicKey: string,
+    fileName: string,
+    fileSize: number,
+    sha256: string
+  ): {
     finalPath: string;
     partialPath: string;
     bytesReceived: number;
@@ -67,8 +82,11 @@ export class Sandbox {
       existing &&
       existing.deviceId === deviceId &&
       existing.deviceName === deviceName &&
+      existing.trustFingerprint === trustFingerprint &&
+      existing.trustPublicKey === trustPublicKey &&
       existing.fileName === fileName &&
       existing.fileSize === fileSize &&
+      existing.sha256 === sha256 &&
       existsSync(existing.partialPath)
     ) {
       return {
@@ -84,8 +102,11 @@ export class Sandbox {
       fileId,
       deviceId,
       deviceName,
+      trustFingerprint,
+      trustPublicKey,
       fileName,
       fileSize,
+      sha256,
       finalPath,
       partialPath
     };
@@ -135,10 +156,16 @@ export class Sandbox {
     };
   }
 
-  clearResumeCache(): void {
+  clearResumeCache(excludedFileIds: Set<string> = new Set()): string[] {
+    const cleared: string[] = [];
     for (const entry of this.listResumeEntries()) {
+      if (excludedFileIds.has(entry.fileId)) {
+        continue;
+      }
       this.discardIncomingResume(entry.fileId, true);
+      cleared.push(entry.fileId);
     }
+    return cleared;
   }
 
   listResumeEntries(): ResumeCacheEntry[] {
@@ -161,8 +188,11 @@ export class Sandbox {
         fileId: meta.fileId,
         deviceId: meta.deviceId,
         deviceName: meta.deviceName,
+        trustFingerprint: meta.trustFingerprint,
+        trustPublicKey: meta.trustPublicKey,
         fileName: meta.fileName,
         fileSize: meta.fileSize,
+        sha256: meta.sha256,
         partialPath: meta.partialPath,
         finalPath: meta.finalPath,
         bytesReceived: statSync(meta.partialPath).size
@@ -197,6 +227,7 @@ export class Sandbox {
         typeof parsed.deviceId !== 'string' ||
         typeof parsed.fileName !== 'string' ||
         typeof parsed.fileSize !== 'number' ||
+        typeof parsed.sha256 !== 'string' ||
         typeof parsed.finalPath !== 'string' ||
         typeof parsed.partialPath !== 'string'
       ) {
@@ -206,8 +237,17 @@ export class Sandbox {
         fileId: parsed.fileId,
         deviceId: parsed.deviceId,
         deviceName: typeof parsed.deviceName === 'string' && parsed.deviceName.length > 0 ? parsed.deviceName : parsed.deviceId,
+        trustFingerprint:
+          typeof parsed.trustFingerprint === 'string' && parsed.trustFingerprint.length > 0
+            ? parsed.trustFingerprint
+            : '',
+        trustPublicKey:
+          typeof parsed.trustPublicKey === 'string' && parsed.trustPublicKey.length > 0
+            ? parsed.trustPublicKey
+            : '',
         fileName: parsed.fileName,
         fileSize: parsed.fileSize,
+        sha256: parsed.sha256,
         finalPath: parsed.finalPath,
         partialPath: parsed.partialPath
       };

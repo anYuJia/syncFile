@@ -25,6 +25,7 @@ const api = {
   getDevices: (): Promise<Device[]> => ipcRenderer.invoke(IpcChannels.GetDevices),
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
   getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
+  getPendingOffers: (): Promise<IncomingOffer[]> => ipcRenderer.invoke(IpcChannels.GetPendingOffers),
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
     ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
   pauseTransfer: (transferId: string): Promise<void> =>
@@ -55,6 +56,8 @@ const api = {
     subscribe(IpcChannels.TransferProgress, callback),
   onTransferComplete: (callback: (progress: TransferProgress) => void): (() => void) =>
     subscribe(IpcChannels.TransferComplete, callback),
+  onTransferHistoryReset: (callback: (items: TransferRecord[]) => void): (() => void) =>
+    subscribe(IpcChannels.TransferHistoryReset, callback),
   onIncomingOffer: (callback: (offer: IncomingOffer) => void): (() => void) =>
     subscribe(IpcChannels.IncomingOffer, callback)
 };

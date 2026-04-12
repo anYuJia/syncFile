@@ -29,6 +29,14 @@ export class TransferHistoryStore {
     return this.records.get(transferId);
   }
 
+  replace(records: TransferRecord[]): void {
+    this.records.clear();
+    for (const record of records) {
+      this.records.set(record.transferId, record);
+    }
+    this.flush();
+  }
+
   upsert(progress: TransferProgress): TransferRecord {
     const previous = this.records.get(progress.transferId);
     const record: TransferRecord = {
@@ -49,6 +57,22 @@ export class TransferHistoryStore {
   clear(): void {
     this.records.clear();
     this.flush();
+  }
+
+  clearFinished(): TransferRecord[] {
+    for (const [id, record] of this.records.entries()) {
+      if (!['pending', 'in-progress', 'paused'].includes(record.status)) {
+        this.records.delete(id);
+      }
+    }
+    this.flush();
+    return this.list();
+  }
+
+  remove(transferId: string): void {
+    if (this.records.delete(transferId)) {
+      this.flush();
+    }
   }
 
   markInterruptedSends(): void {
@@ -125,12 +149,14 @@ function isTransferRecord(value: unknown): value is TransferRecord {
   const candidate = value as Partial<TransferRecord>;
   return (
     typeof candidate.transferId === 'string' &&
-    typeof candidate.direction === 'string' &&
+    (candidate.direction === 'send' || candidate.direction === 'receive') &&
     typeof candidate.fileName === 'string' &&
     typeof candidate.fileSize === 'number' &&
     typeof candidate.bytesTransferred === 'number' &&
     typeof candidate.peerDeviceName === 'string' &&
-    typeof candidate.status === 'string' &&
+    ['pending', 'in-progress', 'paused', 'completed', 'failed', 'rejected', 'cancelled'].includes(
+      String(candidate.status)
+    ) &&
     typeof candidate.updatedAt === 'number'
   );
 }

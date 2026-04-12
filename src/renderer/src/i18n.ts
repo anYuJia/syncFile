@@ -61,6 +61,7 @@ export interface Messages {
   taskFilterDone: string;
   taskFilterIssues: string;
   taskSearchPlaceholder: string;
+  taskNoMatches: string;
   transferLocalPath: string;
   transferPeerId: string;
   pairDevice: string;
@@ -203,6 +204,7 @@ const zh: Messages = {
   taskFilterDone: '已完成',
   taskFilterIssues: '异常',
   taskSearchPlaceholder: '搜索文件名或设备',
+  taskNoMatches: '没有匹配当前筛选条件的任务。',
   transferLocalPath: '本地路径',
   transferPeerId: '设备 ID',
   pairDevice: '配对',
@@ -343,6 +345,7 @@ const en: Messages = {
   taskFilterDone: 'Done',
   taskFilterIssues: 'Issues',
   taskSearchPlaceholder: 'Search file or device',
+  taskNoMatches: 'No tasks match the current filters.',
   transferLocalPath: 'Local path',
   transferPeerId: 'Peer ID',
   pairDevice: 'Pair',

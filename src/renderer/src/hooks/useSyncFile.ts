@@ -92,10 +92,11 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
 
     const init = async (): Promise<void> => {
       try {
-        const [self, list, history] = await Promise.all([
+        const [self, list, history, pending] = await Promise.all([
           window.syncFile.getSelfDevice(),
           window.syncFile.getDevices(),
-          window.syncFile.getTransferHistory()
+          window.syncFile.getTransferHistory(),
+          window.syncFile.getPendingOffers()
         ]);
         if (!active) {
           return;
@@ -103,6 +104,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
         setSelfDevice(self);
         setDevices(list);
         setTransferMap(buildTransferMap(history));
+        setPendingOffers(pending);
       } catch (error) {
         if (!active) {
           return;
@@ -135,6 +137,10 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       setPendingOffers((prev) => [...prev, offer]);
     });
 
+    const offTransferHistoryReset = window.syncFile.onTransferHistoryReset((items) => {
+      setTransferMap(buildTransferMap(items));
+    });
+
     const applyTransferEvent = (progress: TransferProgress): void => {
       setTransferMap((prev) => {
         const next = { ...prev };
@@ -156,6 +162,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       offOnline();
       offOffline();
       offIncomingOffer();
+      offTransferHistoryReset();
       offTransferProgress();
       offTransferComplete();
     };

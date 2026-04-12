@@ -75,7 +75,16 @@ describe('Sandbox', () => {
   });
 
   it('persists and completes incoming resume state', () => {
-    const prepared = sandbox.prepareIncomingResume('file-1', 'device-a', 'Alice MacBook', 'hello.txt', 5);
+    const prepared = sandbox.prepareIncomingResume(
+      'file-1',
+      'device-a',
+      'Alice MacBook',
+      'AAAA-BBBB-CCCC-DDDD',
+      'PUBKEY1',
+      'hello.txt',
+      5,
+      'sha-hello'
+    );
     writeFileSync(prepared.partialPath, 'hello');
 
     expect(sandbox.incomingResumeOffset('file-1')).toBe(5);
@@ -87,8 +96,26 @@ describe('Sandbox', () => {
   });
 
   it('reports and clears resume cache', () => {
-    const first = sandbox.prepareIncomingResume('file-1', 'device-a', 'Alice MacBook', 'hello.txt', 5);
-    const second = sandbox.prepareIncomingResume('file-2', 'device-b', 'Bob PC', 'world.txt', 3);
+    const first = sandbox.prepareIncomingResume(
+      'file-1',
+      'device-a',
+      'Alice MacBook',
+      'AAAA-BBBB-CCCC-DDDD',
+      'PUBKEY1',
+      'hello.txt',
+      5,
+      'sha-hello'
+    );
+    const second = sandbox.prepareIncomingResume(
+      'file-2',
+      'device-b',
+      'Bob PC',
+      'EEEE-FFFF-GGGG-HHHH',
+      'PUBKEY2',
+      'world.txt',
+      3,
+      'sha-world'
+    );
     writeFileSync(first.partialPath, 'hello');
     writeFileSync(second.partialPath, 'abc');
 
@@ -100,7 +127,16 @@ describe('Sandbox', () => {
   });
 
   it('lists resumable cache entries with device metadata', () => {
-    const prepared = sandbox.prepareIncomingResume('file-3', 'device-c', 'Carol Linux', 'draft.txt', 4);
+    const prepared = sandbox.prepareIncomingResume(
+      'file-3',
+      'device-c',
+      'Carol Linux',
+      'IIII-JJJJ-KKKK-LLLL',
+      'PUBKEY3',
+      'draft.txt',
+      4,
+      'sha-draft'
+    );
     writeFileSync(prepared.partialPath, 'data');
 
     expect(sandbox.listResumeEntries()).toEqual([
@@ -108,8 +144,11 @@ describe('Sandbox', () => {
         fileId: 'file-3',
         deviceId: 'device-c',
         deviceName: 'Carol Linux',
+        trustFingerprint: 'IIII-JJJJ-KKKK-LLLL',
+        trustPublicKey: 'PUBKEY3',
         fileName: 'draft.txt',
         fileSize: 4,
+        sha256: 'sha-draft',
         partialPath: prepared.partialPath,
         finalPath: prepared.finalPath,
         bytesReceived: 4

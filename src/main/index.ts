@@ -10,6 +10,8 @@ import { registerIpcHandlers } from './ipc/handlers';
 import { loadOrCreateIdentity } from './storage/device-identity';
 import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
+import { PendingOfferStore } from './storage/pending-offers';
+import { recoverPendingOffers } from './storage/pending-offer-recovery';
 import { SettingsStore } from './storage/settings';
 import { TransferHistoryStore } from './storage/transfer-history';
 import { recoverTransferState } from './storage/transfer-recovery';
@@ -63,9 +65,11 @@ async function bootstrap(): Promise<void> {
   const defaultSandboxRoot = resolveDefaultSandboxRoot();
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
+  const pendingOfferStore = new PendingOfferStore(userDataDir);
   const settingsStore = new SettingsStore(userDataDir);
   transferHistoryStore = new TransferHistoryStore(userDataDir);
   recoverTransferState(transferHistoryStore, sandbox);
+  recoverPendingOffers(pendingOfferStore, transferHistoryStore);
   const registry = new DeviceRegistry();
 
   tcpServer = new TcpServer({ sandbox });
@@ -117,6 +121,7 @@ async function bootstrap(): Promise<void> {
       tcpClient,
       sandbox,
       sandboxLocation,
+      pendingOfferStore,
       settingsStore,
       transferHistoryStore,
       identity,

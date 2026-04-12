@@ -26,6 +26,7 @@ export interface IncomingOfferInfo {
   offerId: string;
   fileName: string;
   fileSize: number;
+  sha256?: string;
   mimeType?: string;
   fromDevice: {
     deviceId: string;
@@ -376,8 +377,11 @@ export class TcpServer extends EventEmitter {
           offer.fileId,
           offer.fromDevice.deviceId,
           offer.fromDevice.name,
+          offer.fromDevice.trustFingerprint,
+          offer.fromDevice.trustPublicKey,
           offer.fileName,
-          offer.fileSize
+          offer.fileSize,
+          offer.sha256 ?? ''
         );
         partialPath = prepared.partialPath;
         finalPath = prepared.finalPath;
@@ -465,6 +469,7 @@ export class TcpServer extends EventEmitter {
               offerId: first.fileId,
               fileName: first.fileName,
               fileSize: first.fileSize,
+              sha256: first.sha256,
               mimeType: first.mimeType,
               fromDevice: first.fromDevice
             },
@@ -526,13 +531,13 @@ export class TcpServer extends EventEmitter {
         settled = true;
         if (offer) {
           this.activeReceives.delete(offer.fileId);
-          this.emit('transfer-cancelled', {
+          this.emit('transfer-error', {
+            error: new Error('sender disconnected before transfer completed'),
             offerId: offer.fileId,
             fileName: offer.fileName,
             fileSize: offer.fileSize,
             bytesReceived,
-            fromDevice: offer.fromDevice,
-            reason: 'sender-cancelled'
+            fromDevice: offer.fromDevice
           });
         } else {
           this.emit('transfer-error', {

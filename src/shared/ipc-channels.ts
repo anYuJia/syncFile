@@ -6,6 +6,7 @@ export const IpcChannels = {
   GetDevices: 'syncfile:get-devices',
   GetSelfDevice: 'syncfile:get-self-device',
   GetTransferHistory: 'syncfile:get-transfer-history',
+  GetPendingOffers: 'syncfile:get-pending-offers',
   SendFile: 'syncfile:send-file',
   PauseTransfer: 'syncfile:pause-transfer',
   CancelTransfer: 'syncfile:cancel-transfer',
@@ -27,6 +28,7 @@ export const IpcChannels = {
   DeviceOffline: 'syncfile:device-offline',
   TransferProgress: 'syncfile:transfer-progress',
   TransferComplete: 'syncfile:transfer-complete',
+  TransferHistoryReset: 'syncfile:transfer-history-reset',
   IncomingOffer: 'syncfile:incoming-offer'
 } as const;
 

@@ -35,7 +35,16 @@ describe('recoverTransferState', () => {
       localPath: '/tmp/photo.jpg'
     });
 
-    const prepared = sandbox.prepareIncomingResume('recv-1', 'peer-2', 'Alice MacBook', 'notes.txt', 10);
+    const prepared = sandbox.prepareIncomingResume(
+      'recv-1',
+      'peer-2',
+      'Alice MacBook',
+      'AAAA-BBBB-CCCC-DDDD',
+      'PUBKEY1',
+      'notes.txt',
+      10,
+      'sha-notes'
+    );
     writeFileSync(prepared.partialPath, 'hello');
 
     recoverTransferState(history, sandbox);
