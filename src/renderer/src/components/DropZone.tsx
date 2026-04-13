@@ -20,8 +20,15 @@ interface DropZoneProps {
 
 function fileToEntry(file: File): PendingFile | null {
   const ef = file as File & { path?: string };
-  if (typeof ef.path === 'string' && ef.path.length > 0) {
-    return { path: ef.path, name: file.name, size: file.size };
+  const filePath =
+    (typeof ef.path === 'string' && ef.path.length > 0
+      ? ef.path
+      : typeof window.syncFile.getPathForFile === 'function'
+        ? window.syncFile.getPathForFile(file)
+        : '') || '';
+
+  if (filePath.length > 0) {
+    return { path: filePath, name: file.name, size: file.size };
   }
   return null;
 }

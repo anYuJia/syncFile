@@ -53,15 +53,11 @@ export class MdnsService {
 
   find(): void {
     if (this.browser) return;
-    const browser = this.bonjour.find({ type: SERVICE_TYPE });
-    this.browser = browser;
-    browser.on('up', this.onServiceUp);
-    browser.on('txt-update', this.onServiceUp);
-    browser.on('down', this.onServiceDown);
+    this.browser = this.createBrowser();
   }
 
   refresh(): void {
-    this.browser?.update();
+    this.resetBrowser();
   }
 
   async stop(): Promise<void> {
@@ -71,10 +67,7 @@ export class MdnsService {
     }
 
     if (this.browser) {
-      this.browser.off('up', this.onServiceUp);
-      this.browser.off('txt-update', this.onServiceUp);
-      this.browser.off('down', this.onServiceDown);
-      this.browser.stop();
+      this.destroyBrowser();
       this.browser = undefined;
     }
 
@@ -142,6 +135,29 @@ export class MdnsService {
     this.refreshTimer = setInterval(() => {
       this.browser?.update();
     }, BROWSER_REFRESH_MS);
+  }
+
+  private createBrowser(): Browser {
+    const browser = this.bonjour.find({ type: SERVICE_TYPE });
+    browser.on('up', this.onServiceUp);
+    browser.on('txt-update', this.onServiceUp);
+    browser.on('down', this.onServiceDown);
+    return browser;
+  }
+
+  private destroyBrowser(): void {
+    if (!this.browser) {
+      return;
+    }
+    this.browser.off('up', this.onServiceUp);
+    this.browser.off('txt-update', this.onServiceUp);
+    this.browser.off('down', this.onServiceDown);
+    this.browser.stop();
+  }
+
+  private resetBrowser(): void {
+    this.destroyBrowser();
+    this.browser = this.createBrowser();
   }
 }
 

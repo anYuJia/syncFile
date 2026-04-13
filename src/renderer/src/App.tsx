@@ -11,7 +11,7 @@ import { useSyncFile } from './hooks/useSyncFile';
 import type { Device, IncomingOffer, PairRequest, TrustedDevice } from '@shared/types';
 
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
-const MIN_RIGHT_PANE_SECTION_HEIGHT = 180;
+const MIN_RIGHT_PANE_SECTION_HEIGHT = 150;
 const AUTO_DISPATCH_MIN_HEIGHT = 260;
 const RIGHT_PANE_RESIZER_HEIGHT = 12;
 
@@ -217,6 +217,14 @@ export function App(): JSX.Element {
       await retryTransfer(transferId);
     } catch {
       // Hook already stores and exposes the error message.
+    }
+  }
+
+  async function handleClearFinishedTransfers(): Promise<void> {
+    try {
+      await window.syncFile.clearTransferHistory();
+    } catch {
+      // Best effort only.
     }
   }
 
@@ -464,6 +472,7 @@ export function App(): JSX.Element {
               onPause={handlePauseTransfer}
               onCancel={handleCancelTransfer}
               onRetry={handleRetryTransfer}
+              onClearFinished={handleClearFinishedTransfers}
             />
           </section>
         </div>

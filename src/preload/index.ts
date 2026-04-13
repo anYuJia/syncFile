@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent, webUtils } from 'electron';
 
 import { IpcChannels } from '../shared/ipc-channels';
 import type {
@@ -53,6 +53,7 @@ const api = {
   getSettings: (): Promise<SettingsPayload> => ipcRenderer.invoke(IpcChannels.GetSettings),
   saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
     ipcRenderer.invoke(IpcChannels.SaveSettings, settings),
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onDeviceOnline: (callback: (device: Device) => void): (() => void) =>
     subscribe(IpcChannels.DeviceOnline, callback),
   onDeviceOffline: (callback: (deviceId: string) => void): (() => void) =>

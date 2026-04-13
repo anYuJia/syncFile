@@ -8,6 +8,7 @@ interface TransferListProps {
   onPause: (transferId: string) => void | Promise<void>;
   onCancel: (transferId: string) => void | Promise<void>;
   onRetry: (transferId: string) => void | Promise<void>;
+  onClearFinished: () => void | Promise<void>;
 }
 
 function formatBytes(bytes: number): string {
@@ -69,7 +70,14 @@ function receiveModeLabel(item: TransferProgress, messages: Messages): string | 
   return null;
 }
 
-export function TransferList({ transfers, messages, onPause, onCancel, onRetry }: TransferListProps): JSX.Element {
+export function TransferList({
+  transfers,
+  messages,
+  onPause,
+  onCancel,
+  onRetry,
+  onClearFinished
+}: TransferListProps): JSX.Element {
   const [filter, setFilter] = useState<'all' | 'active' | 'done' | 'issues'>('all');
   const [query, setQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -92,6 +100,9 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
         return matchesFilter && matchesQuery;
       }),
     [filter, normalizedQuery, transfers]
+  );
+  const hasFinishedTransfers = transfers.some(
+    (item) => !['pending', 'in-progress', 'paused'].includes(item.status)
   );
 
   if (transfers.length === 0) {
@@ -163,6 +174,15 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
             }}
           >
             {messages.taskRetryVisible}
+          </button>
+        )}
+        {hasFinishedTransfers && (
+          <button
+            type="button"
+            className="button button-ghost transfer-bulk-action"
+            onClick={() => void onClearFinished()}
+          >
+            {messages.settingsClearTransferHistory}
           </button>
         )}
         <input
