@@ -15,6 +15,7 @@ publish:
   - provider: github
     owner: anYuJia
     repo: syncFile
+    releaseType: release
 
 mac:
   category: public.app-category.productivity
