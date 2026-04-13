@@ -101,4 +101,31 @@ describe('TransferHistoryStore', () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].transferId).toBe('active-1');
   });
+
+  it('clears paused records when dismissible history is requested', () => {
+    const store = new TransferHistoryStore(root);
+    store.upsert({
+      transferId: 'paused-1',
+      direction: 'receive',
+      fileName: 'paused.txt',
+      fileSize: 100,
+      bytesTransferred: 30,
+      peerDeviceName: 'Peer',
+      status: 'paused'
+    });
+    store.upsert({
+      transferId: 'active-1',
+      direction: 'send',
+      fileName: 'active.txt',
+      fileSize: 100,
+      bytesTransferred: 20,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+
+    const remaining = store.clearDismissible();
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].transferId).toBe('active-1');
+  });
 });

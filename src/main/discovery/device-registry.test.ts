@@ -52,4 +52,20 @@ describe('DeviceRegistry', () => {
 
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it('prunes devices that have gone stale', () => {
+    const registry = new DeviceRegistry();
+    const offlineListener = vi.fn();
+    registry.on('device-offline', offlineListener);
+
+    registry.upsert(makeDevice({ deviceId: 'dev-stale' }), 1_000);
+    registry.upsert(makeDevice({ deviceId: 'dev-fresh', address: '10.0.0.11' }), 5_000);
+
+    const removed = registry.pruneOlderThan(3_000);
+
+    expect(removed).toEqual(['dev-stale']);
+    expect(registry.list()).toHaveLength(1);
+    expect(registry.list()[0]?.deviceId).toBe('dev-fresh');
+    expect(offlineListener).toHaveBeenCalledWith('dev-stale');
+  });
 });

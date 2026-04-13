@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { DeviceList } from './components/DeviceList';
 import { DropZone } from './components/DropZone';
@@ -10,9 +10,18 @@ import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
 import type { Device, IncomingOffer, PairRequest, TrustedDevice } from '@shared/types';
 
-const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v3';
+const LEFT_PANE_SPLIT_KEY = 'syncfile.left-pane-manual-split-v1';
+const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v4';
+const DEFAULT_LEFT_PANE_SPLIT = 0.28;
+const DEFAULT_RIGHT_PANE_SPLIT = 0.5;
+const MIN_LEFT_PANE_SPLIT = 0.2;
+const MAX_LEFT_PANE_SPLIT = 0.5;
+const MIN_RIGHT_PANE_SPLIT = 0.2;
+const MAX_RIGHT_PANE_SPLIT = 0.8;
+const MIN_LEFT_PANE_WIDTH = 220;
+const MIN_RIGHT_PANE_WIDTH = 420;
 const MIN_RIGHT_PANE_SECTION_HEIGHT = 150;
-const AUTO_DISPATCH_MIN_HEIGHT = 260;
+const COLUMN_RESIZER_WIDTH = 12;
 const RIGHT_PANE_RESIZER_HEIGHT = 12;
 
 function clamp(value: number, min: number, max: number): number {
@@ -45,16 +54,27 @@ export function App(): JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
-  const [rightPaneSplit, setRightPaneSplit] = useState<number | null>(() => {
+  const [leftPaneSplit, setLeftPaneSplit] = useState<number>(() => {
+    const saved = localStorage.getItem(LEFT_PANE_SPLIT_KEY);
+    const parsed = saved ? Number(saved) : Number.NaN;
+    return Number.isFinite(parsed)
+      ? clamp(parsed, MIN_LEFT_PANE_SPLIT, MAX_LEFT_PANE_SPLIT)
+      : DEFAULT_LEFT_PANE_SPLIT;
+  });
+  const [rightPaneSplit, setRightPaneSplit] = useState<number>(() => {
     const saved = localStorage.getItem(RIGHT_PANE_SPLIT_KEY);
     const parsed = saved ? Number(saved) : Number.NaN;
-    return Number.isFinite(parsed) ? clamp(parsed, 0.25, 0.75) : null;
+    return Number.isFinite(parsed)
+      ? clamp(parsed, MIN_RIGHT_PANE_SPLIT, MAX_RIGHT_PANE_SPLIT)
+      : DEFAULT_RIGHT_PANE_SPLIT;
   });
-  const [isResizingPanels, setIsResizingPanels] = useState(false);
+  const [isResizingRows, setIsResizingRows] = useState(false);
+  const [isResizingColumns, setIsResizingColumns] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const contentGridRef = useRef<HTMLElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
   const pairingDevice = devices.find((device) => device.deviceId === pairingDeviceId) ?? null;
@@ -99,16 +119,15 @@ export function App(): JSX.Element {
   }, [isDarkMode]);
 
   useEffect(() => {
-    if (rightPaneSplit === null) {
-      localStorage.removeItem(RIGHT_PANE_SPLIT_KEY);
-      return;
-    }
+    localStorage.setItem(LEFT_PANE_SPLIT_KEY, String(leftPaneSplit));
+  }, [leftPaneSplit]);
 
+  useEffect(() => {
     localStorage.setItem(RIGHT_PANE_SPLIT_KEY, String(rightPaneSplit));
   }, [rightPaneSplit]);
 
   useEffect(() => {
-    if (!isResizingPanels) {
+    if (!isResizingRows) {
       return;
     }
 
@@ -135,7 +154,7 @@ export function App(): JSX.Element {
     };
 
     const stopResizing = (): void => {
-      setIsResizingPanels(false);
+      setIsResizingRows(false);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -151,7 +170,53 @@ export function App(): JSX.Element {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [isResizingPanels]);
+  }, [isResizingRows]);
+
+  useEffect(() => {
+    if (!isResizingColumns) {
+      return;
+    }
+
+    const updateSplitFromPointer = (clientX: number): void => {
+      const pane = contentGridRef.current;
+      if (!pane) {
+        return;
+      }
+
+      const rect = pane.getBoundingClientRect();
+      const availableWidth = rect.width - COLUMN_RESIZER_WIDTH;
+      if (availableWidth <= MIN_LEFT_PANE_WIDTH + MIN_RIGHT_PANE_WIDTH) {
+        return;
+      }
+
+      const minRatio = MIN_LEFT_PANE_WIDTH / availableWidth;
+      const maxRatio = 1 - MIN_RIGHT_PANE_WIDTH / availableWidth;
+      const nextRatio = (clientX - rect.left - COLUMN_RESIZER_WIDTH / 2) / availableWidth;
+      setLeftPaneSplit(clamp(nextRatio, minRatio, maxRatio));
+    };
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      updateSplitFromPointer(event.clientX);
+    };
+
+    const stopResizing = (): void => {
+      setIsResizingColumns(false);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResizing);
+    window.addEventListener('pointercancel', stopResizing);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResizing);
+      window.removeEventListener('pointercancel', stopResizing);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingColumns]);
 
   async function handleSendFiles(filePaths: string[]): Promise<void> {
     const fallbackTarget = devices.length === 1 ? devices[0].deviceId : null;
@@ -314,20 +379,31 @@ export function App(): JSX.Element {
 
   const currentOffer = pendingOffers[0] ?? null;
   const currentPairRequest = pendingPairRequests[0] ?? null;
-  const dispatchCardStyle =
-    rightPaneSplit === null
-      ? undefined
-      : {
-          flexBasis: `calc((100% - ${RIGHT_PANE_RESIZER_HEIGHT}px) * ${rightPaneSplit})`
-        };
+  const contentGridStyle = {
+    '--left-pane-split': leftPaneSplit
+  } as CSSProperties;
+  const rightPaneStyle = {
+    '--right-pane-split': rightPaneSplit
+  } as CSSProperties;
 
   const handlePaneResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     event.preventDefault();
-    setIsResizingPanels(true);
+    setIsResizingColumns(false);
+    setIsResizingRows(true);
   };
 
   const handlePaneResizerDoubleClick = (): void => {
-    setRightPaneSplit(null);
+    setRightPaneSplit(DEFAULT_RIGHT_PANE_SPLIT);
+  };
+
+  const handleColumnResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    event.preventDefault();
+    setIsResizingRows(false);
+    setIsResizingColumns(true);
+  };
+
+  const handleColumnResizerDoubleClick = (): void => {
+    setLeftPaneSplit(DEFAULT_LEFT_PANE_SPLIT);
   };
 
   return (
@@ -389,7 +465,11 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      <main className={`content-grid${isResizingPanels ? ' is-resizing' : ''}`}>
+      <main
+        ref={contentGridRef}
+        className={`content-grid${isResizingRows ? ' is-resizing-rows' : ''}${isResizingColumns ? ' is-resizing-columns' : ''}`}
+        style={contentGridStyle}
+      >
         <section className="card card-manifest">
           <div className="card-head">
             <h2>{messages.onlineDevices}</h2>
@@ -420,14 +500,22 @@ export function App(): JSX.Element {
           />
         </section>
 
+        <button
+          type="button"
+          className={`column-resizer${isResizingColumns ? ' is-active' : ''}`}
+          onPointerDown={handleColumnResizerPointerDown}
+          onDoubleClick={handleColumnResizerDoubleClick}
+          aria-label="Resize online devices and main panels"
+        >
+          <span className="column-resizer-handle" aria-hidden="true" />
+        </button>
+
         <div
           ref={rightPaneRef}
-          className={`right-pane${rightPaneSplit === null ? ' is-auto' : ''}`}
+          className="right-pane"
+          style={rightPaneStyle}
         >
-          <section
-            className="card card-dispatch"
-            style={dispatchCardStyle}
-          >
+          <section className="card card-dispatch">
             <div className="card-head">
               <h2>{messages.sendFile}</h2>
               {selectedDevice && (
@@ -454,7 +542,7 @@ export function App(): JSX.Element {
 
           <button
             type="button"
-            className={`pane-resizer${isResizingPanels ? ' is-active' : ''}`}
+            className={`pane-resizer${isResizingRows ? ' is-active' : ''}`}
             onPointerDown={handlePaneResizerPointerDown}
             onDoubleClick={handlePaneResizerDoubleClick}
             aria-label="Resize send and transfer panels"

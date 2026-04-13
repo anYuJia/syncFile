@@ -74,10 +74,13 @@ body,
 #root {
   width: 100%;
   height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 
 body {
+  min-height: 100vh;
+  min-height: 100dvh;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
   color: var(--text-primary);
   background: var(--bg-primary);
@@ -88,11 +91,15 @@ body {
 /* ── Shell ────────────────────────────────────────────────────── */
 
 .app-shell {
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 14px;
+  overflow: hidden;
 }
 
 /* ── Topbar ───────────────────────────────────────────────────── */
@@ -230,66 +237,100 @@ body {
 /* ── Content grid ─────────────────────────────────────────────── */
 
 .content-grid {
-  height: 100%;
+  --column-resizer-size: 12px;
+  --left-pane-split: 0.28;
+  --left-pane-min-width: 220px;
+  flex: 1 1 auto;
+  height: auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns:
+    minmax(var(--left-pane-min-width), calc((100% - var(--column-resizer-size)) * var(--left-pane-split)))
+    var(--column-resizer-size)
+    minmax(0, 1fr);
   grid-template-rows: 1fr;
-  gap: 12px;
+  gap: 0;
+  overflow: hidden;
 }
 
-.content-grid.is-resizing,
-.content-grid.is-resizing * {
+.content-grid.is-resizing-columns,
+.content-grid.is-resizing-columns * {
+  cursor: col-resize !important;
+}
+
+.content-grid.is-resizing-rows,
+.content-grid.is-resizing-rows * {
   cursor: row-resize !important;
 }
 
+.card-manifest {
+  height: 100%;
+  min-width: 0;
+}
+
+.column-resizer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.column-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.26);
+  transform: translateX(-50%);
+}
+
+.column-resizer-handle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.column-resizer:hover .column-resizer-handle,
+.column-resizer.is-active .column-resizer-handle {
+  background: var(--bg-tertiary);
+  box-shadow: var(--shadow-md);
+  transform: translate(-50%, -50%) scaleY(1.08);
+}
+
+.column-resizer:focus-visible {
+  outline: none;
+}
+
+.column-resizer:focus-visible .column-resizer-handle {
+  box-shadow: 0 0 0 3px var(--accent-subtle), var(--shadow-md);
+}
+
 .right-pane {
+  --row-resizer-size: 12px;
+  --right-pane-split: 0.5;
+  --dispatch-min-height: 150px;
+  --ledger-min-height: 160px;
   height: 100%;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.right-pane.is-auto .card-dispatch {
-  flex: 0 1 auto;
-  min-height: 260px;
-  max-height: calc(100% - 160px);
-}
-
-.right-pane.is-auto .card-dispatch .drop-zone {
-  flex: 0 0 auto;
-  min-height: 260px;
-}
-
-.right-pane.is-auto .card-dispatch .drop-zone-label {
-  flex: 0 0 220px;
-  min-height: 220px;
-}
-
-.right-pane.is-auto .card-dispatch .dz-files {
-  flex: 0 1 auto;
-  min-height: 0;
-}
-
-.right-pane.is-auto .card-dispatch .dz-file-stage {
-  flex: 0 1 auto;
-  min-height: 0;
-}
-
-.right-pane.is-auto .card-dispatch .dz-file-grid {
-  flex: 0 1 auto;
-  max-height: 260px;
-}
-
-.right-pane:not(.is-auto) .card-dispatch {
-  flex: 0 0 auto;
-  min-height: 150px;
-}
-
-.right-pane .card-ledger {
-  flex: 1 1 0;
-  min-height: 160px;
+  min-width: 0;
+  display: grid;
+  grid-template-rows:
+    minmax(var(--dispatch-min-height), calc((100% - var(--row-resizer-size)) * var(--right-pane-split)))
+    var(--row-resizer-size)
+    minmax(var(--ledger-min-height), 1fr);
   overflow: hidden;
 }
 
@@ -311,20 +352,23 @@ body {
 
 .card-dispatch {
   border-top: 2px solid var(--accent);
+  min-height: 0;
 }
 
 .card-ledger {
   border-top: 2px solid var(--text-tertiary);
+  min-height: 0;
 }
 
 .pane-resizer {
   position: relative;
   width: 100%;
-  flex: 0 0 12px;
+  height: 100%;
   border: 0;
   background: transparent;
   padding: 0;
   cursor: row-resize;
+  touch-action: none;
 }
 
 .pane-resizer::before {
@@ -436,6 +480,7 @@ body {
 /* ── Device list ──────────────────────────────────────────────── */
 
 .device-list {
+  flex: 1 1 auto;
   margin: 0;
   padding: 4px 10px 10px;
   list-style: none;
@@ -545,7 +590,8 @@ body {
 }
 
 .device-list-empty {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1045,13 +1091,19 @@ body {
   background: var(--bg-secondary);
   padding: 10px;
   display: grid;
-  gap: 4px;
+  gap: 8px;
   overflow: hidden;
   transition: all 0.15s ease;
 }
 
 .transfer-item:hover {
   box-shadow: var(--shadow-sm);
+}
+
+.transfer-item.is-compact {
+  gap: 0;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 .transfer-item-stamp {
@@ -1062,13 +1114,6 @@ body {
   color: var(--text-tertiary);
 }
 
-.transfer-item-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .transfer-item-summary {
   width: 100%;
   border: 0;
@@ -1076,11 +1121,37 @@ body {
   padding: 0;
   text-align: left;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.transfer-item-summary-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.transfer-item-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.transfer-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .transfer-item-title-group {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -1102,15 +1173,37 @@ body {
 
 .transfer-item-percent {
   font-family: 'SF Mono', 'Menlo', monospace;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   flex-shrink: 0;
 }
 
+.transfer-item-summary-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.transfer-item-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+  background: rgba(148, 163, 184, 0.12);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
 .transfer-item-meta {
   color: var(--text-secondary);
   font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .transfer-item-note {
@@ -1160,6 +1253,27 @@ body {
   font-size: 10px;
 }
 
+.transfer-item-summary:hover .transfer-item-chevron {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.transfer-item.is-compact .transfer-item-summary-head {
+  gap: 6px;
+}
+
+.transfer-item.is-compact .transfer-item-summary-main {
+  gap: 2px;
+}
+
+.transfer-item.is-compact .transfer-item-name {
+  font-size: 12px;
+}
+
+.transfer-item.is-compact .transfer-item-percent {
+  font-size: 12px;
+}
+
 .transfer-item-details {
   display: grid;
   gap: 6px;
@@ -1206,6 +1320,126 @@ body {
 .transfer-item.is-rejected .transfer-item-stamp,
 .transfer-item.is-cancelled .transfer-item-stamp {
   color: var(--danger);
+}
+
+.transfer-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(10px);
+}
+
+.transfer-detail-dialog {
+  width: min(680px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0.08), transparent 18%),
+    var(--bg-elevated);
+  box-shadow: var(--shadow-xl);
+  padding: 20px;
+}
+
+.transfer-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.transfer-detail-stamp {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.transfer-detail-stamp.is-completed {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.transfer-detail-stamp.is-failed,
+.transfer-detail-stamp.is-rejected,
+.transfer-detail-stamp.is-cancelled {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.transfer-detail-title {
+  margin: 16px 0 6px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.transfer-detail-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.transfer-detail-note {
+  margin: 10px 0 0;
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.transfer-detail-progress {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.transfer-detail-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+.transfer-detail-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.transfer-detail-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.transfer-detail-details {
+  margin-top: 16px;
 }
 
 /* ── Receive prompt ───────────────────────────────────────────── */
@@ -1822,6 +2056,10 @@ body {
   .content-grid {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(420px, 1fr);
+  }
+
+  .column-resizer {
+    display: none;
   }
 
   .card-manifest {

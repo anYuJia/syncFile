@@ -455,7 +455,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   ipcMain.handle(IpcChannels.RefreshDevices, (): Device[] => {
-    context.mdnsService.refresh();
+    context.mdnsService.refresh(true);
     return context.registry.list();
   });
 
@@ -658,7 +658,16 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   ipcMain.handle(IpcChannels.ClearTransferHistory, (): void => {
-    context.transferHistoryStore.clearFinished();
+    const pausedReceiveIds = context.transferHistoryStore
+      .list()
+      .filter((record) => record.direction === 'receive' && record.status === 'paused')
+      .map((record) => record.transferId);
+
+    for (const transferId of pausedReceiveIds) {
+      context.sandbox.discardIncomingResume(transferId, true);
+    }
+
+    context.transferHistoryStore.clearDismissible();
     publishTransferHistoryReset();
   });
 

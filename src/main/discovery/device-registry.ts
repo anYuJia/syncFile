@@ -28,12 +28,13 @@ export declare interface DeviceRegistry {
 }
 
 export class DeviceRegistry extends EventEmitter {
-  private readonly devices = new Map<string, Device>();
+  private readonly devices = new Map<string, { device: Device; lastSeenAt: number }>();
 
-  upsert(device: Device): void {
-    const previous = this.devices.get(device.deviceId);
+  upsert(device: Device, seenAt = Date.now()): void {
+    const previousEntry = this.devices.get(device.deviceId);
+    const previous = previousEntry?.device;
     const existed = previous !== undefined;
-    this.devices.set(device.deviceId, device);
+    this.devices.set(device.deviceId, { device, lastSeenAt: seenAt });
     if (!existed || hasMeaningfulChange(previous, device)) {
       this.emit('device-online', device);
       this.emit('device:online', device);
@@ -47,7 +48,7 @@ export class DeviceRegistry extends EventEmitter {
   }
 
   list(): Device[] {
-    return Array.from(this.devices.values());
+    return Array.from(this.devices.values(), (entry) => entry.device);
   }
 
   clear(): void {
@@ -57,6 +58,20 @@ export class DeviceRegistry extends EventEmitter {
       this.emit('device-offline', id);
       this.emit('device:offline', id);
     }
+  }
+
+  pruneOlderThan(cutoffTime: number): string[] {
+    const removedIds: string[] = [];
+    for (const [id, entry] of this.devices.entries()) {
+      if (entry.lastSeenAt >= cutoffTime) {
+        continue;
+      }
+      this.devices.delete(id);
+      removedIds.push(id);
+      this.emit('device-offline', id);
+      this.emit('device:offline', id);
+    }
+    return removedIds;
   }
 }
 
