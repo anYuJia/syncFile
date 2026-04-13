@@ -24,6 +24,7 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 
 const api = {
   getDevices: (): Promise<Device[]> => ipcRenderer.invoke(IpcChannels.GetDevices),
+  refreshDevices: (): Promise<Device[]> => ipcRenderer.invoke(IpcChannels.RefreshDevices),
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
   getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
   getPendingOffers: (): Promise<IncomingOffer[]> => ipcRenderer.invoke(IpcChannels.GetPendingOffers),

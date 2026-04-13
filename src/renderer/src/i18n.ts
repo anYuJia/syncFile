@@ -18,6 +18,7 @@ export interface Messages {
   routeMetaIdle: string;
   routeReady: (fromName: string, toName: string) => string;
   onlineDevices: string;
+  refreshDevices: string;
   sendFile: string;
   transferActivity: string;
   manifestKicker: string;
@@ -165,6 +166,7 @@ const zh: Messages = {
   routeMetaIdle: '尚未选中目的地',
   routeReady: (fromName, toName) => `${fromName} → ${toName}`,
   onlineDevices: '在线设备',
+  refreshDevices: '刷新设备',
   sendFile: '发送文件',
   transferActivity: '传输记录',
   manifestKicker: '设备清单',
@@ -310,6 +312,7 @@ const en: Messages = {
   routeMetaIdle: 'No destination selected',
   routeReady: (fromName, toName) => `${fromName} → ${toName}`,
   onlineDevices: 'Online devices',
+  refreshDevices: 'Refresh devices',
   sendFile: 'Send file',
   transferActivity: 'Transfer activity',
   manifestKicker: 'Manifest',

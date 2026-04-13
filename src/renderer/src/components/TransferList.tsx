@@ -95,7 +95,11 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
   );
 
   if (transfers.length === 0) {
-    return <div className="transfer-list-empty">{messages.transferEmpty}</div>;
+    return (
+      <div className="transfer-panel">
+        <div className="transfer-list-empty">{messages.transferEmpty}</div>
+      </div>
+    );
   }
 
   const handleOpenPath = async (path: string): Promise<void> => {
@@ -115,7 +119,7 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
   };
 
   return (
-    <>
+    <div className="transfer-panel">
       <div className="transfer-toolbar">
         <div className="transfer-filters">
           {[
@@ -289,6 +293,6 @@ export function TransferList({ transfers, messages, onPause, onCancel, onRetry }
       })}
       </ul>
       )}
-    </>
+    </div>
   );
 }

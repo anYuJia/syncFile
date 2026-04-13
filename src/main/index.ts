@@ -4,8 +4,9 @@ import { platform as getPlatform } from 'os';
 import { app, BrowserWindow, shell } from 'electron';
 
 import type { Device } from '../shared/types';
+import type { MdnsService } from './discovery/mdns-service';
 import { DeviceRegistry } from './discovery/device-registry';
-import { MdnsService } from './discovery/mdns-service';
+import { MdnsService as SyncMdnsService } from './discovery/mdns-service';
 import { registerIpcHandlers } from './ipc/handlers';
 import { loadOrCreateIdentity } from './storage/device-identity';
 import { SandboxLocationStore } from './storage/sandbox-location';
@@ -92,7 +93,7 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  mdnsService = new MdnsService({
+  mdnsService = new SyncMdnsService({
     registry,
     self: {
       deviceId: identity.deviceId,
@@ -129,6 +130,7 @@ async function bootstrap(): Promise<void> {
       pendingOfferStore,
       settingsStore,
       transferHistoryStore,
+      mdnsService,
       identity,
       getSelfDevice,
       getWindow: () => mainWindow

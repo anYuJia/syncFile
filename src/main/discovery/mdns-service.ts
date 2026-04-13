@@ -4,6 +4,7 @@ import type { DeviceRegistry } from './device-registry';
 
 export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
+const BROWSER_REFRESH_MS = 4000;
 
 export interface MdnsServiceOptions {
   registry: DeviceRegistry;
@@ -21,6 +22,7 @@ export class MdnsService {
   private readonly bonjour: Bonjour;
   private published?: Service;
   private browser?: Browser;
+  private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: MdnsServiceOptions) {
     this.bonjour = new Bonjour();
@@ -29,6 +31,7 @@ export class MdnsService {
   start(): void {
     this.publish();
     this.find();
+    this.scheduleRefresh();
   }
 
   publish(): void {
@@ -53,12 +56,23 @@ export class MdnsService {
     const browser = this.bonjour.find({ type: SERVICE_TYPE });
     this.browser = browser;
     browser.on('up', this.onServiceUp);
+    browser.on('txt-update', this.onServiceUp);
     browser.on('down', this.onServiceDown);
   }
 
+  refresh(): void {
+    this.browser?.update();
+  }
+
   async stop(): Promise<void> {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+
     if (this.browser) {
       this.browser.off('up', this.onServiceUp);
+      this.browser.off('txt-update', this.onServiceUp);
       this.browser.off('down', this.onServiceDown);
       this.browser.stop();
       this.browser = undefined;
@@ -96,7 +110,7 @@ export class MdnsService {
     if (!deviceId) return null;
 
     const host = service.host || service.fqdn || '';
-    const address = selectAddress(service.addresses, host);
+    const address = selectAddress(service.addresses, host, service.referer?.address);
 
     return {
       deviceId,
@@ -119,10 +133,70 @@ export class MdnsService {
     if (Buffer.isBuffer(raw)) return raw.toString('utf8');
     return undefined;
   }
+
+  private scheduleRefresh(): void {
+    if (this.refreshTimer) {
+      return;
+    }
+
+    this.refreshTimer = setInterval(() => {
+      this.browser?.update();
+    }, BROWSER_REFRESH_MS);
+  }
 }
 
-function selectAddress(addresses: string[] | undefined, host: string): string {
-  if (!addresses || addresses.length === 0) return host;
-  const ipv4 = addresses.find((address) => !address.includes(':'));
-  return ipv4 ?? addresses[0];
+export function selectAddress(
+  addresses: string[] | undefined,
+  host: string,
+  refererAddress?: string
+): string {
+  if (!addresses || addresses.length === 0) {
+    if (refererAddress && !refererAddress.includes(':')) {
+      return refererAddress;
+    }
+    return host;
+  }
+
+  if (refererAddress && addresses.includes(refererAddress)) {
+    return refererAddress;
+  }
+
+  const ranked = [...addresses].sort((left, right) => {
+    return scoreAddress(right, refererAddress) - scoreAddress(left, refererAddress);
+  });
+
+  return ranked[0] ?? host;
+}
+
+function scoreAddress(address: string, refererAddress?: string): number {
+  if (refererAddress && address === refererAddress) {
+    return 100;
+  }
+  if (!address.includes(':')) {
+    if (refererAddress && sameIpv4Subnet(address, refererAddress)) {
+      return 90;
+    }
+    if (isPrivateIpv4(address)) {
+      return 80;
+    }
+    return 70;
+  }
+  return 10;
+}
+
+function sameIpv4Subnet(left: string, right: string): boolean {
+  if (left.includes(':') || right.includes(':')) {
+    return false;
+  }
+
+  const [l1, l2, l3] = left.split('.');
+  const [r1, r2, r3] = right.split('.');
+  return l1 === r1 && l2 === r2 && l3 === r3;
+}
+
+function isPrivateIpv4(address: string): boolean {
+  if (address.startsWith('10.')) return true;
+  if (address.startsWith('192.168.')) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(address)) return true;
+  return false;
 }

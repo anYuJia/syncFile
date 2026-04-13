@@ -31,9 +31,10 @@ export class DeviceRegistry extends EventEmitter {
   private readonly devices = new Map<string, Device>();
 
   upsert(device: Device): void {
-    const existed = this.devices.has(device.deviceId);
+    const previous = this.devices.get(device.deviceId);
+    const existed = previous !== undefined;
     this.devices.set(device.deviceId, device);
-    if (!existed) {
+    if (!existed || hasMeaningfulChange(previous, device)) {
       this.emit('device-online', device);
       this.emit('device:online', device);
     }
@@ -57,4 +58,21 @@ export class DeviceRegistry extends EventEmitter {
       this.emit('device:offline', id);
     }
   }
+}
+
+function hasMeaningfulChange(previous: Device | undefined, next: Device): boolean {
+  if (!previous) {
+    return true;
+  }
+
+  return (
+    previous.name !== next.name ||
+    previous.host !== next.host ||
+    previous.address !== next.address ||
+    previous.port !== next.port ||
+    previous.platform !== next.platform ||
+    previous.version !== next.version ||
+    previous.trustFingerprint !== next.trustFingerprint ||
+    previous.trustPublicKey !== next.trustPublicKey
+  );
 }

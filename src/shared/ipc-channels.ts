@@ -4,6 +4,7 @@
 export const IpcChannels = {
   // Renderer -> Main (invoke)
   GetDevices: 'syncfile:get-devices',
+  RefreshDevices: 'syncfile:refresh-devices',
   GetSelfDevice: 'syncfile:get-self-device',
   GetTransferHistory: 'syncfile:get-transfer-history',
   GetPendingOffers: 'syncfile:get-pending-offers',

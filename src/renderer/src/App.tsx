@@ -28,6 +28,7 @@ export function App(): JSX.Element {
     transfers,
     errorMessage,
     clearError,
+    refreshDevices,
     sendFile,
     pauseTransfer,
     cancelTransfer,
@@ -42,6 +43,7 @@ export function App(): JSX.Element {
   const [pendingPairRequests, setPendingPairRequests] = useState<PairRequest[]>([]);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [rightPaneSplit, setRightPaneSplit] = useState<number | null>(() => {
     const saved = localStorage.getItem(RIGHT_PANE_SPLIT_KEY);
@@ -227,6 +229,22 @@ export function App(): JSX.Element {
     }
   }
 
+  async function handleRefreshDevices(): Promise<void> {
+    try {
+      setIsRefreshingDevices(true);
+      const list = await refreshDevices();
+      if (list.length > 0 && !list.some((item) => item.deviceId === selectedDeviceId)) {
+        setSelectedDeviceId(list[0]?.deviceId ?? null);
+      }
+    } catch {
+      // Best effort only.
+    } finally {
+      window.setTimeout(() => {
+        setIsRefreshingDevices(false);
+      }, 600);
+    }
+  }
+
   async function handleTrustAndAccept(offer: IncomingOffer): Promise<void> {
     try {
       setBusyOfferId(offer.offerId);
@@ -367,7 +385,23 @@ export function App(): JSX.Element {
         <section className="card card-manifest">
           <div className="card-head">
             <h2>{messages.onlineDevices}</h2>
-            <span className="card-counter">{devices.length}</span>
+            <div className="card-head-actions">
+              <button
+                type="button"
+                className={`button button-ghost manifest-refresh-button${isRefreshingDevices ? ' is-spinning' : ''}`}
+                onClick={() => void handleRefreshDevices()}
+                title={messages.refreshDevices}
+                aria-label={messages.refreshDevices}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10" />
+                  <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14" />
+                </svg>
+              </button>
+              <span className="card-counter">{devices.length}</span>
+            </div>
           </div>
           <DeviceList
             devices={devices}

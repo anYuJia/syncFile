@@ -17,6 +17,7 @@ import type {
   TransferProgress
 } from '../../shared/types';
 import type { DeviceRegistry } from '../discovery/device-registry';
+import type { MdnsService } from '../discovery/mdns-service';
 import type { PendingOfferStore } from '../storage/pending-offers';
 import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
@@ -138,6 +139,7 @@ interface OutboundTransferMeta {
 
 export interface IpcContext {
   registry: DeviceRegistry;
+  mdnsService: MdnsService;
   tcpServer: TcpServer;
   tcpClient: TcpClient;
   sandbox: Sandbox;
@@ -449,6 +451,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   };
 
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
+    return context.registry.list();
+  });
+
+  ipcMain.handle(IpcChannels.RefreshDevices, (): Device[] => {
+    context.mdnsService.refresh();
     return context.registry.list();
   });
 

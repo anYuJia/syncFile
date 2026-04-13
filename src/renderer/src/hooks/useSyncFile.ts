@@ -22,6 +22,7 @@ interface UseSyncFileResult {
   isLoading: boolean;
   errorMessage: string | null;
   clearError: () => void;
+  refreshDevices: () => Promise<Device[]>;
   sendFile: (deviceId: string, filePath: string, existingTransferId?: string) => Promise<TransferId>;
   pauseTransfer: (transferId: string) => Promise<void>;
   cancelTransfer: (transferId: string) => Promise<void>;
@@ -265,6 +266,17 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     }
   }
 
+  async function refreshDevices(): Promise<Device[]> {
+    try {
+      const list = await window.syncFile.refreshDevices();
+      setDevices(list);
+      return list;
+    } catch (error) {
+      setErrorMessage(localizeError(error, messages) || messages.failedToLoadDeviceInformation);
+      throw error;
+    }
+  }
+
   return {
     selfDevice,
     devices,
@@ -273,6 +285,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     isLoading,
     errorMessage,
     clearError: () => setErrorMessage(null),
+    refreshDevices,
     sendFile,
     pauseTransfer,
     cancelTransfer,
@@ -304,7 +317,7 @@ function localizeError(error: unknown, messages: Messages): string | null {
   if (message.includes('source file changed')) {
     return messages.errorSourceFileChanged;
   }
-  if (message.includes('connection timed out')) {
+  if (message.includes('ETIMEDOUT') || message.includes('connection timed out')) {
     return messages.errorConnectionTimedOut;
   }
   if (message.includes('did not respond in time')) {
