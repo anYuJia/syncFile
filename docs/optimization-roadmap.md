@@ -11,6 +11,8 @@ Move syncFile from a usable LAN transfer prototype to a reliable desktop tool wi
 - stronger recovery after interruption/restart
 - better maintenance and observability
 
+Detailed audit-derived fix tracking now lives in `docs/fix-tracker.md`.
+
 ## Current State
 
 Already implemented:
