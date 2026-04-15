@@ -8,6 +8,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoAccept: false,
   autoAcceptMaxSizeMB: 64,
   openReceivedFolder: false,
+  desktopNotifications: true,
   trustedDevices: []
 };
 
@@ -64,6 +65,10 @@ function normalizeSettings(input: Partial<Settings>): Settings {
       DEFAULT_SETTINGS.autoAcceptMaxSizeMB
     ),
     openReceivedFolder,
+    desktopNotifications:
+      typeof input.desktopNotifications === 'boolean'
+        ? input.desktopNotifications
+        : DEFAULT_SETTINGS.desktopNotifications,
     trustedDevices: normalizeTrustedDevices(input.trustedDevices)
   };
 }

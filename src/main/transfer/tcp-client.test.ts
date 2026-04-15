@@ -16,11 +16,26 @@ describe('TcpClient', () => {
   let server: TcpServer;
   let port: number;
   const clientIdentity = createTrustKeypair();
+  const serverIdentity = createTrustKeypair();
+  const serverPeer = {
+    deviceId: 'server-device',
+    trustFingerprint: serverIdentity.fingerprint,
+    trustPublicKey: serverIdentity.publicKey
+  };
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'syncfile-cli-'));
     sandbox = new Sandbox(root);
-    server = new TcpServer({ sandbox });
+    server = new TcpServer({
+      sandbox,
+      selfDevice: {
+        deviceId: 'server-device',
+        name: 'Server',
+        trustFingerprint: serverIdentity.fingerprint,
+        trustPublicKey: serverIdentity.publicKey,
+        trustPrivateKey: serverIdentity.privateKey
+      }
+    });
     server.on('incoming-offer', (_offer, respond) => respond.accept());
     port = await server.listen(0);
   });
@@ -56,6 +71,7 @@ describe('TcpClient', () => {
     await client.sendFile({
       host: '127.0.0.1',
       port,
+      peer: serverPeer,
       filePath: sourcePath,
       sha256: await sha256File(sourcePath)
     });
@@ -84,7 +100,13 @@ describe('TcpClient', () => {
     });
 
     await expect(
-      client.sendFile({ host: '127.0.0.1', port, filePath: sourcePath, sha256: await sha256File(sourcePath) })
+      client.sendFile({
+        host: '127.0.0.1',
+        port,
+        peer: serverPeer,
+        filePath: sourcePath,
+        sha256: await sha256File(sourcePath)
+      })
     ).rejects.toThrow(/declined/i);
   });
 
@@ -113,6 +135,7 @@ describe('TcpClient', () => {
       client.sendFile({
         host: '127.0.0.1',
         port,
+        peer: serverPeer,
         filePath: sourcePath,
         fileId: 'cancel-me',
         sha256: await sha256File(sourcePath)
@@ -146,6 +169,7 @@ describe('TcpClient', () => {
       client.sendFile({
         host: '127.0.0.1',
         port,
+        peer: serverPeer,
         filePath: sourcePath,
         fileId: 'resume-me',
         sha256: await sha256File(sourcePath)
@@ -161,6 +185,7 @@ describe('TcpClient', () => {
     await client.sendFile({
       host: '127.0.0.1',
       port,
+      peer: serverPeer,
       filePath: sourcePath,
       fileId: 'resume-me',
       sha256: await sha256File(sourcePath)
@@ -185,7 +210,7 @@ describe('TcpClient', () => {
       respond.accept();
     });
 
-    await expect(client.pairWithPeer('127.0.0.1', port)).resolves.toBe(true);
+    await expect(client.pairWithPeer('127.0.0.1', port, serverPeer)).resolves.toBe(true);
   });
 
   it('pauses an in-progress transfer and allows it to resume later', async () => {
@@ -217,6 +242,7 @@ describe('TcpClient', () => {
       client.sendFile({
         host: '127.0.0.1',
         port,
+        peer: serverPeer,
         filePath: sourcePath,
         fileId: 'pause-me',
         sha256: await sha256File(sourcePath)
@@ -232,6 +258,7 @@ describe('TcpClient', () => {
     await client.sendFile({
       host: '127.0.0.1',
       port,
+      peer: serverPeer,
       filePath: sourcePath,
       fileId: 'pause-me',
       sha256: await sha256File(sourcePath)
@@ -274,7 +301,7 @@ describe('TcpClient', () => {
       idleTimeoutMs: 50
     });
 
-    await expect(client.pairWithPeer('127.0.0.1', idlePort)).rejects.toThrow(/timed out/i);
+    await expect(client.pairWithPeer('127.0.0.1', idlePort, serverPeer)).rejects.toThrow(/timed out/i);
     for (const socket of idleConnections) {
       socket.destroy();
     }

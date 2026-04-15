@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MessageDecoder, encodeMessage } from './codec';
+import { MAX_CONTROL_MESSAGE_BYTES, MessageDecoder, encodeMessage } from './codec';
 import { PROTOCOL_VERSION } from './protocol';
 
 describe('encodeMessage', () => {
@@ -39,6 +39,16 @@ describe('encodeMessage', () => {
     expect(declaredLength).toBe(payloadBytes);
     expect(declaredLength).toBeGreaterThan(payloadText.length);
     expect(JSON.parse(payloadText)).toEqual(message);
+  });
+
+  it('rejects control messages larger than the configured limit', () => {
+    expect(() =>
+      encodeMessage({
+        type: 'file-reject',
+        fileId: 'x'.repeat(MAX_CONTROL_MESSAGE_BYTES),
+        reason: 'user-declined'
+      } as const)
+    ).toThrow(`Message exceeds ${MAX_CONTROL_MESSAGE_BYTES} bytes`);
   });
 });
 
@@ -134,5 +144,25 @@ describe('MessageDecoder', () => {
     expect(second.messages).toHaveLength(1);
     expect(second.messages[0]).toEqual({ type: 'file-accept', fileId: 'split-remainder' });
     expect(second.remainder).toEqual(trailing);
+  });
+
+  it('rejects frames whose declared control body exceeds the configured limit', () => {
+    const decoder = new MessageDecoder();
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(MAX_CONTROL_MESSAGE_BYTES + 1, 0);
+
+    expect(() => decoder.push(header)).toThrow(`Message exceeds ${MAX_CONTROL_MESSAGE_BYTES} bytes`);
+  });
+
+  it('treats oversized trailing bytes as remainder after a valid message', () => {
+    const decoder = new MessageDecoder();
+    const message = encodeMessage({ type: 'file-accept', fileId: 'valid-first' });
+    const trailing = Buffer.alloc(4);
+    trailing.writeUInt32BE(MAX_CONTROL_MESSAGE_BYTES + 1, 0);
+
+    const result = decoder.pushWithRemainder(Buffer.concat([message, trailing]));
+
+    expect(result.messages).toEqual([{ type: 'file-accept', fileId: 'valid-first' }]);
+    expect(result.remainder).toEqual(trailing);
   });
 });

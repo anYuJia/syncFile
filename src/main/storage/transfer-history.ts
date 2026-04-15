@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 
 import type { TransferRecord, TransferProgress } from '../../shared/types';
@@ -9,6 +10,8 @@ export class TransferHistoryStore {
   private readonly configPath: string;
   private readonly records = new Map<string, TransferRecord>();
   private persistTimer: NodeJS.Timeout | null = null;
+  private persistPromise: Promise<void> | null = null;
+  private persistQueued = false;
 
   constructor(userDataDir: string) {
     this.configPath = join(userDataDir, 'transfer-history.json');
@@ -34,7 +37,7 @@ export class TransferHistoryStore {
     for (const record of records) {
       this.records.set(record.transferId, record);
     }
-    this.flush();
+    void this.flush().catch(() => undefined);
   }
 
   upsert(progress: TransferProgress): TransferRecord {
@@ -49,14 +52,14 @@ export class TransferHistoryStore {
     if (progress.status === 'pending' || progress.status === 'in-progress') {
       this.schedulePersist();
     } else {
-      this.flush();
+      void this.flush().catch(() => undefined);
     }
     return record;
   }
 
   clear(): void {
     this.records.clear();
-    this.flush();
+    void this.flush().catch(() => undefined);
   }
 
   clearFinished(): TransferRecord[] {
@@ -65,7 +68,7 @@ export class TransferHistoryStore {
         this.records.delete(id);
       }
     }
-    this.flush();
+    void this.flush().catch(() => undefined);
     return this.list();
   }
 
@@ -75,14 +78,25 @@ export class TransferHistoryStore {
         this.records.delete(id);
       }
     }
-    this.flush();
+    void this.flush().catch(() => undefined);
     return this.list();
   }
 
   remove(transferId: string): void {
     if (this.records.delete(transferId)) {
-      this.flush();
+      void this.flush().catch(() => undefined);
     }
+  }
+
+  removeMany(transferIds: string[]): TransferRecord[] {
+    let changed = false;
+    for (const transferId of transferIds) {
+      changed = this.records.delete(transferId) || changed;
+    }
+    if (changed) {
+      void this.flush().catch(() => undefined);
+    }
+    return this.list();
   }
 
   markInterruptedSends(): void {
@@ -99,16 +113,17 @@ export class TransferHistoryStore {
       }
     }
     if (changed) {
-      this.flush();
+      void this.flush().catch(() => undefined);
     }
   }
 
-  flush(): void {
+  async flush(): Promise<void> {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = null;
     }
-    this.persist();
+    this.persistQueued = true;
+    await this.ensurePersisting();
   }
 
   private trim(): void {
@@ -127,13 +142,30 @@ export class TransferHistoryStore {
     }
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      this.persist();
+      this.persistQueued = true;
+      void this.ensurePersisting().catch(() => undefined);
     }, 100);
   }
 
-  private persist(): void {
-    mkdirSync(dirname(this.configPath), { recursive: true });
-    writeFileSync(this.configPath, JSON.stringify(this.list(), null, 2), 'utf8');
+  private ensurePersisting(): Promise<void> {
+    if (!this.persistPromise) {
+      this.persistPromise = this.persistLoop().finally(() => {
+        this.persistPromise = null;
+        if (this.persistQueued) {
+          void this.ensurePersisting();
+        }
+      });
+    }
+
+    return this.persistPromise;
+  }
+
+  private async persistLoop(): Promise<void> {
+    while (this.persistQueued) {
+      this.persistQueued = false;
+      await mkdir(dirname(this.configPath), { recursive: true });
+      await writeFile(this.configPath, JSON.stringify(this.list(), null, 2), 'utf8');
+    }
   }
 
   private load(): TransferRecord[] {

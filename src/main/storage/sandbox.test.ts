@@ -57,14 +57,38 @@ describe('Sandbox', () => {
     expect(existsSync(root)).toBe(true);
   });
 
-  it('calculates total sandbox usage recursively', () => {
+  it('recognizes paths inside the sandbox root', () => {
+    const path = sandbox.pathForIncoming('device-a', 'inside.txt');
+
+    expect(sandbox.containsPath(path)).toBe(true);
+    expect(sandbox.assertContainsPath(path)).toBe(path);
+  });
+
+  it('rejects paths outside the sandbox root', () => {
+    const outsidePath = join(tmpdir(), 'syncfile-outside.txt');
+
+    expect(sandbox.containsPath(outsidePath)).toBe(false);
+    expect(() => sandbox.assertContainsPath(outsidePath)).toThrow('path is outside sandbox');
+  });
+
+  it('calculates total sandbox usage recursively', async () => {
     const first = sandbox.pathForIncoming('device-a', 'first.txt');
     const second = sandbox.pathForIncoming('device-b', 'second.txt');
 
     writeFileSync(first, '1234');
     writeFileSync(second, '123456');
 
-    expect(sandbox.currentUsageBytes()).toBe(10);
+    await expect(sandbox.currentUsageBytes()).resolves.toBe(10);
+  });
+
+  it('refreshes cached usage after the sandbox is marked dirty', async () => {
+    await expect(sandbox.currentUsageBytes()).resolves.toBe(0);
+
+    const path = sandbox.pathForIncoming('device-a', 'fresh.txt');
+    writeFileSync(path, 'abc');
+    sandbox.markUsageDirty();
+
+    await expect(sandbox.currentUsageBytes()).resolves.toBe(3);
   });
 
   it('returns the device directory for incoming files', () => {

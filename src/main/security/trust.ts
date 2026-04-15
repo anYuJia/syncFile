@@ -2,6 +2,9 @@ import { createHash, generateKeyPairSync, sign, verify, createPrivateKey, create
 
 import type { FileOfferMessage, PairRequestMessage } from '../transfer/protocol';
 
+export const PAIR_REQUEST_MAX_AGE_MS = 5 * 60 * 1000;
+export const PAIR_REQUEST_MAX_FUTURE_SKEW_MS = 30 * 1000;
+
 export interface TrustKeypair {
   publicKey: string;
   privateKey: string;
@@ -72,8 +75,18 @@ export function signPairRequest(
   return sign(null, Buffer.from(pairRequestPayload(request), 'utf8'), key).toString('base64');
 }
 
-export function verifyPairRequest(request: PairRequestMessage): boolean {
+export function verifyPairRequest(request: PairRequestMessage, now = Date.now()): boolean {
   if (!request.signature) {
+    return false;
+  }
+
+  if (!Number.isFinite(request.timestamp)) {
+    return false;
+  }
+  if (request.timestamp < now - PAIR_REQUEST_MAX_AGE_MS) {
+    return false;
+  }
+  if (request.timestamp > now + PAIR_REQUEST_MAX_FUTURE_SKEW_MS) {
     return false;
   }
 

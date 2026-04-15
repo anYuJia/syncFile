@@ -7,7 +7,7 @@ import type { Device } from '../shared/types';
 import type { MdnsService } from './discovery/mdns-service';
 import { DeviceRegistry } from './discovery/device-registry';
 import { MdnsService as SyncMdnsService } from './discovery/mdns-service';
-import { registerIpcHandlers } from './ipc/handlers';
+import { registerIpcHandlers, unregisterIpcHandlers } from './ipc/handlers';
 import { loadOrCreateIdentity } from './storage/device-identity';
 import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
@@ -26,6 +26,7 @@ let tcpServer: TcpServer | null = null;
 let mdnsService: MdnsService | null = null;
 let transferHistoryStore: TransferHistoryStore | null = null;
 let cleanupPromise: Promise<void> | null = null;
+let bootstrapPromise: Promise<void> | null = null;
 let ipcRegistered = false;
 
 async function createWindow(): Promise<BrowserWindow> {
@@ -51,6 +52,12 @@ async function createWindow(): Promise<BrowserWindow> {
     window.show();
   });
 
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
+
   window.webContents.setWindowOpenHandler((details) => {
     void shell.openExternal(details.url);
     return { action: 'deny' };
@@ -65,7 +72,23 @@ async function createWindow(): Promise<BrowserWindow> {
   return window;
 }
 
-async function bootstrap(): Promise<void> {
+function hasActiveServices(): boolean {
+  return tcpServer !== null && mdnsService !== null && transferHistoryStore !== null;
+}
+
+function hasPartialRuntimeState(): boolean {
+  return tcpServer !== null || mdnsService !== null || transferHistoryStore !== null || ipcRegistered;
+}
+
+async function ensureWindow(): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow = await createWindow();
+}
+
+async function bootstrapServices(): Promise<void> {
   const userDataDir = app.getPath('userData');
   const identity = loadOrCreateIdentity(userDataDir);
   const defaultSandboxRoot = resolveDefaultSandboxRoot();
@@ -78,7 +101,16 @@ async function bootstrap(): Promise<void> {
   recoverPendingOffers(pendingOfferStore, transferHistoryStore);
   const registry = new DeviceRegistry();
 
-  tcpServer = new TcpServer({ sandbox });
+  tcpServer = new TcpServer({
+    sandbox,
+    selfDevice: {
+      deviceId: identity.deviceId,
+      name: identity.name,
+      trustFingerprint: identity.trustFingerprint,
+      trustPublicKey: identity.trustPublicKey,
+      trustPrivateKey: identity.trustPrivateKey
+    }
+  });
   const actualPort = await tcpServer
     .listen(DEFAULT_TRANSFER_PORT)
     .catch(() => (tcpServer as TcpServer).listen(0));
@@ -99,14 +131,11 @@ async function bootstrap(): Promise<void> {
       deviceId: identity.deviceId,
       name: identity.name,
       trustFingerprint: identity.trustFingerprint,
-      trustPublicKey: identity.trustPublicKey,
       port: actualPort,
       platform: getPlatform()
     }
   });
   mdnsService.start();
-
-  mainWindow = await createWindow();
 
   const getSelfDevice = (): Device => ({
     deviceId: identity.deviceId,
@@ -139,6 +168,40 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+async function bootstrap(): Promise<void> {
+  if (cleanupPromise) {
+    await cleanupPromise;
+  }
+
+  if (bootstrapPromise) {
+    await bootstrapPromise;
+    return;
+  }
+
+  bootstrapPromise = (async () => {
+    if (!hasActiveServices()) {
+      if (hasPartialRuntimeState()) {
+        await cleanup();
+      }
+
+      try {
+        await bootstrapServices();
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
+    }
+
+    await ensureWindow();
+  })();
+
+  try {
+    await bootstrapPromise;
+  } finally {
+    bootstrapPromise = null;
+  }
+}
+
 function resolveDefaultSandboxRoot(): string {
   if (!app.isPackaged) {
     return join(app.getAppPath(), 'file');
@@ -160,18 +223,26 @@ async function cleanup(): Promise<void> {
   }
 
   cleanupPromise = (async () => {
+    if (ipcRegistered) {
+      unregisterIpcHandlers();
+      ipcRegistered = false;
+    }
+
     if (mdnsService) {
       await mdnsService.stop();
       mdnsService = null;
     }
 
-    transferHistoryStore?.flush();
+    await transferHistoryStore?.flush();
+    transferHistoryStore = null;
 
     if (tcpServer) {
       await tcpServer.close();
       tcpServer = null;
     }
-  })();
+  })().finally(() => {
+    cleanupPromise = null;
+  });
 
   await cleanupPromise;
 }
@@ -192,8 +263,6 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    void createWindow().then((window) => {
-      mainWindow = window;
-    });
+    void bootstrap();
   }
 });

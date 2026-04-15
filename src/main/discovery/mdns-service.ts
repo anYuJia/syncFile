@@ -5,7 +5,6 @@ import type { DeviceRegistry } from './device-registry';
 export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
 const BROWSER_REFRESH_MS = 4000;
-const BROWSER_RESET_EVERY = 3;
 const DEVICE_STALE_MS = 15000;
 
 export interface MdnsServiceOptions {
@@ -14,7 +13,6 @@ export interface MdnsServiceOptions {
     deviceId: string;
     name: string;
     trustFingerprint: string;
-    trustPublicKey: string;
     port: number;
     platform: string;
   };
@@ -25,7 +23,6 @@ export class MdnsService {
   private published?: Service;
   private browser?: Browser;
   private refreshTimer: NodeJS.Timeout | null = null;
-  private refreshTick = 0;
 
   constructor(private readonly opts: MdnsServiceOptions) {
     this.bonjour = new Bonjour();
@@ -47,7 +44,6 @@ export class MdnsService {
         deviceId: this.opts.self.deviceId,
         displayName: this.opts.self.name,
         trustFingerprint: this.opts.self.trustFingerprint,
-        trustPublicKey: this.opts.self.trustPublicKey,
         platform: this.opts.self.platform,
         version: MDNS_PROTOCOL_VERSION
       }
@@ -63,7 +59,6 @@ export class MdnsService {
     if (clearRegistry) {
       this.opts.registry.clear();
     }
-    this.refreshTick = 0;
     this.resetBrowser();
   }
 
@@ -72,7 +67,6 @@ export class MdnsService {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
-    this.refreshTick = 0;
 
     if (this.browser) {
       this.destroyBrowser();
@@ -141,10 +135,9 @@ export class MdnsService {
     }
 
     this.refreshTimer = setInterval(() => {
-      this.refreshTick += 1;
       this.opts.registry.pruneOlderThan(Date.now() - DEVICE_STALE_MS);
-      if (this.refreshTick % BROWSER_RESET_EVERY === 0) {
-        this.resetBrowser();
+      if (!this.browser) {
+        this.browser = this.createBrowser();
         return;
       }
       this.browser?.update();

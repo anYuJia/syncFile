@@ -41,8 +41,15 @@ const PROGRESS_THROTTLE_MS = 120;
 interface OutboundTransferRequest {
   host: string;
   port: number;
+  peerDeviceId: string;
+  peerTrustFingerprint: string;
+  peerTrustPublicKey: string;
   filePath: string;
-  sha256: string;
+  fileSize: number;
+  sourceFileModifiedAt: number;
+  existingTransferId?: string;
+  previousTransfer?: Partial<TransferProgress>;
+  sha256?: string;
 }
 
 export function sourceFileCanResume(
@@ -152,6 +159,39 @@ export interface IpcContext {
   getWindow: () => BrowserWindow | null;
 }
 
+export const handledIpcChannels = [
+  IpcChannels.GetDevices,
+  IpcChannels.RefreshDevices,
+  IpcChannels.GetSelfDevice,
+  IpcChannels.GetTransferHistory,
+  IpcChannels.GetPendingOffers,
+  IpcChannels.PairDevice,
+  IpcChannels.AcceptPairRequest,
+  IpcChannels.RejectPairRequest,
+  IpcChannels.SendFile,
+  IpcChannels.PauseTransfer,
+  IpcChannels.CancelTransfer,
+  IpcChannels.AcceptIncoming,
+  IpcChannels.RejectIncoming,
+  IpcChannels.OpenSandbox,
+  IpcChannels.OpenTransferPath,
+  IpcChannels.RevealTransferPath,
+  IpcChannels.ClearTransferHistory,
+  IpcChannels.RemoveTransferHistoryItems,
+  IpcChannels.ClearResumeCache,
+  IpcChannels.GetSandboxLocation,
+  IpcChannels.ChooseSandboxLocation,
+  IpcChannels.SelectFile,
+  IpcChannels.GetSettings,
+  IpcChannels.SaveSettings
+] as const;
+
+export function unregisterIpcHandlers(): void {
+  for (const channel of handledIpcChannels) {
+    ipcMain.removeHandler(channel);
+  }
+}
+
 export function registerIpcHandlers(context: IpcContext): void {
   const pendingOffers = new Map<string, PendingOffer>();
   const pendingPairRequests = new Map<string, PendingPairRequest>();
@@ -159,8 +199,10 @@ export function registerIpcHandlers(context: IpcContext): void {
   const outboundTransfers = new Map<string, OutboundTransferMeta>();
   const outboundRequests = new Map<string, OutboundTransferRequest>();
   const queuedOutboundTransferIds: string[] = [];
+  const queuedOutboundTransferIdSet = new Set<string>();
   const cancellingOutboundTransfers = new Set<string>();
   const pausingOutboundTransfers = new Set<string>();
+  const hashingOutboundTransfers = new Set<string>();
   const pendingProgressEvents = new Map<string, TransferProgress>();
   const progressTimers = new Map<string, NodeJS.Timeout>();
   let activeOutboundTransferId: string | null = null;
@@ -267,10 +309,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     error
   });
 
-  const currentSandboxLocation = (): SandboxLocationInfo => ({
+  const currentSandboxLocation = async (): Promise<SandboxLocationInfo> => ({
     path: context.sandbox.rootPath(),
     isCustom: context.sandboxLocation.currentPath() !== null,
-    usageBytes: context.sandbox.currentUsageBytes()
+    usageBytes: await context.sandbox.currentUsageBytes()
   });
 
   const currentMaintenanceInfo = () => {
@@ -285,8 +327,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
   const autoAcceptLimitBytes = (settings: Settings): number => settings.autoAcceptMaxSizeMB * 1024 * 1024;
 
-  const exceedsSandboxLimit = (fileSize: number, settings: Settings): boolean => {
-    return context.sandbox.currentUsageBytes() + fileSize > sandboxLimitBytes(settings);
+  const exceedsSandboxLimit = async (fileSize: number, settings: Settings): Promise<boolean> => {
+    return (await context.sandbox.currentUsageBytes()) + fileSize > sandboxLimitBytes(settings);
   };
 
   const lastTransferredBytes = (transferId: string): number => {
@@ -303,6 +345,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       return false;
     }
     queuedOutboundTransferIds.splice(index, 1);
+    queuedOutboundTransferIdSet.delete(transferId);
     return true;
   };
 
@@ -313,6 +356,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     outboundRequests.delete(transferId);
     cancellingOutboundTransfers.delete(transferId);
     pausingOutboundTransfers.delete(transferId);
+    hashingOutboundTransfers.delete(transferId);
+    queuedOutboundTransferIdSet.delete(transferId);
     if (activeOutboundTransferId === transferId) {
       activeOutboundTransferId = null;
     }
@@ -327,6 +372,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!nextTransferId) {
       return;
     }
+    queuedOutboundTransferIdSet.delete(nextTransferId);
 
     const meta = outboundTransfers.get(nextTransferId);
     const request = outboundRequests.get(nextTransferId);
@@ -338,30 +384,85 @@ export function registerIpcHandlers(context: IpcContext): void {
 
     activeOutboundTransferId = nextTransferId;
 
-    void context.tcpClient
-      .sendFile({
-        host: request.host,
-        port: request.port,
-        filePath: request.filePath,
-        fileId: nextTransferId,
-        sha256: request.sha256
-      })
-      .then(() => {
+    void (async () => {
+      try {
+        hashingOutboundTransfers.add(nextTransferId);
+        const fileSha256 = await sha256File(request.filePath);
+        hashingOutboundTransfers.delete(nextTransferId);
+
         const currentMeta = outboundTransfers.get(nextTransferId) ?? meta;
+        const currentRequest = outboundRequests.get(nextTransferId) ?? request;
+        if (!outboundTransfers.has(nextTransferId) || !outboundRequests.has(nextTransferId)) {
+          settleOutboundTransfer(nextTransferId);
+          startNextOutboundTransfer();
+          return;
+        }
+
+        if (currentRequest.existingTransferId) {
+          const previous = currentRequest.previousTransfer;
+          if (
+            !sourceFileHashCanResume(
+              previous,
+              currentRequest.filePath,
+              currentRequest.fileSize,
+              currentRequest.sourceFileModifiedAt,
+              fileSha256
+            )
+          ) {
+            throw new Error('source file changed; cannot resume transfer');
+          }
+        }
+
+        const preparedMeta: OutboundTransferMeta = {
+          ...currentMeta,
+          sourceFileSha256: fileSha256
+        };
+        outboundTransfers.set(nextTransferId, preparedMeta);
+        outboundRequests.set(nextTransferId, {
+          ...currentRequest,
+          sha256: fileSha256
+        });
+        publishTransferEvent(
+          IpcChannels.TransferProgress,
+          makeOutboundProgress(preparedMeta, lastTransferredBytes(nextTransferId), 'pending')
+        );
+
+        if (cancellingOutboundTransfers.has(nextTransferId)) {
+          throw new Error('transfer cancelled');
+        }
+        if (pausingOutboundTransfers.has(nextTransferId)) {
+          throw new Error('transfer paused');
+        }
+
+        await context.tcpClient.sendFile({
+          host: currentRequest.host,
+          port: currentRequest.port,
+          peer: {
+            deviceId: currentRequest.peerDeviceId,
+            trustFingerprint: currentRequest.peerTrustFingerprint,
+            trustPublicKey: currentRequest.peerTrustPublicKey
+          },
+          filePath: currentRequest.filePath,
+          fileId: nextTransferId,
+          sha256: fileSha256
+        });
+
+        const latestMeta = outboundTransfers.get(nextTransferId) ?? preparedMeta;
         publishTransferEvent(
           IpcChannels.TransferComplete,
-          makeOutboundProgress(currentMeta, currentMeta.fileSize, 'completed')
+          makeOutboundProgress(latestMeta, latestMeta.fileSize, 'completed')
         );
         settleOutboundTransfer(nextTransferId);
         startNextOutboundTransfer();
-      })
-      .catch((error: Error) => {
+      } catch (error) {
+        hashingOutboundTransfers.delete(nextTransferId);
         const currentMeta = outboundTransfers.get(nextTransferId) ?? meta;
         const previousBytes = lastTransferredBytes(nextTransferId);
+        const message = error instanceof Error ? error.message : String(error);
         const wasCancelled =
-          cancellingOutboundTransfers.has(nextTransferId) || error.message.includes('transfer cancelled');
+          cancellingOutboundTransfers.has(nextTransferId) || message.includes('transfer cancelled');
         const wasPaused =
-          pausingOutboundTransfers.has(nextTransferId) || error.message.includes('transfer paused');
+          pausingOutboundTransfers.has(nextTransferId) || message.includes('transfer paused');
 
         if (wasCancelled) {
           publishTransferEvent(
@@ -385,11 +486,12 @@ export function registerIpcHandlers(context: IpcContext): void {
 
         publishTransferEvent(
           IpcChannels.TransferProgress,
-          makeOutboundProgress(currentMeta, previousBytes, 'failed', error.message)
+          makeOutboundProgress(currentMeta, previousBytes, 'failed', message)
         );
         settleOutboundTransfer(nextTransferId);
         startNextOutboundTransfer();
-      });
+      }
+    })();
   };
 
   const isTrustedDevice = (
@@ -472,7 +574,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!device) {
       throw new Error(`device ${deviceId} not found`);
     }
-    const accepted = await context.tcpClient.pairWithPeer(device.address, device.port);
+    const accepted = await context.tcpClient.pairWithPeer(device.address, device.port, {
+      deviceId: device.deviceId,
+      trustFingerprint: device.trustFingerprint,
+      trustPublicKey: device.trustPublicKey
+    });
     if (!accepted) {
       throw new Error('peer declined pairing');
     }
@@ -514,13 +620,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       const fileName = basename(filePath);
       const fileStats = statSync(filePath);
       const fileSize = fileStats.size;
-      const fileSha256 = await sha256File(filePath);
-      if (existingTransferId) {
-        const previous = context.transferHistoryStore.get(existingTransferId);
-        if (!sourceFileHashCanResume(previous, filePath, fileSize, fileStats.mtimeMs, fileSha256)) {
-          throw new Error('source file changed; cannot resume transfer');
-        }
-      }
+      const previousTransfer = existingTransferId
+        ? context.transferHistoryStore.get(existingTransferId)
+        : undefined;
 
       outboundTransfers.set(transferId, {
         transferId,
@@ -530,13 +632,19 @@ export function registerIpcHandlers(context: IpcContext): void {
         peerDeviceId: device.deviceId,
         localPath: filePath,
         sourceFileModifiedAt: fileStats.mtimeMs,
-        sourceFileSha256: fileSha256
+        sourceFileSha256: previousTransfer?.sourceFileSha256 ?? ''
       });
       outboundRequests.set(transferId, {
         host: device.address,
         port: device.port,
+        peerDeviceId: device.deviceId,
+        peerTrustFingerprint: device.trustFingerprint,
+        peerTrustPublicKey: device.trustPublicKey,
         filePath,
-        sha256: fileSha256
+        fileSize,
+        sourceFileModifiedAt: fileStats.mtimeMs,
+        existingTransferId,
+        previousTransfer
       });
 
       const meta = outboundTransfers.get(transferId)!;
@@ -545,8 +653,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         makeOutboundProgress(meta, lastTransferredBytes(transferId), 'pending')
       );
 
-      if (!queuedOutboundTransferIds.includes(transferId) && activeOutboundTransferId !== transferId) {
+      if (!queuedOutboundTransferIdSet.has(transferId) && activeOutboundTransferId !== transferId) {
         queuedOutboundTransferIds.push(transferId);
+        queuedOutboundTransferIdSet.add(transferId);
       }
       startNextOutboundTransfer();
 
@@ -571,6 +680,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
 
     pausingOutboundTransfers.add(transferId);
+    if (hashingOutboundTransfers.has(transferId)) {
+      return;
+    }
     const paused = context.tcpClient.pause(transferId);
     if (!paused) {
       pausingOutboundTransfers.delete(transferId);
@@ -592,6 +704,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       }
 
       cancellingOutboundTransfers.add(transferId);
+      if (hashingOutboundTransfers.has(transferId)) {
+        return;
+      }
       const cancelled = context.tcpClient.cancel(transferId);
       if (!cancelled) {
         cancellingOutboundTransfers.delete(transferId);
@@ -647,14 +762,15 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   ipcMain.handle(IpcChannels.OpenTransferPath, async (_event, path: string): Promise<void> => {
-    const result = await shell.openPath(path);
+    const safePath = context.sandbox.assertContainsPath(path);
+    const result = await shell.openPath(safePath);
     if (result.length > 0) {
       throw new Error(result);
     }
   });
 
   ipcMain.handle(IpcChannels.RevealTransferPath, (_event, path: string): void => {
-    shell.showItemInFolder(path);
+    shell.showItemInFolder(context.sandbox.assertContainsPath(path));
   });
 
   ipcMain.handle(IpcChannels.ClearTransferHistory, (): void => {
@@ -671,6 +787,29 @@ export function registerIpcHandlers(context: IpcContext): void {
     publishTransferHistoryReset();
   });
 
+  ipcMain.handle(IpcChannels.RemoveTransferHistoryItems, (_event, transferIds: string[]): void => {
+    if (!Array.isArray(transferIds) || transferIds.length === 0) {
+      return;
+    }
+
+    const pausedReceiveIds = context.transferHistoryStore
+      .list()
+      .filter(
+        (record) =>
+          transferIds.includes(record.transferId) &&
+          record.direction === 'receive' &&
+          record.status === 'paused'
+      )
+      .map((record) => record.transferId);
+
+    for (const transferId of pausedReceiveIds) {
+      context.sandbox.discardIncomingResume(transferId, true);
+    }
+
+    context.transferHistoryStore.removeMany(transferIds);
+    publishTransferHistoryReset();
+  });
+
   ipcMain.handle(IpcChannels.ClearResumeCache, (): void => {
     const activeReceiveIds = new Set(completedOrAcceptedOffers.keys());
     const clearedIds = context.sandbox.clearResumeCache(activeReceiveIds);
@@ -680,7 +819,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     publishTransferHistoryReset();
   });
 
-  ipcMain.handle(IpcChannels.GetSandboxLocation, (): SandboxLocationInfo => {
+  ipcMain.handle(IpcChannels.GetSandboxLocation, async (): Promise<SandboxLocationInfo> => {
     return currentSandboxLocation();
   });
 
@@ -720,10 +859,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     return selected.filePaths[0];
   });
 
-  ipcMain.handle(IpcChannels.GetSettings, (): SettingsPayload => {
+  ipcMain.handle(IpcChannels.GetSettings, async (): Promise<SettingsPayload> => {
     return {
       ...context.settingsStore.get(),
-      sandboxLocation: currentSandboxLocation(),
+      sandboxLocation: await currentSandboxLocation(),
       maintenance: currentMaintenanceInfo()
     };
   });
@@ -741,36 +880,53 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.tcpServer.on('incoming-offer', (info, responder) => {
-    const settings = context.settingsStore.get();
-    if (exceedsSandboxLimit(info.fileSize, settings)) {
-      responder.reject('too-large');
-      publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
-      return;
-    }
+    void (async () => {
+      try {
+        const settings = context.settingsStore.get();
+        if (await exceedsSandboxLimit(info.fileSize, settings)) {
+          responder.reject('too-large');
+          publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
+          return;
+        }
 
-    if (canAutoAcceptOffer(info, settings)) {
-      const receiveMode = resolveReceiveMode(info, settings);
-      completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
-      responder.accept();
-      context.pendingOfferStore.remove(info.offerId);
-      publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
-      return;
-    }
+        if (canAutoAcceptOffer(info, settings)) {
+          const receiveMode = resolveReceiveMode(info, settings);
+          completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
+          responder.accept();
+          context.pendingOfferStore.remove(info.offerId);
+          publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'pending', receiveMode));
+          return;
+        }
 
-    pendingOffers.set(info.offerId, { info, responder });
+        pendingOffers.set(info.offerId, { info, responder });
 
-    const offer: IncomingOffer = {
-      offerId: info.offerId,
-      fromDevice: info.fromDevice,
-      fileName: info.fileName,
-      fileSize: info.fileSize,
-      mimeType: info.mimeType,
-      receivedAt: Date.now(),
-      saveDirectory: context.sandbox.directoryForIncoming(info.fromDevice.deviceId)
-    };
+        const offer: IncomingOffer = {
+          offerId: info.offerId,
+          fromDevice: info.fromDevice,
+          fileName: info.fileName,
+          fileSize: info.fileSize,
+          mimeType: info.mimeType,
+          receivedAt: Date.now(),
+          saveDirectory: context.sandbox.directoryForIncoming(info.fromDevice.deviceId)
+        };
 
-    context.pendingOfferStore.upsert(offer);
-    sendToRenderer(IpcChannels.IncomingOffer, offer);
+        context.pendingOfferStore.upsert(offer);
+        sendToRenderer(IpcChannels.IncomingOffer, offer);
+      } catch (error) {
+        responder.reject('user-declined');
+        publishTransferEvent(IpcChannels.TransferProgress, {
+          transferId: info.offerId,
+          direction: 'receive',
+          fileName: info.fileName,
+          fileSize: info.fileSize,
+          bytesTransferred: 0,
+          peerDeviceName: info.fromDevice.name,
+          peerDeviceId: info.fromDevice.deviceId,
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'failed to inspect sandbox usage'
+        } satisfies TransferProgress);
+      }
+    })();
   });
 
   context.tcpServer.on('pair-request', (request, responder) => {

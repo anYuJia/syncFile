@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 
 import type { Sandbox } from '../storage/sandbox';
 import { sha256File } from './file-hash';
+import { secureAccept, type SecureIdentity, type SecureSocket } from './secure-channel';
 import { verifyFileOffer, verifyPairRequest } from '../security/trust';
 import { MessageDecoder, encodeMessage } from './codec';
 import {
@@ -17,11 +18,14 @@ import {
   type FileRejectMessage,
   type PairRequestMessage
 } from './protocol';
+import { PAIR_REQUEST_MAX_AGE_MS } from '../security/trust';
 
 type RejectReason = FileRejectMessage['reason'];
+const DEFAULT_IDLE_TIMEOUT_MS = 120000;
 
 export interface TcpServerOptions {
   sandbox: Sandbox;
+  selfDevice: SecureIdentity;
 }
 
 export interface IncomingOfferInfo {
@@ -126,10 +130,11 @@ type ConnectionPhase =
 export class TcpServer extends EventEmitter {
   private readonly server: Server;
   private readonly sockets = new Set<Socket>();
+  private readonly recentPairRequests = new Map<string, number>();
   private readonly activeReceives = new Map<
     string,
       {
-        socket: Socket;
+        socket: SecureSocket;
         writeStream: WriteStream | null;
         partialPath: string | null;
         finalPath: string | null;
@@ -142,7 +147,7 @@ export class TcpServer extends EventEmitter {
 
   constructor(private readonly options: TcpServerOptions) {
     super();
-    this.server = createServer((socket) => this.handleSocket(socket));
+    this.server = createServer((socket) => this.handleConnection(socket));
   }
 
   listen(port = 43434): Promise<number> {
@@ -181,11 +186,26 @@ export class TcpServer extends EventEmitter {
     });
   }
 
-  private handleSocket(socket: Socket): void {
+  private handleConnection(socket: Socket): void {
     this.sockets.add(socket);
     socket.once('close', () => {
       this.sockets.delete(socket);
     });
+
+    void secureAccept(socket, {
+      selfDevice: this.options.selfDevice
+    })
+      .then(({ socket: secureSocket }) => {
+        this.handleSocket(secureSocket);
+      })
+      .catch(() => {
+        if (!socket.destroyed) {
+          socket.destroy();
+        }
+      });
+  }
+
+  private handleSocket(socket: SecureSocket): void {
 
     const decoder = new MessageDecoder();
     let phase: ConnectionPhase = 'awaiting-offer';
@@ -336,6 +356,7 @@ export class TcpServer extends EventEmitter {
       }
 
       const ok = writeStream.write(chunk);
+      this.options.sandbox.markUsageDirty();
       if (!ok) {
         socket.pause();
         writeStream.once('drain', () => socket.resume());
@@ -477,6 +498,10 @@ export class TcpServer extends EventEmitter {
               socket.end();
               return;
             }
+            if (this.isReplayPairRequest(first.requestId, first.timestamp)) {
+              socket.end();
+              return;
+            }
             const pairResponder: PairResponder = {
               accept: () => {
                 socket.write(
@@ -576,7 +601,7 @@ export class TcpServer extends EventEmitter {
       }
     });
 
-    socket.setTimeout(30000);
+    socket.setTimeout(DEFAULT_IDLE_TIMEOUT_MS);
     socket.on('timeout', () => {
       socketError = new Error('transfer timed out');
       socket.destroy();
@@ -658,5 +683,21 @@ export class TcpServer extends EventEmitter {
       reason: 'receiver-cancelled'
     });
     return true;
+  }
+
+  private isReplayPairRequest(requestId: string, timestamp: number): boolean {
+    const cutoff = timestamp - PAIR_REQUEST_MAX_AGE_MS;
+    for (const [knownRequestId, seenAt] of this.recentPairRequests.entries()) {
+      if (seenAt < cutoff) {
+        this.recentPairRequests.delete(knownRequestId);
+      }
+    }
+
+    if (this.recentPairRequests.has(requestId)) {
+      return true;
+    }
+
+    this.recentPairRequests.set(requestId, timestamp);
+    return false;
   }
 }

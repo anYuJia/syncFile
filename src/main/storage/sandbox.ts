@@ -1,5 +1,16 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
-import { basename, join } from 'path';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'fs';
+import { readdir, stat } from 'fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path';
 
 interface IncomingResumeMeta {
   fileId: string;
@@ -34,10 +45,16 @@ export interface ResumeCacheEntry {
 }
 
 export class Sandbox {
+  private usageBytes: number | null = null;
+  private usageRefreshPromise: Promise<number> | null = null;
+  private usageDirty = true;
+  private usageDirtyWhileRefreshing = false;
+
   constructor(private root: string) {}
 
   setRoot(root: string): void {
     this.root = root;
+    this.markUsageDirty();
   }
 
   rootPath(): string {
@@ -45,8 +62,30 @@ export class Sandbox {
     return this.root;
   }
 
-  currentUsageBytes(): number {
-    return directorySize(this.rootPath());
+  containsPath(targetPath: string): boolean {
+    return isPathWithinRoot(this.rootPath(), targetPath);
+  }
+
+  assertContainsPath(targetPath: string): string {
+    if (!this.containsPath(targetPath)) {
+      throw new Error('path is outside sandbox');
+    }
+    return targetPath;
+  }
+
+  async currentUsageBytes(): Promise<number> {
+    if (!this.usageDirty && this.usageBytes !== null) {
+      return this.usageBytes;
+    }
+
+    return this.refreshUsageBytes();
+  }
+
+  markUsageDirty(): void {
+    this.usageDirty = true;
+    if (this.usageRefreshPromise) {
+      this.usageDirtyWhileRefreshing = true;
+    }
   }
 
   directoryForIncoming(deviceId: string): string {
@@ -126,6 +165,7 @@ export class Sandbox {
     }
     renameSync(meta.partialPath, meta.finalPath);
     rmSync(this.resumeMetaPath(fileId), { force: true });
+    this.markUsageDirty();
     return meta.finalPath;
   }
 
@@ -138,6 +178,7 @@ export class Sandbox {
       rmSync(meta.partialPath, { force: true });
     }
     rmSync(this.resumeMetaPath(fileId), { force: true });
+    this.markUsageDirty();
   }
 
   incomingResumeOffset(fileId: string): number {
@@ -259,6 +300,26 @@ export class Sandbox {
 
   private writeIncomingResumeMeta(meta: IncomingResumeMeta): void {
     writeFileSync(this.resumeMetaPath(meta.fileId), JSON.stringify(meta, null, 2), 'utf8');
+    this.markUsageDirty();
+  }
+
+  private refreshUsageBytes(): Promise<number> {
+    if (this.usageRefreshPromise) {
+      return this.usageRefreshPromise;
+    }
+
+    this.usageDirtyWhileRefreshing = false;
+    this.usageRefreshPromise = directorySize(this.rootPath())
+      .then((totalBytes) => {
+        this.usageBytes = totalBytes;
+        this.usageDirty = this.usageDirtyWhileRefreshing;
+        return totalBytes;
+      })
+      .finally(() => {
+        this.usageRefreshPromise = null;
+      });
+
+    return this.usageRefreshPromise;
   }
 }
 
@@ -276,19 +337,48 @@ function formatTimestamp(d: Date): string {
   return `${yyyy}${mm}${dd}_${hh}${mi}${ss}`;
 }
 
-function directorySize(path: string): number {
+async function directorySize(path: string): Promise<number> {
   let total = 0;
 
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
+  for (const entry of await readdir(path, { withFileTypes: true })) {
     const fullPath = join(path, entry.name);
     if (entry.isDirectory()) {
-      total += directorySize(fullPath);
+      total += await directorySize(fullPath);
       continue;
     }
     if (entry.isFile()) {
-      total += statSync(fullPath).size;
+      total += (await stat(fullPath)).size;
     }
   }
 
   return total;
+}
+
+function isPathWithinRoot(rootPath: string, targetPath: string): boolean {
+  const normalizedRoot = normalizePathForComparison(rootPath);
+  const normalizedTarget = normalizePathForComparison(targetPath);
+  const relativePath = relative(normalizedRoot, normalizedTarget);
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function normalizePathForComparison(path: string): string {
+  const missingSegments: string[] = [];
+  let resolvedPath = resolve(path);
+
+  while (!existsSync(resolvedPath)) {
+    const parent = dirname(resolvedPath);
+    if (parent === resolvedPath) {
+      return resolvedPath;
+    }
+    missingSegments.unshift(basename(resolvedPath));
+    resolvedPath = parent;
+  }
+
+  try {
+    const normalizedPath = realpathSync.native(resolvedPath);
+    return missingSegments.length > 0 ? join(normalizedPath, ...missingSegments) : normalizedPath;
+  } catch {
+    const normalizedPath = realpathSync(resolvedPath);
+    return missingSegments.length > 0 ? join(normalizedPath, ...missingSegments) : normalizedPath;
+  }
 }

@@ -90,6 +90,7 @@ export interface Settings {
   autoAccept: boolean;
   autoAcceptMaxSizeMB: number;
   openReceivedFolder: boolean;
+  desktopNotifications: boolean;
   trustedDevices: TrustedDevice[];
 }
 

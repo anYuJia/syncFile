@@ -20,6 +20,7 @@ export const IpcChannels = {
   OpenTransferPath: 'syncfile:open-transfer-path',
   RevealTransferPath: 'syncfile:reveal-transfer-path',
   ClearTransferHistory: 'syncfile:clear-transfer-history',
+  RemoveTransferHistoryItems: 'syncfile:remove-transfer-history-items',
   ClearResumeCache: 'syncfile:clear-resume-cache',
   GetSandboxLocation: 'syncfile:get-sandbox-location',
   ChooseSandboxLocation: 'syncfile:choose-sandbox-location',

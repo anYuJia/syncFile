@@ -9,7 +9,8 @@ import { Sandbox } from '../storage/sandbox';
 import { MessageDecoder, encodeMessage } from './codec';
 import type { FileOfferMessage } from './protocol';
 import { isFileCancel, isFileReject } from './protocol';
-import { createTrustKeypair, signFileOffer } from '../security/trust';
+import { createTrustKeypair, signFileOffer, signPairRequest } from '../security/trust';
+import { secureConnect } from './secure-channel';
 import { TcpServer } from './tcp-server';
 
 describe('TcpServer', () => {
@@ -17,11 +18,26 @@ describe('TcpServer', () => {
   let sandbox: Sandbox;
   let server: TcpServer;
   const senderIdentity = createTrustKeypair();
+  const serverIdentity = createTrustKeypair();
+  const serverPeer = {
+    deviceId: 'server-device',
+    trustFingerprint: serverIdentity.fingerprint,
+    trustPublicKey: serverIdentity.publicKey
+  };
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'syncfile-srv-'));
     sandbox = new Sandbox(root);
-    server = new TcpServer({ sandbox });
+    server = new TcpServer({
+      sandbox,
+      selfDevice: {
+        deviceId: 'server-device',
+        name: 'Server',
+        trustFingerprint: serverIdentity.fingerprint,
+        trustPublicKey: serverIdentity.publicKey,
+        trustPrivateKey: serverIdentity.privateKey
+      }
+    });
   });
 
   afterEach(async () => {
@@ -50,8 +66,18 @@ describe('TcpServer', () => {
       progressEvents.push(info.bytesReceived);
     });
 
-    const socket = connect(port, '127.0.0.1');
-    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',
@@ -98,8 +124,18 @@ describe('TcpServer', () => {
       respond.reject('user-declined');
     });
 
-    const socket = connect(port, '127.0.0.1');
-    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
         type: 'file-offer',
@@ -152,8 +188,18 @@ describe('TcpServer', () => {
       }, 20);
     });
 
-    const socket = connect(port, '127.0.0.1');
-    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
         type: 'file-offer',
@@ -193,8 +239,18 @@ describe('TcpServer', () => {
     const port = await server.listen(0);
     const decoder = new MessageDecoder();
 
-    const socket = connect(port, '127.0.0.1');
-    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',
@@ -231,6 +287,57 @@ describe('TcpServer', () => {
     expect(rejected).toBe('identity-mismatch');
   });
 
+  it('ignores replayed pair requests within the validity window', async () => {
+    const port = await server.listen(0);
+    let pairRequestCount = 0;
+
+    server.on('pair-request', (_request, respond) => {
+      pairRequestCount += 1;
+      respond.reject();
+    });
+
+    const unsignedRequest = {
+      type: 'pair-request' as const,
+      version: 1 as const,
+      requestId: 'pair-replay',
+      timestamp: Date.now(),
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+    const request = {
+      ...unsignedRequest,
+      signature: signPairRequest(unsignedRequest, senderIdentity.privateKey)
+    };
+
+    const sendPairRequest = async (): Promise<void> => {
+      const rawSocket = connect(port, '127.0.0.1');
+      await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+      const socket = await secureConnect(rawSocket, {
+        selfDevice: {
+          deviceId: 'dev-a',
+          name: 'A',
+          trustFingerprint: senderIdentity.fingerprint,
+          trustPublicKey: senderIdentity.publicKey,
+          trustPrivateKey: senderIdentity.privateKey
+        },
+        expectedPeer: serverPeer
+      });
+
+      socket.write(encodeMessage(request));
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      socket.destroy();
+    };
+
+    await sendPairRequest();
+    await sendPairRequest();
+
+    expect(pairRequestCount).toBe(1);
+  });
+
   it('emits a paused event when the sender disconnects mid-transfer', async () => {
     const port = await server.listen(0);
 
@@ -242,8 +349,18 @@ describe('TcpServer', () => {
       server.once('transfer-paused', (info) => resolve(info.bytesReceived));
     });
 
-    const socket = connect(port, '127.0.0.1');
-    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
 
     const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
       type: 'file-offer',

@@ -2,6 +2,7 @@ import type { ProtocolMessage } from './protocol';
 
 const HEADER_BYTES = 4;
 const UINT32_MAX = 0xffffffff;
+export const MAX_CONTROL_MESSAGE_BYTES = 64 * 1024;
 
 function asBuffer(chunk: Buffer | Uint8Array): Buffer {
   return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -18,6 +19,9 @@ function isProtocolMessageLike(value: unknown): value is ProtocolMessage {
 
 export function encodeMessage(msg: ProtocolMessage): Buffer {
   const payload = Buffer.from(JSON.stringify(msg), 'utf8');
+  if (payload.length > MAX_CONTROL_MESSAGE_BYTES) {
+    throw new RangeError(`Message exceeds ${MAX_CONTROL_MESSAGE_BYTES} bytes`);
+  }
   if (payload.length > UINT32_MAX) {
     throw new RangeError(`Message exceeds ${UINT32_MAX} bytes`);
   }
@@ -53,6 +57,14 @@ export class MessageDecoder {
 
     while (this.buffer.length - offset >= HEADER_BYTES) {
       const bodyLength = this.buffer.readUInt32BE(offset);
+      if (bodyLength > MAX_CONTROL_MESSAGE_BYTES) {
+        if (options.allowInvalidTrailingData && messages.length > 0) {
+          trailingRemainder = true;
+          break;
+        }
+        throw new RangeError(`Message exceeds ${MAX_CONTROL_MESSAGE_BYTES} bytes`);
+      }
+
       const frameLength = HEADER_BYTES + bodyLength;
       if (this.buffer.length - offset < frameLength) {
         trailingRemainder = options.allowInvalidTrailingData && messages.length > 0;

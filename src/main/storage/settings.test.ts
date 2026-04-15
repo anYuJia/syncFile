@@ -24,6 +24,7 @@ describe('SettingsStore', () => {
       autoAccept: false,
       autoAcceptMaxSizeMB: 64,
       openReceivedFolder: false,
+      desktopNotifications: true,
       trustedDevices: []
     });
   });
@@ -46,6 +47,7 @@ describe('SettingsStore', () => {
       autoAccept: true,
       autoAcceptMaxSizeMB: 64,
       openReceivedFolder: true,
+      desktopNotifications: true,
       trustedDevices: []
     });
   });
@@ -58,6 +60,7 @@ describe('SettingsStore', () => {
         autoAccept: false,
         autoAcceptMaxSizeMB: 32,
         openReceivedFolder: false,
+        desktopNotifications: false,
         trustedDevices: [
           { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 }
         ]
@@ -67,9 +70,12 @@ describe('SettingsStore', () => {
 
     const store = new SettingsStore(root);
 
-    expect(store.get().trustedDevices).toEqual([
+    expect(store.get()).toMatchObject({
+      desktopNotifications: false,
+      trustedDevices: [
       { deviceId: 'dev-1', name: 'Alice MacBook', trustFingerprint: 'ABCD-1234-5678-90EF', trustPublicKey: 'PUBKEY1', trustedAt: 1234567890 }
-    ]);
+      ]
+    });
   });
 
   it('filters invalid trusted device records', () => {
@@ -128,6 +134,7 @@ describe('SettingsStore', () => {
       autoAccept: false,
       autoAcceptMaxSizeMB: 102400,
       openReceivedFolder: false,
+      desktopNotifications: true,
       trustedDevices: [
         { deviceId: 'dev-1', name: 'Alpha', trustFingerprint: 'AAAA-0000-BBBB-CCCC', trustPublicKey: 'PUB1', trustedAt: 3 },
         { deviceId: 'dev-2', name: 'Beta', trustFingerprint: 'FFFF-0000-AAAA-BBBB', trustPublicKey: 'PUB2', trustedAt: 2 }

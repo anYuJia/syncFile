@@ -7,6 +7,7 @@ import type { ReadStream } from 'fs';
 
 import { MessageDecoder, encodeMessage } from './codec';
 import { signFileOffer, signPairRequest } from '../security/trust';
+import { secureConnect, type ExpectedPeerIdentity, type SecureIdentity, type SecureSocket } from './secure-channel';
 import {
   isFileAccept,
   isFileCancel,
@@ -18,7 +19,7 @@ import {
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 8000;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 15000;
-const DEFAULT_IDLE_TIMEOUT_MS = 30000;
+const DEFAULT_IDLE_TIMEOUT_MS = 120000;
 
 export interface TcpClientOptions {
   selfDevice: {
@@ -36,6 +37,7 @@ export interface TcpClientOptions {
 export interface SendFileParams {
   host: string;
   port: number;
+  peer: ExpectedPeerIdentity;
   filePath: string;
   fileId?: string;
   sha256: string;
@@ -55,7 +57,7 @@ export interface ProgressEvent {
 }
 
 interface ActiveTransfer {
-  socket: Socket | null;
+  socket: SecureSocket | null;
   stream: ReadStream | null;
   intent: 'pause' | 'cancel' | null;
   accepted: boolean;
@@ -147,11 +149,16 @@ export class TcpClient extends EventEmitter {
     };
 
     try {
-      const socket = await openSocket(
+      const rawSocket = await openSocket(
         params.host,
         params.port,
         this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
       );
+      const socket = await secureConnect(rawSocket, {
+        selfDevice: this.options.selfDevice as SecureIdentity,
+        expectedPeer: params.peer,
+        timeoutMs: this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
+      });
       activeTransfer.socket = socket;
       socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
 
@@ -277,12 +284,17 @@ export class TcpClient extends EventEmitter {
     };
   }
 
-  async pairWithPeer(host: string, port: number): Promise<boolean> {
-    const socket = await openSocket(
+  async pairWithPeer(host: string, port: number, peer: ExpectedPeerIdentity): Promise<boolean> {
+    const rawSocket = await openSocket(
       host,
       port,
       this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
     );
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: this.options.selfDevice as SecureIdentity,
+      expectedPeer: peer,
+      timeoutMs: this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
+    });
     const decoder = new MessageDecoder();
     const unsignedRequest: Omit<PairRequestMessage, 'signature'> = {
       type: 'pair-request',
@@ -368,7 +380,7 @@ export class TcpClient extends EventEmitter {
   }
 
   private streamFile(
-    socket: Socket,
+    socket: SecureSocket,
     filePath: string,
     fileId: string,
     fileName: string,
