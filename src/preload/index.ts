@@ -69,7 +69,9 @@ const api = {
   onIncomingOffer: (callback: (offer: IncomingOffer) => void): (() => void) =>
     subscribe(IpcChannels.IncomingOffer, callback),
   onIncomingPairRequest: (callback: (request: PairRequest) => void): (() => void) =>
-    subscribe(IpcChannels.IncomingPairRequest, callback)
+    subscribe(IpcChannels.IncomingPairRequest, callback),
+  onPairRequestRemoved: (callback: (requestId: string) => void): (() => void) =>
+    subscribe(IpcChannels.PairRequestRemoved, callback)
 };
 
 export type SyncFileAPI = typeof api;

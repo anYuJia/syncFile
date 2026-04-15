@@ -74,7 +74,7 @@ export class TransferHistoryStore {
 
   clearDismissible(): TransferRecord[] {
     for (const [id, record] of this.records.entries()) {
-      if (!['pending', 'in-progress'].includes(record.status)) {
+      if (!['pending', 'in-progress', 'paused'].includes(record.status)) {
         this.records.delete(id);
       }
     }

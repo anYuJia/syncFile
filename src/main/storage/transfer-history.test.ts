@@ -106,7 +106,7 @@ describe('TransferHistoryStore', () => {
     expect(remaining[0].transferId).toBe('active-1');
   });
 
-  it('clears paused records when dismissible history is requested', async () => {
+  it('keeps paused records when dismissible history is requested', async () => {
     const store = new TransferHistoryStore(root);
     store.upsert({
       transferId: 'paused-1',
@@ -130,8 +130,8 @@ describe('TransferHistoryStore', () => {
     const remaining = store.clearDismissible();
     await store.flush();
 
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0].transferId).toBe('active-1');
+    expect(remaining).toHaveLength(2);
+    expect(remaining.map((record) => record.transferId).sort()).toEqual(['active-1', 'paused-1']);
   });
 
   it('removes only the requested transfer ids', async () => {

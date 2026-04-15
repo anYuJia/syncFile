@@ -109,7 +109,21 @@ export function App(): JSX.Element {
     const offIncomingPairRequest = window.syncFile.onIncomingPairRequest((request) => {
       setPendingPairRequests((prev) => [...prev, request]);
     });
-    return () => offIncomingPairRequest();
+    const offPairRequestRemoved = window.syncFile.onPairRequestRemoved((requestId) => {
+      setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
+      setUnreadPairRequestIds((current) => {
+        if (!current.has(requestId)) {
+          return current;
+        }
+        const next = new Set(current);
+        next.delete(requestId);
+        return next;
+      });
+    });
+    return () => {
+      offIncomingPairRequest();
+      offPairRequestRemoved();
+    };
   }, []);
 
   useEffect(() => {

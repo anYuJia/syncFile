@@ -290,10 +290,14 @@ describe('TcpServer', () => {
   it('ignores replayed pair requests within the validity window', async () => {
     const port = await server.listen(0);
     let pairRequestCount = 0;
+    let transferErrorCount = 0;
 
     server.on('pair-request', (_request, respond) => {
       pairRequestCount += 1;
       respond.reject();
+    });
+    server.on('transfer-error', () => {
+      transferErrorCount += 1;
     });
 
     const unsignedRequest = {
@@ -336,6 +340,62 @@ describe('TcpServer', () => {
     await sendPairRequest();
 
     expect(pairRequestCount).toBe(1);
+    expect(transferErrorCount).toBe(0);
+  });
+
+  it('removes stale pair requests when the requester disconnects before a response', async () => {
+    const port = await server.listen(0);
+    let transferErrorCount = 0;
+
+    server.on('transfer-error', () => {
+      transferErrorCount += 1;
+    });
+
+    const pairClosedPromise = new Promise<string>((resolve) => {
+      server.once('pair-request-closed', (requestId) => resolve(requestId));
+    });
+
+    server.on('pair-request', () => {
+      // Intentionally leave the request pending to simulate a stale requester.
+    });
+
+    const unsignedRequest = {
+      type: 'pair-request' as const,
+      version: 1 as const,
+      requestId: 'pair-stale',
+      timestamp: Date.now(),
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+    const request = {
+      ...unsignedRequest,
+      signature: signPairRequest(unsignedRequest, senderIdentity.privateKey)
+    };
+
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
+
+    socket.write(encodeMessage(request));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    socket.destroy();
+
+    await expect(pairClosedPromise).resolves.toBe('pair-stale');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(transferErrorCount).toBe(0);
   });
 
   it('emits a paused event when the sender disconnects mid-transfer', async () => {

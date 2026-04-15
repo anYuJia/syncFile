@@ -327,8 +327,20 @@ export function registerIpcHandlers(context: IpcContext): void {
   const sandboxLimitBytes = (settings: Settings): number => settings.maxSandboxSizeMB * 1024 * 1024;
   const autoAcceptLimitBytes = (settings: Settings): number => settings.autoAcceptMaxSizeMB * 1024 * 1024;
 
-  const exceedsSandboxLimit = async (fileSize: number, settings: Settings): Promise<boolean> => {
-    return (await context.sandbox.currentUsageBytes()) + fileSize > sandboxLimitBytes(settings);
+  const exceedsSandboxLimit = async (info: IncomingOfferInfo, settings: Settings): Promise<boolean> => {
+    const matchingResumeBytes = context.sandbox.matchingResumeBytes(
+      info.offerId,
+      info.fromDevice.deviceId,
+      info.fromDevice.name,
+      info.fromDevice.trustFingerprint,
+      info.fromDevice.trustPublicKey,
+      info.fileName,
+      info.fileSize,
+      info.sha256 ?? ''
+    );
+    const projectedUsageBytes =
+      (await context.sandbox.currentUsageBytes()) + Math.max(0, info.fileSize - matchingResumeBytes);
+    return projectedUsageBytes > sandboxLimitBytes(settings);
   };
 
   const lastTransferredBytes = (transferId: string): number => {
@@ -774,12 +786,17 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   ipcMain.handle(IpcChannels.ClearTransferHistory, (): void => {
-    const pausedReceiveIds = context.transferHistoryStore
+    const dismissibleReceiveIds = context.transferHistoryStore
       .list()
-      .filter((record) => record.direction === 'receive' && record.status === 'paused')
+      .filter(
+        (record) =>
+          record.direction === 'receive' &&
+          !['pending', 'in-progress', 'paused'].includes(record.status) &&
+          context.sandbox.hasIncomingResume(record.transferId)
+      )
       .map((record) => record.transferId);
 
-    for (const transferId of pausedReceiveIds) {
+    for (const transferId of dismissibleReceiveIds) {
       context.sandbox.discardIncomingResume(transferId, true);
     }
 
@@ -792,21 +809,30 @@ export function registerIpcHandlers(context: IpcContext): void {
       return;
     }
 
-    const pausedReceiveIds = context.transferHistoryStore
+    const removableRecords = context.transferHistoryStore
       .list()
       .filter(
         (record) =>
           transferIds.includes(record.transferId) &&
-          record.direction === 'receive' &&
-          record.status === 'paused'
+          !['pending', 'in-progress', 'paused'].includes(record.status)
+      );
+
+    if (removableRecords.length === 0) {
+      return;
+    }
+
+    const receiveResumeIds = removableRecords
+      .filter(
+        (record) =>
+          record.direction === 'receive' && context.sandbox.hasIncomingResume(record.transferId)
       )
       .map((record) => record.transferId);
 
-    for (const transferId of pausedReceiveIds) {
+    for (const transferId of receiveResumeIds) {
       context.sandbox.discardIncomingResume(transferId, true);
     }
 
-    context.transferHistoryStore.removeMany(transferIds);
+    context.transferHistoryStore.removeMany(removableRecords.map((record) => record.transferId));
     publishTransferHistoryReset();
   });
 
@@ -883,7 +909,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     void (async () => {
       try {
         const settings = context.settingsStore.get();
-        if (await exceedsSandboxLimit(info.fileSize, settings)) {
+        if (await exceedsSandboxLimit(info, settings)) {
           responder.reject('too-large');
           publishTransferEvent(IpcChannels.TransferProgress, makeInboundProgress(info, 0, 'rejected', 'manual'));
           return;
@@ -936,6 +962,13 @@ export function registerIpcHandlers(context: IpcContext): void {
       fromDevice: request.fromDevice,
       receivedAt: Date.now()
     });
+  });
+
+  context.tcpServer.on('pair-request-closed', (requestId) => {
+    if (!pendingPairRequests.delete(requestId)) {
+      return;
+    }
+    sendToRenderer(IpcChannels.PairRequestRemoved, requestId);
   });
 
   context.tcpServer.on('transfer-complete', (info) => {
@@ -997,6 +1030,9 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.tcpServer.on('transfer-error', (info: TransferErrorInfo) => {
+    if (!info.offerId && !info.fileName && !info.fromDevice) {
+      return;
+    }
     if (info.offerId) {
       completedOrAcceptedOffers.delete(info.offerId);
     }

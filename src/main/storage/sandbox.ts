@@ -119,13 +119,15 @@ export class Sandbox {
     const existing = this.readIncomingResumeMeta(fileId);
     if (
       existing &&
-      existing.deviceId === deviceId &&
-      existing.deviceName === deviceName &&
-      existing.trustFingerprint === trustFingerprint &&
-      existing.trustPublicKey === trustPublicKey &&
-      existing.fileName === fileName &&
-      existing.fileSize === fileSize &&
-      existing.sha256 === sha256 &&
+      isMatchingIncomingResume(existing, {
+        deviceId,
+        deviceName,
+        trustFingerprint,
+        trustPublicKey,
+        fileName,
+        fileSize,
+        sha256
+      }) &&
       existsSync(existing.partialPath)
     ) {
       return {
@@ -187,6 +189,41 @@ export class Sandbox {
       return 0;
     }
     return statSync(meta.partialPath).size;
+  }
+
+  matchingResumeBytes(
+    fileId: string,
+    deviceId: string,
+    deviceName: string,
+    trustFingerprint: string,
+    trustPublicKey: string,
+    fileName: string,
+    fileSize: number,
+    sha256: string
+  ): number {
+    const meta = this.readIncomingResumeMeta(fileId);
+    if (
+      !meta ||
+      !isMatchingIncomingResume(meta, {
+        deviceId,
+        deviceName,
+        trustFingerprint,
+        trustPublicKey,
+        fileName,
+        fileSize,
+        sha256
+      }) ||
+      !existsSync(meta.partialPath)
+    ) {
+      return 0;
+    }
+
+    return statSync(meta.partialPath).size;
+  }
+
+  hasIncomingResume(fileId: string): boolean {
+    const meta = this.readIncomingResumeMeta(fileId);
+    return Boolean(meta && existsSync(meta.partialPath));
   }
 
   resumeCacheSummary(): ResumeCacheSummary {
@@ -325,6 +362,29 @@ export class Sandbox {
 
 function sanitizeSegment(input: string): string {
   return input.replace(/[\\/\0]/g, '_').replace(/^\.+/, '') || 'unnamed';
+}
+
+function isMatchingIncomingResume(
+  existing: IncomingResumeMeta,
+  candidate: {
+    deviceId: string;
+    deviceName: string;
+    trustFingerprint: string;
+    trustPublicKey: string;
+    fileName: string;
+    fileSize: number;
+    sha256: string;
+  }
+): boolean {
+  return (
+    existing.deviceId === candidate.deviceId &&
+    existing.deviceName === candidate.deviceName &&
+    existing.trustFingerprint === candidate.trustFingerprint &&
+    existing.trustPublicKey === candidate.trustPublicKey &&
+    existing.fileName === candidate.fileName &&
+    existing.fileSize === candidate.fileSize &&
+    existing.sha256 === candidate.sha256
+  );
 }
 
 function formatTimestamp(d: Date): string {

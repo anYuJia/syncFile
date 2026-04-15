@@ -179,4 +179,62 @@ describe('Sandbox', () => {
       }
     ]);
   });
+
+  it('reports matching resume bytes only for the same incoming transfer metadata', () => {
+    const prepared = sandbox.prepareIncomingResume(
+      'file-4',
+      'device-d',
+      'Delta Laptop',
+      'MMMM-NNNN-OOOO-PPPP',
+      'PUBKEY4',
+      'clip.mov',
+      9,
+      'sha-clip'
+    );
+    writeFileSync(prepared.partialPath, '12345');
+
+    expect(
+      sandbox.matchingResumeBytes(
+        'file-4',
+        'device-d',
+        'Delta Laptop',
+        'MMMM-NNNN-OOOO-PPPP',
+        'PUBKEY4',
+        'clip.mov',
+        9,
+        'sha-clip'
+      )
+    ).toBe(5);
+    expect(
+      sandbox.matchingResumeBytes(
+        'file-4',
+        'device-d',
+        'Delta Laptop',
+        'MMMM-NNNN-OOOO-PPPP',
+        'PUBKEY4',
+        'clip.mov',
+        9,
+        'other-sha'
+      )
+    ).toBe(0);
+  });
+
+  it('detects whether a resumable partial file exists', () => {
+    const prepared = sandbox.prepareIncomingResume(
+      'file-5',
+      'device-e',
+      'Echo Desktop',
+      'QQQQ-RRRR-SSSS-TTTT',
+      'PUBKEY5',
+      'draft.bin',
+      4,
+      'sha-draft-bin'
+    );
+
+    expect(sandbox.hasIncomingResume('file-5')).toBe(false);
+
+    writeFileSync(prepared.partialPath, 'ab');
+
+    expect(sandbox.hasIncomingResume('file-5')).toBe(true);
+  });
 });

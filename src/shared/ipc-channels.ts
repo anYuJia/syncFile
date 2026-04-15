@@ -35,7 +35,8 @@ export const IpcChannels = {
   TransferComplete: 'syncfile:transfer-complete',
   TransferHistoryReset: 'syncfile:transfer-history-reset',
   IncomingOffer: 'syncfile:incoming-offer',
-  IncomingPairRequest: 'syncfile:incoming-pair-request'
+  IncomingPairRequest: 'syncfile:incoming-pair-request',
+  PairRequestRemoved: 'syncfile:pair-request-removed'
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

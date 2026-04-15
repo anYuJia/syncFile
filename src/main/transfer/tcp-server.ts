@@ -101,6 +101,7 @@ export interface TransferErrorInfo {
 export interface TcpServerEvents {
   'incoming-offer': (offer: IncomingOfferInfo, respond: OfferResponder) => void;
   'pair-request': (request: PairRequestMessage, respond: PairResponder) => void;
+  'pair-request-closed': (requestId: string) => void;
   progress: (info: ReceiveProgressInfo) => void;
   'transfer-complete': (info: TransferCompleteInfo) => void;
   'transfer-paused': (info: ReceiveInterruptedInfo) => void;
@@ -217,6 +218,8 @@ export class TcpServer extends EventEmitter {
     let bufferedData = Buffer.alloc(0);
     let settled = false;
     let socketError: Error | null = null;
+    let pendingPairRequestId: string | null = null;
+    let pairRequestResolved = false;
 
     const fail = (error: Error): void => {
       if (settled) return;
@@ -495,15 +498,26 @@ export class TcpServer extends EventEmitter {
           const [first, ...rest] = messages;
           if (isPairRequest(first)) {
             if (!verifyPairRequest(first)) {
+              settled = true;
+              phase = 'completed';
               socket.end();
               return;
             }
             if (this.isReplayPairRequest(first.requestId, first.timestamp)) {
+              settled = true;
+              phase = 'completed';
               socket.end();
               return;
             }
+            pendingPairRequestId = first.requestId;
+            settled = true;
+            phase = 'completed';
             const pairResponder: PairResponder = {
               accept: () => {
+                if (pairRequestResolved || socket.destroyed) {
+                  return;
+                }
+                pairRequestResolved = true;
                 socket.write(
                   encodeMessage({
                     type: 'pair-response',
@@ -514,6 +528,10 @@ export class TcpServer extends EventEmitter {
                 );
               },
               reject: () => {
+                if (pairRequestResolved || socket.destroyed) {
+                  return;
+                }
+                pairRequestResolved = true;
                 socket.write(
                   encodeMessage({
                     type: 'pair-response',
@@ -612,6 +630,10 @@ export class TcpServer extends EventEmitter {
     });
 
     socket.on('close', () => {
+      if (pendingPairRequestId && !pairRequestResolved) {
+        pairRequestResolved = true;
+        this.emit('pair-request-closed', pendingPairRequestId);
+      }
       if (!settled && phase !== 'rejected' && phase !== 'completed') {
         settled = true;
         if (offer) {

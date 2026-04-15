@@ -223,4 +223,309 @@ describe('registerIpcHandlers', () => {
       })
     );
   });
+
+  it('does not double count matching resume bytes against the sandbox limit', async () => {
+    const registry = Object.assign(new EventEmitter(), {
+      list: vi.fn(() => [])
+    });
+    const tcpClient = Object.assign(new EventEmitter(), {
+      sendFile: vi.fn(),
+      pairWithPeer: vi.fn(),
+      pause: vi.fn().mockReturnValue(false),
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const tcpServer = Object.assign(new EventEmitter(), {
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const pendingOfferStore = {
+      list: vi.fn(() => []),
+      upsert: vi.fn(),
+      remove: vi.fn()
+    };
+
+    registerIpcHandlers({
+      registry: registry as never,
+      mdnsService: { refresh: vi.fn() } as never,
+      tcpServer: tcpServer as never,
+      tcpClient: tcpClient as never,
+      sandbox: {
+        rootPath: vi.fn(() => join(root, 'sandbox')),
+        currentUsageBytes: vi.fn().mockResolvedValue(1_048_200),
+        matchingResumeBytes: vi.fn(() => 600),
+        hasIncomingResume: vi.fn(() => false),
+        resumeCacheSummary: vi.fn(() => ({ count: 0, bytes: 0 })),
+        discardIncomingResume: vi.fn(),
+        clearResumeCache: vi.fn(() => []),
+        directoryForIncoming: vi.fn(() => join(root, 'sandbox', 'peer-1')),
+        setRoot: vi.fn(),
+        assertContainsPath: vi.fn((path: string) => path)
+      } as never,
+      sandboxLocation: {
+        currentPath: vi.fn(() => null),
+        save: vi.fn((path: string) => path)
+      } as never,
+      pendingOfferStore: pendingOfferStore as never,
+      settingsStore: {
+        get: vi.fn(() => ({
+          maxSandboxSizeMB: 1,
+          autoAccept: false,
+          autoAcceptMaxSizeMB: 64,
+          openReceivedFolder: false,
+          desktopNotifications: true,
+          trustedDevices: []
+        })),
+        save: vi.fn()
+      } as never,
+      transferHistoryStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        get: vi.fn(() => undefined),
+        count: vi.fn(() => 0),
+        remove: vi.fn()
+      } as never,
+      identity: {} as never,
+      getSelfDevice: vi.fn(),
+      getWindow: vi.fn(() => null)
+    });
+
+    tcpServer.emit(
+      'incoming-offer',
+      {
+        offerId: 'offer-1',
+        fileName: 'resume.bin',
+        fileSize: 800,
+        sha256: 'sha-resume',
+        fromDevice: {
+          deviceId: 'peer-1',
+          name: 'Peer',
+          trustFingerprint: 'AAAA-BBBB-CCCC-DDDD',
+          trustPublicKey: 'PUBKEY1'
+        }
+      },
+      {
+        accept: vi.fn(),
+        reject: vi.fn(),
+        cancel: vi.fn()
+      }
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(pendingOfferStore.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes stale pending pair requests when the connection closes', () => {
+    const send = vi.fn();
+    const registry = Object.assign(new EventEmitter(), {
+      list: vi.fn(() => [])
+    });
+    const tcpClient = Object.assign(new EventEmitter(), {
+      sendFile: vi.fn(),
+      pairWithPeer: vi.fn(),
+      pause: vi.fn().mockReturnValue(false),
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const tcpServer = Object.assign(new EventEmitter(), {
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const handle = vi.mocked(ipcMain.handle);
+
+    registerIpcHandlers({
+      registry: registry as never,
+      mdnsService: { refresh: vi.fn() } as never,
+      tcpServer: tcpServer as never,
+      tcpClient: tcpClient as never,
+      sandbox: {
+        rootPath: vi.fn(() => join(root, 'sandbox')),
+        currentUsageBytes: vi.fn().mockResolvedValue(0),
+        matchingResumeBytes: vi.fn(() => 0),
+        hasIncomingResume: vi.fn(() => false),
+        resumeCacheSummary: vi.fn(() => ({ count: 0, bytes: 0 })),
+        discardIncomingResume: vi.fn(),
+        clearResumeCache: vi.fn(() => []),
+        directoryForIncoming: vi.fn(() => join(root, 'sandbox', 'peer-1')),
+        setRoot: vi.fn(),
+        assertContainsPath: vi.fn((path: string) => path)
+      } as never,
+      sandboxLocation: {
+        currentPath: vi.fn(() => null),
+        save: vi.fn((path: string) => path)
+      } as never,
+      pendingOfferStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        remove: vi.fn()
+      } as never,
+      settingsStore: {
+        get: vi.fn(() => ({
+          maxSandboxSizeMB: 1024,
+          autoAccept: false,
+          autoAcceptMaxSizeMB: 64,
+          openReceivedFolder: false,
+          desktopNotifications: true,
+          trustedDevices: []
+        })),
+        save: vi.fn()
+      } as never,
+      transferHistoryStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        get: vi.fn(() => undefined),
+        count: vi.fn(() => 0),
+        remove: vi.fn()
+      } as never,
+      identity: {} as never,
+      getSelfDevice: vi.fn(),
+      getWindow: vi.fn(
+        () =>
+          ({
+            isDestroyed: () => false,
+            webContents: { send }
+          }) as never
+      )
+    });
+
+    const acceptPairHandler = handle.mock.calls.find(
+      ([channel]) => channel === IpcChannels.AcceptPairRequest
+    )?.[1] as ((event: unknown, requestId: string) => void);
+
+    tcpServer.emit(
+      'pair-request',
+      {
+        requestId: 'pair-1',
+        fromDevice: {
+          deviceId: 'peer-1',
+          name: 'Peer',
+          trustFingerprint: 'AAAA-BBBB-CCCC-DDDD',
+          trustPublicKey: 'PUBKEY1'
+        }
+      },
+      {
+        accept: vi.fn(),
+        reject: vi.fn()
+      }
+    );
+    tcpServer.emit('pair-request-closed', 'pair-1');
+
+    expect(send).toHaveBeenCalledWith(IpcChannels.PairRequestRemoved, 'pair-1');
+    expect(() => acceptPairHandler({}, 'pair-1')).toThrow('pair request pair-1 not found');
+  });
+
+  it('clears cached partial files only for dismissible receive history entries', () => {
+    const registry = Object.assign(new EventEmitter(), {
+      list: vi.fn(() => [])
+    });
+    const tcpClient = Object.assign(new EventEmitter(), {
+      sendFile: vi.fn(),
+      pairWithPeer: vi.fn(),
+      pause: vi.fn().mockReturnValue(false),
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const tcpServer = Object.assign(new EventEmitter(), {
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const discardIncomingResume = vi.fn();
+    const clearDismissible = vi.fn();
+    const removeMany = vi.fn(() => []);
+    const historyRecords = [
+      {
+        transferId: 'paused-1',
+        direction: 'receive' as const,
+        fileName: 'paused.txt',
+        fileSize: 100,
+        bytesTransferred: 30,
+        peerDeviceName: 'Peer',
+        status: 'paused' as const
+      },
+      {
+        transferId: 'failed-1',
+        direction: 'receive' as const,
+        fileName: 'failed.txt',
+        fileSize: 100,
+        bytesTransferred: 30,
+        peerDeviceName: 'Peer',
+        status: 'failed' as const
+      },
+      {
+        transferId: 'done-1',
+        direction: 'send' as const,
+        fileName: 'done.txt',
+        fileSize: 100,
+        bytesTransferred: 100,
+        peerDeviceName: 'Peer',
+        status: 'completed' as const
+      }
+    ];
+    const handle = vi.mocked(ipcMain.handle);
+
+    registerIpcHandlers({
+      registry: registry as never,
+      mdnsService: { refresh: vi.fn() } as never,
+      tcpServer: tcpServer as never,
+      tcpClient: tcpClient as never,
+      sandbox: {
+        rootPath: vi.fn(() => join(root, 'sandbox')),
+        currentUsageBytes: vi.fn().mockResolvedValue(0),
+        matchingResumeBytes: vi.fn(() => 0),
+        hasIncomingResume: vi.fn((transferId: string) => transferId !== 'done-1'),
+        resumeCacheSummary: vi.fn(() => ({ count: 0, bytes: 0 })),
+        discardIncomingResume,
+        clearResumeCache: vi.fn(() => []),
+        directoryForIncoming: vi.fn(() => join(root, 'sandbox', 'peer-1')),
+        setRoot: vi.fn(),
+        assertContainsPath: vi.fn((path: string) => path)
+      } as never,
+      sandboxLocation: {
+        currentPath: vi.fn(() => null),
+        save: vi.fn((path: string) => path)
+      } as never,
+      pendingOfferStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        remove: vi.fn()
+      } as never,
+      settingsStore: {
+        get: vi.fn(() => ({
+          maxSandboxSizeMB: 1024,
+          autoAccept: false,
+          autoAcceptMaxSizeMB: 64,
+          openReceivedFolder: false,
+          desktopNotifications: true,
+          trustedDevices: []
+        })),
+        save: vi.fn()
+      } as never,
+      transferHistoryStore: {
+        list: vi.fn(() => historyRecords),
+        upsert: vi.fn(),
+        get: vi.fn(() => undefined),
+        count: vi.fn(() => historyRecords.length),
+        remove: vi.fn(),
+        removeMany,
+        clearDismissible
+      } as never,
+      identity: {} as never,
+      getSelfDevice: vi.fn(),
+      getWindow: vi.fn(() => null)
+    });
+
+    const clearTransferHistoryHandler = handle.mock.calls.find(
+      ([channel]) => channel === IpcChannels.ClearTransferHistory
+    )?.[1] as ((event: unknown) => void);
+    const removeTransferHistoryItemsHandler = handle.mock.calls.find(
+      ([channel]) => channel === IpcChannels.RemoveTransferHistoryItems
+    )?.[1] as ((event: unknown, transferIds: string[]) => void);
+
+    clearTransferHistoryHandler({});
+    expect(discardIncomingResume).toHaveBeenCalledWith('failed-1', true);
+    expect(discardIncomingResume).not.toHaveBeenCalledWith('paused-1', true);
+    expect(clearDismissible).toHaveBeenCalledTimes(1);
+
+    discardIncomingResume.mockClear();
+
+    removeTransferHistoryItemsHandler({}, ['paused-1', 'failed-1', 'done-1']);
+    expect(discardIncomingResume).toHaveBeenCalledWith('failed-1', true);
+    expect(discardIncomingResume).not.toHaveBeenCalledWith('paused-1', true);
+    expect(removeMany).toHaveBeenCalledWith(['failed-1', 'done-1']);
+  });
 });

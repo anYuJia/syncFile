@@ -179,7 +179,7 @@ export function TransferList({
   };
 
   const visibleFinishedTransferIds = visibleTransfers
-    .filter((item) => !['pending', 'in-progress'].includes(item.status))
+    .filter((item) => !['pending', 'in-progress', 'paused'].includes(item.status))
     .map((item) => item.transferId);
 
   return (
