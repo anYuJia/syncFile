@@ -1,13 +1,19 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
 import type { Messages } from '../i18n';
+import { formatBytes } from '../utils/format';
 
 /* ── Types ────────────────────────────────────────────────────── */
 
 interface PendingFile {
   path: string;
   name: string;
+  label: string;
   size: number;
 }
+
+type DataTransferItemWithEntry = DataTransferItem & {
+  webkitGetAsEntry?: () => FileSystemEntry | null;
+};
 
 interface DropZoneProps {
   onSend: (filePaths: string[]) => void | Promise<void>;
@@ -26,18 +32,14 @@ function fileToEntry(file: File): PendingFile | null {
       : typeof window.syncFile.getPathForFile === 'function'
         ? window.syncFile.getPathForFile(file)
         : '') || '';
+  const relativePath = typeof file.webkitRelativePath === 'string' && file.webkitRelativePath.length > 0
+    ? file.webkitRelativePath
+    : file.name;
 
   if (filePath.length > 0) {
-    return { path: filePath, name: file.name, size: file.size };
+    return { path: filePath, name: file.name, label: relativePath, size: file.size };
   }
   return null;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function extOf(name: string): string {
@@ -103,8 +105,19 @@ export function DropZone({
   selfDeviceName
 }: DropZoneProps): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const directoryInputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+
+  const addPendingEntries = (entries: PendingFile[]): void => {
+    if (entries.length === 0) {
+      return;
+    }
+    setPendingFiles((prev) => {
+      const existing = new Set(prev.map((file) => file.path));
+      return [...prev, ...entries.filter((entry) => !existing.has(entry.path))];
+    });
+  };
 
   const addFiles = (fileList: FileList): void => {
     const entries: PendingFile[] = [];
@@ -112,11 +125,7 @@ export function DropZone({
       const entry = fileToEntry(fileList[i]);
       if (entry) entries.push(entry);
     }
-    if (entries.length === 0) return;
-    setPendingFiles((prev) => {
-      const existing = new Set(prev.map((f) => f.path));
-      return [...prev, ...entries.filter((e) => !existing.has(e.path))];
-    });
+    addPendingEntries(entries);
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>): void => {
@@ -133,7 +142,7 @@ export function DropZone({
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     setIsDragActive(false);
-    addFiles(event.dataTransfer.files);
+    void collectDataTransferEntries(event.dataTransfer).then(addPendingEntries);
   };
 
   const handleFileInput = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -143,6 +152,10 @@ export function DropZone({
 
   const openFilePicker = (): void => {
     fileInputRef.current?.click();
+  };
+
+  const openDirectoryPicker = (): void => {
+    directoryInputRef.current?.click();
   };
 
   const handleRemove = (event: MouseEvent, path: string): void => {
@@ -184,19 +197,40 @@ export function DropZone({
         className="drop-zone-hidden-input"
         onChange={handleFileInput}
       />
+      <input
+        ref={directoryInputRef}
+        type="file"
+        multiple
+        className="drop-zone-hidden-input"
+        onChange={handleFileInput}
+        {...({
+          webkitdirectory: '',
+          directory: ''
+        } as unknown as Record<string, string>)}
+      />
 
       {!hasFiles ? (
-        <button type="button" className="drop-zone-label" onClick={openFilePicker}>
-          <span className="drop-zone-icon" aria-hidden="true">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </span>
-          <span className="drop-zone-title">{messages.dropZoneTitle}</span>
-          <span className="drop-zone-subtitle">{messages.dropZoneAction}</span>
-        </button>
+        <>
+          <button type="button" className="drop-zone-label" onClick={openFilePicker}>
+            <span className="drop-zone-icon" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </span>
+            <span className="drop-zone-title">{messages.dropZoneTitle}</span>
+            <span className="drop-zone-subtitle">{messages.dropZoneAction}</span>
+          </button>
+          <div className="drop-zone-quick-actions">
+            <button type="button" className="button button-ghost drop-zone-quick-action" onClick={openFilePicker}>
+              {messages.dropZonePickFromDisk}
+            </button>
+            <button type="button" className="button button-ghost drop-zone-quick-action" onClick={openDirectoryPicker}>
+              {messages.dropZoneAddFolder}
+            </button>
+          </div>
+        </>
       ) : (
         <div className="dz-files">
           <div className="dz-file-stage">
@@ -204,8 +238,8 @@ export function DropZone({
               {pendingFiles.map((file) => (
                 <div key={file.path} className="dz-file-tile">
                   <FileIcon name={file.name} />
-                  <span className="dz-file-tile-name" title={file.name}>{file.name}</span>
-                  <span className="dz-file-tile-size">{formatSize(file.size)}</span>
+                  <span className="dz-file-tile-name" title={file.label}>{file.label}</span>
+                  <span className="dz-file-tile-size">{formatBytes(file.size)}</span>
                   <button
                     type="button"
                     className="dz-file-tile-remove"
@@ -225,8 +259,8 @@ export function DropZone({
                 type="button"
                 className="dz-file-tile dz-file-tile-add"
                 onClick={openFilePicker}
-                title={messages.dropZoneAction}
-                aria-label={messages.dropZoneAction}
+                title={messages.dropZonePickFromDisk}
+                aria-label={messages.dropZonePickFromDisk}
               >
                 <span className="dz-file-tile-add-icon" aria-hidden="true">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -235,6 +269,21 @@ export function DropZone({
                   </svg>
                 </span>
                 <span className="dz-file-tile-add-label">{messages.dropZoneAddMore}</span>
+              </button>
+              <button
+                type="button"
+                className="dz-file-tile dz-file-tile-add"
+                onClick={openDirectoryPicker}
+                title={messages.dropZoneAddFolder}
+                aria-label={messages.dropZoneAddFolder}
+              >
+                <span className="dz-file-tile-add-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v1H3z" />
+                    <path d="M3 10h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  </svg>
+                </span>
+                <span className="dz-file-tile-add-label">{messages.dropZoneAddFolder}</span>
               </button>
             </div>
 
@@ -279,4 +328,71 @@ export function DropZone({
       )}
     </div>
   );
+}
+
+async function collectDataTransferEntries(dataTransfer: DataTransfer): Promise<PendingFile[]> {
+  const items = Array.from(dataTransfer.items ?? []) as DataTransferItemWithEntry[];
+  const entries = items
+    .map((item) => item.webkitGetAsEntry?.())
+    .filter((entry): entry is FileSystemEntry => Boolean(entry));
+
+  if (entries.length === 0) {
+    return collectFileEntries(dataTransfer.files);
+  }
+
+  const files = await Promise.all(entries.map((entry) => readEntryFiles(entry)));
+  return files.flat();
+}
+
+function collectFileEntries(fileList: FileList): PendingFile[] {
+  const entries: PendingFile[] = [];
+  for (let i = 0; i < fileList.length; i++) {
+    const entry = fileToEntry(fileList[i]);
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
+async function readEntryFiles(entry: FileSystemEntry): Promise<PendingFile[]> {
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) => {
+      try {
+        (entry as FileSystemFileEntry).file((nextFile) => resolve(nextFile));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    const pending = fileToEntry(file);
+    return pending ? [pending] : [];
+  }
+
+  if (!entry.isDirectory) {
+    return [];
+  }
+
+  const reader = (entry as FileSystemDirectoryEntry).createReader();
+  const nestedEntries = await readDirectoryEntries(reader);
+  const files = await Promise.all(nestedEntries.map((nestedEntry) => readEntryFiles(nestedEntry)));
+  return files.flat();
+}
+
+async function readDirectoryEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+  const entries: FileSystemEntry[] = [];
+
+  while (true) {
+    const chunk = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+      try {
+        reader.readEntries((nextEntries) => resolve(nextEntries));
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    if (chunk.length === 0) {
+      return entries;
+    }
+    entries.push(...chunk);
+  }
 }

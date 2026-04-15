@@ -45,6 +45,8 @@ const api = {
   openTransferPath: (path: string): Promise<void> => ipcRenderer.invoke(IpcChannels.OpenTransferPath, path),
   revealTransferPath: (path: string): Promise<void> => ipcRenderer.invoke(IpcChannels.RevealTransferPath, path),
   clearTransferHistory: (): Promise<void> => ipcRenderer.invoke(IpcChannels.ClearTransferHistory),
+  removeTransferHistoryItems: (transferIds: string[]): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.RemoveTransferHistoryItems, transferIds),
   clearResumeCache: (): Promise<void> => ipcRenderer.invoke(IpcChannels.ClearResumeCache),
   getSandboxLocation: (): Promise<SandboxLocationInfo> => ipcRenderer.invoke(IpcChannels.GetSandboxLocation),
   chooseSandboxLocation: (): Promise<SandboxLocationInfo | null> =>

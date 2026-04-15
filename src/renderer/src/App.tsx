@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { DeviceList } from './components/DeviceList';
 import { DropZone } from './components/DropZone';
+import { PairRequestQueuePrompt } from './components/PairRequestQueuePrompt';
 import { PairDevicePrompt } from './components/PairDevicePrompt';
 import { ReceivePrompt } from './components/ReceivePrompt';
 import { SettingsModal } from './components/Settings';
@@ -23,6 +24,9 @@ const MIN_RIGHT_PANE_WIDTH = 420;
 const MIN_RIGHT_PANE_SECTION_HEIGHT = 150;
 const COLUMN_RESIZER_WIDTH = 12;
 const RIGHT_PANE_RESIZER_HEIGHT = 12;
+const COMPACT_LAYOUT_QUERY = '(max-width: 1040px)';
+
+type CompactSection = 'manifest' | 'dispatch' | 'ledger';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -48,12 +52,16 @@ export function App(): JSX.Element {
   } = useSyncFile(messages);
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [selectedIncomingOfferId, setSelectedIncomingOfferId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [pendingPairRequests, setPendingPairRequests] = useState<PairRequest[]>([]);
+  const [selectedPairRequestId, setSelectedPairRequestId] = useState<string | null>(null);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
+  const [selectedTransferId, setSelectedTransferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
+  const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
   const [leftPaneSplit, setLeftPaneSplit] = useState<number>(() => {
     const saved = localStorage.getItem(LEFT_PANE_SPLIT_KEY);
     const parsed = saved ? Number(saved) : Number.NaN;
@@ -74,16 +82,27 @@ export function App(): JSX.Element {
     const saved = localStorage.getItem('theme');
     return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
+  const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => {
+    return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
+  });
+  const [compactSection, setCompactSection] = useState<CompactSection>('manifest');
+  const [busyTransferIds, setBusyTransferIds] = useState<Set<string>>(new Set());
+  const [unreadOfferIds, setUnreadOfferIds] = useState<Set<string>>(new Set());
+  const [unreadPairRequestIds, setUnreadPairRequestIds] = useState<Set<string>>(new Set());
   const contentGridRef = useRef<HTMLElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
+  const seenOfferIdsRef = useRef<Set<string>>(new Set());
+  const seenPairRequestIdsRef = useRef<Set<string>>(new Set());
+  const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
   const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
   const pairingDevice = devices.find((device) => device.deviceId === pairingDeviceId) ?? null;
-  const trustedDeviceKeys = new Set(
-    trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)
+  const trustedDeviceKeys = useMemo(
+    () => new Set(trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)),
+    [trustedDevices]
   );
 
   useEffect(() => {
-    void refreshTrustedDevices();
+    void refreshAppSettings();
   }, []);
 
   useEffect(() => {
@@ -96,6 +115,9 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (devices.length === 0) {
       setSelectedDeviceId(null);
+      if (isCompactLayout) {
+        setCompactSection('manifest');
+      }
       return;
     }
 
@@ -105,7 +127,194 @@ export function App(): JSX.Element {
     }
 
     setSelectedDeviceId(devices[0].deviceId);
-  }, [devices, selectedDeviceId]);
+  }, [devices, isCompactLayout, selectedDeviceId]);
+
+  useEffect(() => {
+    if (pendingOffers.length === 0) {
+      setSelectedIncomingOfferId(null);
+      return;
+    }
+
+    if (selectedIncomingOfferId && pendingOffers.some((offer) => offer.offerId === selectedIncomingOfferId)) {
+      return;
+    }
+
+    setSelectedIncomingOfferId(pendingOffers[0].offerId);
+  }, [pendingOffers, selectedIncomingOfferId]);
+
+  useEffect(() => {
+    if (pendingPairRequests.length === 0) {
+      setSelectedPairRequestId(null);
+      return;
+    }
+
+    if (
+      selectedPairRequestId &&
+      pendingPairRequests.some((request) => request.requestId === selectedPairRequestId)
+    ) {
+      return;
+    }
+
+    setSelectedPairRequestId(pendingPairRequests[0].requestId);
+  }, [pendingPairRequests, selectedPairRequestId]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(COMPACT_LAYOUT_QUERY);
+    const updateLayout = (): void => {
+      setIsCompactLayout(mediaQuery.matches);
+    };
+    updateLayout();
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
+  }, []);
+
+  useEffect(() => {
+    for (const offer of pendingOffers) {
+      if (seenOfferIdsRef.current.has(offer.offerId)) {
+        continue;
+      }
+      seenOfferIdsRef.current.add(offer.offerId);
+      setUnreadOfferIds((current) => new Set(current).add(offer.offerId));
+      maybeShowDesktopNotification(
+        desktopNotificationsEnabled,
+        messages.notificationIncomingTitle,
+        messages.notificationIncomingBody(offer.fromDevice.name, offer.fileName),
+        () => {
+          setSelectedIncomingOfferId(offer.offerId);
+          if (isCompactLayout) {
+            setCompactSection('manifest');
+          }
+        }
+      );
+    }
+
+    for (const offerId of [...seenOfferIdsRef.current]) {
+      if (!pendingOffers.some((offer) => offer.offerId === offerId)) {
+        seenOfferIdsRef.current.delete(offerId);
+      }
+    }
+    setUnreadOfferIds((current) => {
+      const next = new Set(current);
+      for (const offerId of [...next]) {
+        if (!pendingOffers.some((offer) => offer.offerId === offerId)) {
+          next.delete(offerId);
+        }
+      }
+      return next;
+    });
+  }, [desktopNotificationsEnabled, messages, pendingOffers]);
+
+  useEffect(() => {
+    for (const request of pendingPairRequests) {
+      if (seenPairRequestIdsRef.current.has(request.requestId)) {
+        continue;
+      }
+      seenPairRequestIdsRef.current.add(request.requestId);
+      setUnreadPairRequestIds((current) => new Set(current).add(request.requestId));
+      maybeShowDesktopNotification(
+        desktopNotificationsEnabled,
+        messages.notificationPairTitle,
+        messages.notificationPairBody(request.fromDevice.name),
+        () => {
+          setSelectedPairRequestId(request.requestId);
+          if (isCompactLayout) {
+            setCompactSection('manifest');
+          }
+        }
+      );
+    }
+
+    for (const requestId of [...seenPairRequestIdsRef.current]) {
+      if (!pendingPairRequests.some((request) => request.requestId === requestId)) {
+        seenPairRequestIdsRef.current.delete(requestId);
+      }
+    }
+    setUnreadPairRequestIds((current) => {
+      const next = new Set(current);
+      for (const requestId of [...next]) {
+        if (!pendingPairRequests.some((request) => request.requestId === requestId)) {
+          next.delete(requestId);
+        }
+      }
+      return next;
+    });
+  }, [desktopNotificationsEnabled, messages, pendingPairRequests]);
+
+  useEffect(() => {
+    const clearVisibleUnread = (): void => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) {
+        return;
+      }
+      if (selectedIncomingOfferId) {
+        setUnreadOfferIds((current) => {
+          if (!current.has(selectedIncomingOfferId)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(selectedIncomingOfferId);
+          return next;
+        });
+      }
+      if (selectedPairRequestId) {
+        setUnreadPairRequestIds((current) => {
+          if (!current.has(selectedPairRequestId)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(selectedPairRequestId);
+          return next;
+        });
+      }
+    };
+
+    clearVisibleUnread();
+    window.addEventListener('focus', clearVisibleUnread);
+    document.addEventListener('visibilitychange', clearVisibleUnread);
+    return () => {
+      window.removeEventListener('focus', clearVisibleUnread);
+      document.removeEventListener('visibilitychange', clearVisibleUnread);
+    };
+  }, [selectedIncomingOfferId, selectedPairRequestId]);
+
+  useEffect(() => {
+    const trackedStatuses = new Set(['completed', 'failed', 'rejected', 'cancelled']);
+    for (const transfer of transfers) {
+      const previousStatus = lastTransferNotificationStatusRef.current.get(transfer.transferId);
+      if (previousStatus === transfer.status) {
+        continue;
+      }
+      lastTransferNotificationStatusRef.current.set(transfer.transferId, transfer.status);
+      if (!trackedStatuses.has(transfer.status)) {
+        continue;
+      }
+
+      if (transfer.status === 'completed') {
+        maybeShowDesktopNotification(
+          desktopNotificationsEnabled,
+          messages.notificationTransferCompleteTitle,
+          messages.notificationTransferCompleteBody(transfer.fileName),
+          () => {
+            setSelectedTransferId(transfer.transferId);
+            if (isCompactLayout) {
+              setCompactSection('ledger');
+            }
+          }
+        );
+      } else {
+        maybeShowDesktopNotification(
+          desktopNotificationsEnabled,
+          messages.notificationTransferFailedTitle,
+          messages.notificationTransferFailedBody(transfer.fileName),
+          () => {
+            setSelectedTransferId(transfer.transferId);
+            if (isCompactLayout) {
+              setCompactSection('ledger');
+            }
+          }
+        );
+      }
+    }
+  }, [desktopNotificationsEnabled, isCompactLayout, messages, transfers]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -229,11 +438,19 @@ export function App(): JSX.Element {
         // Hook already stores and exposes the error message.
       }
     }
+    if (isCompactLayout) {
+      setCompactSection('ledger');
+    }
   }
 
   async function handleAccept(offerId: string): Promise<void> {
     try {
       setBusyOfferId(offerId);
+      setUnreadOfferIds((current) => {
+        const next = new Set(current);
+        next.delete(offerId);
+        return next;
+      });
       await acceptOffer(offerId);
     } catch {
       // Hook already stores and exposes the error message.
@@ -245,6 +462,11 @@ export function App(): JSX.Element {
   async function handleReject(offerId: string): Promise<void> {
     try {
       setBusyOfferId(offerId);
+      setUnreadOfferIds((current) => {
+        const next = new Set(current);
+        next.delete(offerId);
+        return next;
+      });
       await rejectOffer(offerId);
     } catch {
       // Hook already stores and exposes the error message.
@@ -263,40 +485,53 @@ export function App(): JSX.Element {
 
   async function handleCancelTransfer(transferId: string): Promise<void> {
     try {
+      markTransferBusy(transferId, true);
       await cancelTransfer(transferId);
     } catch {
       // Hook already stores and exposes the error message.
+    } finally {
+      markTransferBusy(transferId, false);
     }
   }
 
   async function handlePauseTransfer(transferId: string): Promise<void> {
     try {
+      markTransferBusy(transferId, true);
       await pauseTransfer(transferId);
     } catch {
       // Hook already stores and exposes the error message.
+    } finally {
+      markTransferBusy(transferId, false);
     }
   }
 
   async function handleRetryTransfer(transferId: string): Promise<void> {
     try {
+      markTransferBusy(transferId, true);
       await retryTransfer(transferId);
     } catch {
       // Hook already stores and exposes the error message.
+    } finally {
+      markTransferBusy(transferId, false);
     }
   }
 
-  async function handleClearFinishedTransfers(): Promise<void> {
+  async function handleClearTransfers(transferIds: string[]): Promise<void> {
+    if (transferIds.length === 0) {
+      return;
+    }
     try {
-      await window.syncFile.clearTransferHistory();
+      await window.syncFile.removeTransferHistoryItems(transferIds);
     } catch {
       // Best effort only.
     }
   }
 
-  async function refreshTrustedDevices(): Promise<void> {
+  async function refreshAppSettings(): Promise<void> {
     try {
       const currentSettings = await window.syncFile.getSettings();
       setTrustedDevices(currentSettings.trustedDevices);
+      setDesktopNotificationsEnabled(currentSettings.desktopNotifications);
     } catch {
       // Best effort only.
     }
@@ -351,7 +586,7 @@ export function App(): JSX.Element {
   async function handlePairDevice(device: Device): Promise<void> {
     try {
       await window.syncFile.pairDevice(device.deviceId);
-      await refreshTrustedDevices();
+      await refreshAppSettings();
       setPairingDeviceId(null);
     } catch {
       // Best effort; settings error remains in UI elsewhere.
@@ -360,9 +595,14 @@ export function App(): JSX.Element {
 
   async function handleAcceptPairRequest(requestId: string): Promise<void> {
     try {
+      setUnreadPairRequestIds((current) => {
+        const next = new Set(current);
+        next.delete(requestId);
+        return next;
+      });
       await window.syncFile.acceptPairRequest(requestId);
       setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
-      await refreshTrustedDevices();
+      await refreshAppSettings();
     } catch {
       // Best effort only.
     }
@@ -370,6 +610,11 @@ export function App(): JSX.Element {
 
   async function handleRejectPairRequest(requestId: string): Promise<void> {
     try {
+      setUnreadPairRequestIds((current) => {
+        const next = new Set(current);
+        next.delete(requestId);
+        return next;
+      });
       await window.syncFile.rejectPairRequest(requestId);
       setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
     } catch {
@@ -377,14 +622,19 @@ export function App(): JSX.Element {
     }
   }
 
-  const currentOffer = pendingOffers[0] ?? null;
-  const currentPairRequest = pendingPairRequests[0] ?? null;
+  const currentOffer =
+    pendingOffers.find((offer) => offer.offerId === selectedIncomingOfferId) ?? pendingOffers[0] ?? null;
+  const currentPairRequest =
+    pendingPairRequests.find((request) => request.requestId === selectedPairRequestId) ??
+    pendingPairRequests[0] ??
+    null;
   const contentGridStyle = {
     '--left-pane-split': leftPaneSplit
   } as CSSProperties;
   const rightPaneStyle = {
     '--right-pane-split': rightPaneSplit
   } as CSSProperties;
+  const unreadRequestCount = unreadOfferIds.size + unreadPairRequestIds.size;
 
   const handlePaneResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     event.preventDefault();
@@ -406,6 +656,64 @@ export function App(): JSX.Element {
     setLeftPaneSplit(DEFAULT_LEFT_PANE_SPLIT);
   };
 
+  const markTransferBusy = (transferId: string, isBusy: boolean): void => {
+    setBusyTransferIds((current) => {
+      const next = new Set(current);
+      if (isBusy) {
+        next.add(transferId);
+      } else {
+        next.delete(transferId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectDevice = (deviceId: string): void => {
+    setSelectedDeviceId(deviceId);
+    if (isCompactLayout) {
+      setCompactSection('dispatch');
+    }
+  };
+
+  const handleOpenRequestsInbox = (): void => {
+    const unreadOfferId = pendingOffers.find((offer) => unreadOfferIds.has(offer.offerId))?.offerId;
+    if (unreadOfferId) {
+      setSelectedIncomingOfferId(unreadOfferId);
+      if (isCompactLayout) {
+        setCompactSection('manifest');
+      }
+      return;
+    }
+
+    const unreadPairRequestId = pendingPairRequests.find((request) => unreadPairRequestIds.has(request.requestId))?.requestId;
+    if (unreadPairRequestId) {
+      setSelectedPairRequestId(unreadPairRequestId);
+      if (isCompactLayout) {
+        setCompactSection('manifest');
+      }
+      return;
+    }
+
+    if (pendingOffers[0]) {
+      setSelectedIncomingOfferId(pendingOffers[0].offerId);
+      if (isCompactLayout) {
+        setCompactSection('manifest');
+      }
+      return;
+    }
+
+    if (pendingPairRequests[0]) {
+      setSelectedPairRequestId(pendingPairRequests[0].requestId);
+      if (isCompactLayout) {
+        setCompactSection('manifest');
+      }
+    }
+  };
+
+  const showManifest = !isCompactLayout || compactSection === 'manifest';
+  const showDispatch = !isCompactLayout || compactSection === 'dispatch';
+  const showLedger = !isCompactLayout || compactSection === 'ledger';
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -415,6 +723,21 @@ export function App(): JSX.Element {
         )}
 
         <div className="topbar-actions">
+          <button
+            type="button"
+            className="button button-muted topbar-icon-button"
+            onClick={handleOpenRequestsInbox}
+            title={messages.requestsInbox}
+            aria-label={messages.requestsInbox}
+          >
+            <span className="topbar-button-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                <path d="M22 7l-10 7L2 7" />
+              </svg>
+              {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
+            </span>
+          </button>
           <button
             type="button"
             className="button button-muted topbar-icon-button"
@@ -448,7 +771,23 @@ export function App(): JSX.Element {
             onClick={() => setIsDarkMode((prev) => !prev)}
             title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {isDarkMode ? '☀️' : '🌙'}
+            {isDarkMode ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2.5" />
+                <path d="M12 19.5V22" />
+                <path d="M4.93 4.93l1.77 1.77" />
+                <path d="M17.3 17.3l1.77 1.77" />
+                <path d="M2 12h2.5" />
+                <path d="M19.5 12H22" />
+                <path d="M4.93 19.07l1.77-1.77" />
+                <path d="M17.3 6.7l1.77-1.77" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
+              </svg>
+            )}
           </button>
           <button type="button" className="button button-muted" onClick={() => void handleOpenSandbox()}>
             {messages.openSandbox}
@@ -467,9 +806,31 @@ export function App(): JSX.Element {
 
       <main
         ref={contentGridRef}
-        className={`content-grid${isResizingRows ? ' is-resizing-rows' : ''}${isResizingColumns ? ' is-resizing-columns' : ''}`}
+        className={`content-grid${isResizingRows ? ' is-resizing-rows' : ''}${isResizingColumns ? ' is-resizing-columns' : ''}${isCompactLayout ? ' is-compact-layout' : ''}`}
         style={contentGridStyle}
       >
+        {isCompactLayout && (
+          <div className="compact-section-switcher" role="tablist" aria-label={messages.compactSectionsAriaLabel}>
+            {[
+              ['manifest', messages.onlineDevices],
+              ['dispatch', messages.sendFile],
+              ['ledger', messages.transferActivity]
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={compactSection === value}
+                className={`compact-section-tab${compactSection === value ? ' is-active' : ''}`}
+                onClick={() => setCompactSection(value as CompactSection)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {showManifest && (
         <section className="card card-manifest">
           <div className="card-head">
             <h2>{messages.onlineDevices}</h2>
@@ -495,11 +856,14 @@ export function App(): JSX.Element {
             devices={devices}
             selectedDeviceId={selectedDeviceId}
             trustedDeviceKeys={trustedDeviceKeys}
-            onSelect={(deviceId) => setSelectedDeviceId(deviceId)}
+            onSelect={handleSelectDevice}
+            onRefresh={handleRefreshDevices}
             messages={messages}
           />
         </section>
+        )}
 
+        {!isCompactLayout && (
         <button
           type="button"
           className={`column-resizer${isResizingColumns ? ' is-active' : ''}`}
@@ -509,12 +873,15 @@ export function App(): JSX.Element {
         >
           <span className="column-resizer-handle" aria-hidden="true" />
         </button>
+        )}
 
+        {(!isCompactLayout || showDispatch || showLedger) && (
         <div
           ref={rightPaneRef}
           className="right-pane"
           style={rightPaneStyle}
         >
+          {showDispatch && (
           <section className="card card-dispatch">
             <div className="card-head">
               <h2>{messages.sendFile}</h2>
@@ -539,7 +906,9 @@ export function App(): JSX.Element {
               selfDeviceName={selfDevice?.name ?? null}
             />
           </section>
+          )}
 
+          {!isCompactLayout && (
           <button
             type="button"
             className={`pane-resizer${isResizingRows ? ' is-active' : ''}`}
@@ -549,7 +918,9 @@ export function App(): JSX.Element {
           >
             <span className="pane-resizer-handle" aria-hidden="true" />
           </button>
+          )}
 
+          {showLedger && (
           <section className="card card-ledger">
             <div className="card-head">
               <h2>{messages.transferActivity}</h2>
@@ -560,19 +931,33 @@ export function App(): JSX.Element {
               onPause={handlePauseTransfer}
               onCancel={handleCancelTransfer}
               onRetry={handleRetryTransfer}
-              onClearFinished={handleClearFinishedTransfers}
+              onClearTransfers={handleClearTransfers}
+              busyTransferIds={busyTransferIds}
+              selectedTransferId={selectedTransferId}
+              onSelectedTransferIdChange={setSelectedTransferId}
             />
           </section>
+          )}
         </div>
+        )}
       </main>
 
       {currentOffer && (
         <ReceivePrompt
-          offer={currentOffer}
-          queueCount={pendingOffers.length}
-          trustedSender={trustedDeviceKeys.has(
-            `${currentOffer.fromDevice.deviceId}:${currentOffer.fromDevice.trustFingerprint}`
-          )}
+          offers={pendingOffers}
+          selectedOfferId={currentOffer.offerId}
+          trustedDeviceKeys={trustedDeviceKeys}
+          onSelectOffer={(offerId) => {
+            setSelectedIncomingOfferId(offerId);
+            setUnreadOfferIds((current) => {
+              if (!current.has(offerId)) {
+                return current;
+              }
+              const next = new Set(current);
+              next.delete(offerId);
+              return next;
+            });
+          }}
           busy={busyOfferId === currentOffer.offerId}
           onAccept={handleAccept}
           onTrustAndAccept={handleTrustAndAccept}
@@ -590,18 +975,24 @@ export function App(): JSX.Element {
         />
       )}
       {currentPairRequest && selfDevice && (
-        <PairDevicePrompt
-          device={{
-            ...currentPairRequest.fromDevice,
-            host: '',
-            address: '',
-            port: 0,
-            platform: '',
-            version: ''
+        <PairRequestQueuePrompt
+          requests={pendingPairRequests}
+          selectedRequestId={currentPairRequest.requestId}
+          onSelectRequest={(requestId) => {
+            setSelectedPairRequestId(requestId);
+            setUnreadPairRequestIds((current) => {
+              if (!current.has(requestId)) {
+                return current;
+              }
+              const next = new Set(current);
+              next.delete(requestId);
+              return next;
+            });
           }}
           selfFingerprint={selfDevice.trustFingerprint}
-          onConfirm={() => handleAcceptPairRequest(currentPairRequest.requestId)}
-          onClose={() => void handleRejectPairRequest(currentPairRequest.requestId)}
+          busy={false}
+          onAccept={handleAcceptPairRequest}
+          onReject={handleRejectPairRequest}
           messages={messages}
         />
       )}
@@ -610,7 +1001,7 @@ export function App(): JSX.Element {
           messages={messages}
           onClose={() => {
             setIsSettingsOpen(false);
-            void refreshTrustedDevices();
+            void refreshAppSettings();
           }}
         />
       )}
@@ -624,4 +1015,28 @@ function dedupeTrustedDevices(devices: TrustedDevice[]): TrustedDevice[] {
     deduped.set(`${device.deviceId}:${device.trustFingerprint}`, device);
   }
   return [...deduped.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function maybeShowDesktopNotification(
+  enabled: boolean,
+  title: string,
+  body: string,
+  onClick?: () => void
+): void {
+  if (!enabled) {
+    return;
+  }
+  if (document.visibilityState === 'visible' && document.hasFocus()) {
+    return;
+  }
+  if (typeof window.Notification !== 'function' || window.Notification.permission !== 'granted') {
+    return;
+  }
+
+  const notification = new window.Notification(title, { body, silent: false });
+  notification.onclick = () => {
+    window.focus();
+    onClick?.();
+    notification.close();
+  };
 }

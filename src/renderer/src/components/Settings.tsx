@@ -2,29 +2,29 @@ import { useEffect, useState } from 'react';
 import type { SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
+import { formatBytes } from '../utils/format';
 
 interface SettingsModalProps {
   messages: Messages;
   onClose: () => void;
 }
 
+type SettingsApi = typeof window.syncFile & {
+  getSandboxLocation?: () => Promise<SandboxLocationInfo>;
+  chooseSandboxLocation?: () => Promise<SandboxLocationInfo | null>;
+};
+
 const DEFAULT_SETTINGS: Settings = {
   maxSandboxSizeMB: 1024,
   autoAccept: false,
   autoAcceptMaxSizeMB: 64,
   openReceivedFolder: false,
+  desktopNotifications: true,
   trustedDevices: []
 };
 
 function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
   return typeof payload === 'object' && payload !== null && 'sandboxLocation' in payload;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
@@ -38,10 +38,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const [saving, setSaving] = useState(false);
   const [choosingSandbox, setChoosingSandbox] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
-  const api = window.syncFile as typeof window.syncFile & {
-    getSandboxLocation?: () => Promise<SandboxLocationInfo>;
-    chooseSandboxLocation?: () => Promise<SandboxLocationInfo | null>;
-  };
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
+    return typeof window.Notification?.permission === 'string' ? window.Notification.permission : 'default';
+  });
+  const api = window.syncFile as SettingsApi;
   const busy = saving || choosingSandbox;
   const handleClose = (): void => {
     if (!busy) {
@@ -49,10 +49,6 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
   };
   const dialogRef = useDialogA11y(handleClose, true);
-
-  useEffect(() => {
-    void refreshSettings();
-  }, [api]);
 
   const refreshSettings = async (): Promise<void> => {
     try {
@@ -68,10 +64,17 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         const nextSandboxLocation = await api.getSandboxLocation();
         setSandboxLocation(nextSandboxLocation);
       }
+      if (typeof window.Notification?.permission === 'string') {
+        setNotificationPermission(window.Notification.permission);
+      }
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.failedToLoadDeviceInformation);
     }
   };
+
+  useEffect(() => {
+    void refreshSettings();
+  }, []);
 
   const handleOpenSandbox = async (): Promise<void> => {
     setChoosingSandbox(true);
@@ -95,6 +98,17 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         maxSandboxSizeMB: Math.min(102400, Math.max(64, Math.round(settings.maxSandboxSizeMB) || 1024)),
         autoAcceptMaxSizeMB: Math.min(102400, Math.max(1, Math.round(settings.autoAcceptMaxSizeMB) || 64))
       };
+      if (
+        normalized.desktopNotifications &&
+        typeof window.Notification?.requestPermission === 'function' &&
+        window.Notification.permission === 'default'
+      ) {
+        try {
+          await window.Notification.requestPermission();
+        } catch {
+          // Best effort only.
+        }
+      }
       await window.syncFile.saveSettings(normalized);
       onClose();
     } catch (error) {
@@ -128,6 +142,18 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const remainingBytes = Math.max(0, maxBytes - usedBytes);
   const usageRatio = maxBytes > 0 ? Math.min(100, Math.round((usedBytes / maxBytes) * 100)) : 0;
   const displayPath = sandboxLocation?.path ?? '';
+
+  const handleRequestNotificationPermission = async (): Promise<void> => {
+    if (typeof window.Notification?.requestPermission !== 'function') {
+      return;
+    }
+    try {
+      const result = await window.Notification.requestPermission();
+      setNotificationPermission(result);
+    } catch {
+      // Best effort only.
+    }
+  };
 
   const handleRemoveTrustedDevice = (deviceId: string, trustFingerprint: string): void => {
     setSettings((current) => ({
@@ -256,6 +282,44 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   </button>
                 </div>
               </div>
+
+              <div className="settings-card">
+                <div className="settings-toggle-row">
+                  <div className="settings-toggle-text">
+                    <span className="settings-label">{messages.settingsDesktopNotifications}</span>
+                    <span className="settings-desc">{messages.settingsDesktopNotificationsDesc}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`settings-toggle${settings.desktopNotifications ? ' is-on' : ''}`}
+                    onClick={() =>
+                      setSettings({ ...settings, desktopNotifications: !settings.desktopNotifications })
+                    }
+                    role="switch"
+                    aria-checked={settings.desktopNotifications}
+                    >
+                      <span className="settings-toggle-knob" />
+                    </button>
+                  </div>
+                  <div className="settings-note settings-inline-note">
+                    {notificationPermission === 'granted'
+                      ? messages.settingsNotificationsPermissionGranted
+                      : notificationPermission === 'denied'
+                        ? messages.settingsNotificationsPermissionDenied
+                        : messages.settingsNotificationsPermissionDefault}
+                  </div>
+                  {notificationPermission === 'default' && (
+                    <div className="settings-inline-actions">
+                      <button
+                        type="button"
+                        className="button button-muted"
+                        onClick={() => void handleRequestNotificationPermission()}
+                      >
+                        {messages.settingsNotificationsRequestPermission}
+                      </button>
+                    </div>
+                  )}
+                </div>
 
               <div className="settings-card">
                 <span className="settings-label">{messages.settingsTrustedDevices}</span>
