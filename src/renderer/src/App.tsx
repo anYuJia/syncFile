@@ -307,12 +307,20 @@ export function App(): JSX.Element {
     const trackedStatuses = new Set(['completed', 'failed', 'rejected', 'cancelled']);
     for (const transfer of transfers) {
       const previousStatus = lastTransferNotificationStatusRef.current.get(transfer.transferId);
+      if (previousStatus === undefined) {
+        lastTransferNotificationStatusRef.current.set(transfer.transferId, transfer.status);
+        continue;
+      }
       if (previousStatus === transfer.status) {
         continue;
       }
       lastTransferNotificationStatusRef.current.set(transfer.transferId, transfer.status);
       if (!trackedStatuses.has(transfer.status)) {
         continue;
+      }
+
+      if (isCompactLayout) {
+        setCompactSection('ledger');
       }
 
       if (transfer.status === 'completed') {
@@ -947,19 +955,24 @@ export function App(): JSX.Element {
           <section className="card card-dispatch">
             <div className="card-head">
               <h2>{messages.sendFile}</h2>
-              {selectedDevice && (
-                trustedDeviceKeys.has(`${selectedDevice.deviceId}:${selectedDevice.trustFingerprint}`) ? (
-                  <span className="device-item-trusted">{messages.pairedDevice}</span>
-                ) : (
-                  <button
-                    type="button"
-                    className="button button-ghost"
-                    onClick={() => setPairingDeviceId(selectedDevice.deviceId)}
-                  >
-                    {messages.pairDevice}
-                  </button>
-                )
-              )}
+              <div className="card-head-actions card-head-actions-dispatch">
+                <span className={`dispatch-target-badge${selectedDevice ? ' is-active' : ''}`}>
+                  {selectedDevice ? messages.dispatchTargetReady(selectedDevice.name) : messages.dispatchTargetIdle}
+                </span>
+                {selectedDevice && (
+                  trustedDeviceKeys.has(`${selectedDevice.deviceId}:${selectedDevice.trustFingerprint}`) ? (
+                    <span className="device-item-trusted">{messages.pairedDevice}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button-ghost"
+                      onClick={() => setPairingDeviceId(selectedDevice.deviceId)}
+                    >
+                      {messages.pairDevice}
+                    </button>
+                  )
+                )}
+              </div>
             </div>
             <DropZone
               onSend={(filePaths) => void handleSendFiles(filePaths)}

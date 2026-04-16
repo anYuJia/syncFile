@@ -6,7 +6,8 @@ import { logDebug, logError, logInfo, logWarn } from '../logging/runtime-log';
 export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
 const BROWSER_REFRESH_MS = 4000;
-const DEVICE_STALE_MS = 15000;
+const DEVICE_STALE_MS = 45000;
+const BROWSER_RESET_MS = 8000;
 
 export interface MdnsServiceOptions {
   registry: DeviceRegistry;
@@ -24,6 +25,7 @@ export class MdnsService {
   private published?: Service;
   private browser?: Browser;
   private refreshTimer: NodeJS.Timeout | null = null;
+  private lastBrowserResetAt = 0;
 
   constructor(private readonly opts: MdnsServiceOptions) {
     this.bonjour = new Bonjour({}, (error: Error) => {
@@ -180,10 +182,23 @@ export class MdnsService {
     }
 
     this.refreshTimer = setInterval(() => {
-      this.opts.registry.pruneOlderThan(Date.now() - DEVICE_STALE_MS);
+      const removedIds = this.opts.registry.pruneOlderThan(Date.now() - DEVICE_STALE_MS);
+      if (removedIds.length > 0) {
+        logWarn('discovery', 'pruned stale devices after missed mdns responses', {
+          deviceIds: removedIds,
+          staleMs: DEVICE_STALE_MS
+        });
+      }
       if (!this.browser) {
         logWarn('discovery', 'mdns browser missing during refresh tick; recreating');
         this.browser = this.createBrowser();
+        return;
+      }
+      if (Date.now() - this.lastBrowserResetAt >= BROWSER_RESET_MS) {
+        // bonjour-service does not emit another "up" event for unchanged peers on plain
+        // browser.update(), so rotating the browser is what refreshes lastSeenAt reliably.
+        logDebug('discovery', 'periodic mdns browser reset for keepalive');
+        this.resetBrowser();
         return;
       }
       logDebug('discovery', 'mdns browser update');
@@ -192,6 +207,7 @@ export class MdnsService {
   }
 
   private createBrowser(): Browser {
+    this.lastBrowserResetAt = Date.now();
     const browser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
     browser.on('up', this.onServiceUp);
     browser.on('txt-update', this.onServiceUp);

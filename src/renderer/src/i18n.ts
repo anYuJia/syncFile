@@ -62,6 +62,8 @@ export interface Messages {
   transferPause: string;
   transferResume: string;
   transferRetry: string;
+  transferDelete: string;
+  transferClearAll: string;
   transferRateLabel: string;
   transferEtaLabel: string;
   transferPreparing: string;
@@ -168,6 +170,8 @@ export interface Messages {
   dropZoneClearFile: string;
   dropZoneSend: string;
   dropZoneSelectDevice: string;
+  dispatchTargetReady: (deviceName: string) => string;
+  dispatchTargetIdle: string;
   dropZoneClearAll: string;
   dropZoneFileCount: (n: number) => string;
   dropZoneRemoveFile: string;
@@ -247,6 +251,8 @@ const zh: Messages = {
   transferPause: '暂停',
   transferResume: '继续',
   transferRetry: '重试',
+  transferDelete: '删除记录',
+  transferClearAll: '全部清理',
   transferRateLabel: '速率',
   transferEtaLabel: '剩余',
   transferPreparing: '准备发送中',
@@ -353,6 +359,8 @@ const zh: Messages = {
   dropZoneClearFile: '清除',
   dropZoneSend: '发送',
   dropZoneSelectDevice: '请选择一台目标设备',
+  dispatchTargetReady: (deviceName: string) => `正在发送文件给 ${deviceName}`,
+  dispatchTargetIdle: '请选择一个目标设备后再发送',
   dropZoneClearAll: '清空',
   dropZoneFileCount: (n: number) => `已选 ${n} 个文件`,
   dropZoneRemoveFile: '移除',
@@ -430,6 +438,8 @@ const en: Messages = {
   transferPause: 'Pause',
   transferResume: 'Resume',
   transferRetry: 'Retry',
+  transferDelete: 'Delete record',
+  transferClearAll: 'Clear all',
   transferRateLabel: 'Rate',
   transferEtaLabel: 'ETA',
   transferPreparing: 'Preparing transfer',
@@ -536,6 +546,8 @@ const en: Messages = {
   dropZoneClearFile: 'Clear',
   dropZoneSend: 'Send',
   dropZoneSelectDevice: 'Select a target device',
+  dispatchTargetReady: (deviceName: string) => `Sending files to ${deviceName}`,
+  dispatchTargetIdle: 'Select a target device before sending',
   dropZoneClearAll: 'Clear all',
   dropZoneFileCount: (n: number) => `${n} file(s) selected`,
   dropZoneRemoveFile: 'Remove',

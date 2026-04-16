@@ -77,6 +77,10 @@ function canOpenCompletedReceive(item: RendererTransferProgress): boolean {
   return item.direction === 'receive' && item.status === 'completed' && Boolean(item.localPath);
 }
 
+function canDeleteTransfer(item: RendererTransferProgress): boolean {
+  return !['pending', 'in-progress', 'paused'].includes(item.status);
+}
+
 export function TransferList({
   transfers,
   messages,
@@ -178,8 +182,8 @@ export function TransferList({
     }
   };
 
-  const visibleFinishedTransferIds = visibleTransfers
-    .filter((item) => !['pending', 'in-progress', 'paused'].includes(item.status))
+  const finishedTransferIds = transfers
+    .filter((item) => canDeleteTransfer(item))
     .map((item) => item.transferId);
 
   return (
@@ -286,13 +290,13 @@ export function TransferList({
             {messages.taskRetryVisible}
           </button>
         )}
-        {visibleFinishedTransferIds.length > 0 && (
+        {finishedTransferIds.length > 0 && (
           <button
             type="button"
             className="button button-ghost transfer-bulk-action"
-            onClick={() => void onClearTransfers(visibleFinishedTransferIds)}
+            onClick={() => void onClearTransfers(finishedTransferIds)}
           >
-            {messages.settingsClearTransferHistory}
+            {messages.transferClearAll}
           </button>
         )}
         <input
@@ -319,6 +323,7 @@ export function TransferList({
         const receiveModeText = receiveModeLabel(item, messages);
         const canPause = item.direction === 'send' && (item.status === 'pending' || item.status === 'in-progress');
         const canCancel = item.status === 'pending' || item.status === 'in-progress';
+        const canDelete = canDeleteTransfer(item);
         const canRetry =
           item.direction === 'send' &&
           (item.status === 'failed' || item.status === 'rejected' || item.status === 'cancelled' || item.status === 'paused') &&
@@ -338,35 +343,59 @@ export function TransferList({
             key={item.transferId}
             className={`transfer-item is-${item.status}${showExpandedBody ? ' is-detailed' : ' is-compact'}`}
           >
-            <button
-              type="button"
-              className="transfer-item-summary"
-              onClick={() => onSelectedTransferIdChange(item.transferId)}
-              aria-haspopup="dialog"
-              aria-label={`${statusText} ${item.fileName}`}
-            >
-              <div className="transfer-item-summary-main">
-                <div className="transfer-item-summary-head">
-                  <div className="transfer-item-stamp">{statusText}</div>
-                  <div className="transfer-item-direction">{directionLabel}</div>
-                  {receiveModeText && <div className="transfer-item-note">{receiveModeText}</div>}
-                </div>
-                <div className="transfer-item-top">
-                  <div className="transfer-item-title-group">
-                    <div className="transfer-item-name">{item.fileName}</div>
-                    <div className="transfer-item-meta">{compactMeta(item, messages)}</div>
+            <div className="transfer-item-summary-row">
+              <button
+                type="button"
+                className="transfer-item-summary"
+                onClick={() => onSelectedTransferIdChange(item.transferId)}
+                aria-haspopup="dialog"
+                aria-label={`${statusText} ${item.fileName}`}
+              >
+                <div className="transfer-item-summary-main">
+                  <div className="transfer-item-summary-head">
+                    <div className="transfer-item-stamp">{statusText}</div>
+                    <div className="transfer-item-direction">{directionLabel}</div>
+                    {receiveModeText && <div className="transfer-item-note">{receiveModeText}</div>}
+                  </div>
+                  <div className="transfer-item-top">
+                    <div className="transfer-item-title-group">
+                      <div className="transfer-item-name">{item.fileName}</div>
+                      <div className="transfer-item-meta">{compactMeta(item, messages)}</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="transfer-item-summary-side">
-                <div className="transfer-item-percent">{percent}%</div>
-                <span className="transfer-item-chevron" aria-hidden="true">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="9 6 15 12 9 18" />
+                <div className="transfer-item-summary-side">
+                  <div className="transfer-item-percent">{percent}%</div>
+                  <span className="transfer-item-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 6 15 12 9 18" />
+                    </svg>
+                  </span>
+                </div>
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  className="button button-ghost transfer-item-delete"
+                  onClick={() => {
+                    if (selectedTransferId === item.transferId) {
+                      onSelectedTransferIdChange(null);
+                    }
+                    void onClearTransfers([item.transferId]);
+                  }}
+                  aria-label={`${messages.transferDelete} ${item.fileName}`}
+                  title={messages.transferDelete}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
                   </svg>
-                </span>
-              </div>
-            </button>
+                </button>
+              )}
+            </div>
             {showExpandedBody && (
               <>
                 <div className="transfer-progress-track" aria-hidden="true">
@@ -457,6 +486,7 @@ export function TransferList({
           transfer={selectedTransfer}
           messages={messages}
           onClose={() => onSelectedTransferIdChange(null)}
+          onClearTransfers={onClearTransfers}
           onPause={onPause}
           onCancel={onCancel}
           onRetry={onRetry}
@@ -473,6 +503,7 @@ interface TransferDetailDialogProps {
   transfer: RendererTransferProgress;
   messages: Messages;
   onClose: () => void;
+  onClearTransfers: (transferIds: string[]) => void | Promise<void>;
   onPause: (transferId: string) => void | Promise<void>;
   onCancel: (transferId: string) => void | Promise<void>;
   onRetry: (transferId: string) => void | Promise<void>;
@@ -485,6 +516,7 @@ function TransferDetailDialog({
   transfer,
   messages,
   onClose,
+  onClearTransfers,
   onPause,
   onCancel,
   onRetry,
@@ -499,6 +531,7 @@ function TransferDetailDialog({
   const canPause =
     transfer.direction === 'send' && (transfer.status === 'pending' || transfer.status === 'in-progress');
   const canCancel = transfer.status === 'pending' || transfer.status === 'in-progress';
+  const canDelete = canDeleteTransfer(transfer);
   const canRetry =
     transfer.direction === 'send' &&
     ['failed', 'rejected', 'cancelled', 'paused'].includes(transfer.status) &&
@@ -555,7 +588,7 @@ function TransferDetailDialog({
           </div>
         )}
 
-        {(canPause || canCancel || canRetry || canOpenPath) && (
+        {(canPause || canCancel || canRetry || canOpenPath || canDelete) && (
           <div className="transfer-detail-actions">
             {canPause && (
               <button
@@ -603,6 +636,18 @@ function TransferDetailDialog({
                 onClick={() => void onRevealPath(transfer.localPath!)}
               >
                 {messages.transferRevealFile}
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                className="button button-ghost transfer-item-action"
+                onClick={() => {
+                  void onClearTransfers([transfer.transferId]);
+                  onClose();
+                }}
+              >
+                {messages.transferDelete}
               </button>
             )}
           </div>
