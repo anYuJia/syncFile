@@ -116,6 +116,9 @@ export interface Messages {
   trustAndAccept: string;
   failedToLoadDeviceInformation: string;
   sendFailed: string;
+  sendQueueStarted: (fileCount: number, recipientCount: number) => string;
+  sendQueuePartial: (queuedCount: number, failedCount: number, skippedCount: number) => string;
+  sendQueueUnavailable: (recipientCount: number) => string;
   failedToAcceptIncomingFile: string;
   failedToRejectIncomingFile: string;
   failedToOpenSandbox: string;
@@ -322,6 +325,10 @@ const zh: Messages = {
   trustAndAccept: '信任并接受',
   failedToLoadDeviceInformation: '加载设备信息失败。',
   sendFailed: '发送失败。',
+  sendQueueStarted: (fileCount, recipientCount) => `已将 ${fileCount} 个文件加入发送队列，目标 ${recipientCount} 个收件人。`,
+  sendQueuePartial: (queuedCount, failedCount, skippedCount) =>
+    `已加入队列 ${queuedCount} 个收件人，失败 ${failedCount} 个，未尝试 ${skippedCount} 个。草稿已为未完成目标保留。`,
+  sendQueueUnavailable: (recipientCount) => `已选 ${recipientCount} 个收件人，但当前没有可发送的在线目标。`,
   failedToAcceptIncomingFile: '接受文件失败。',
   failedToRejectIncomingFile: '拒绝文件失败。',
   failedToOpenSandbox: '打开沙箱目录失败。',
@@ -526,6 +533,12 @@ const en: Messages = {
   trustAndAccept: 'Trust & accept',
   failedToLoadDeviceInformation: 'Failed to load device information.',
   sendFailed: 'Send failed.',
+  sendQueueStarted: (fileCount, recipientCount) =>
+    `Queued ${fileCount} files for ${recipientCount} recipient(s).`,
+  sendQueuePartial: (queuedCount, failedCount, skippedCount) =>
+    `Queued ${queuedCount} recipient(s), failed ${failedCount}, skipped ${skippedCount}. Drafts were kept for unfinished targets.`,
+  sendQueueUnavailable: (recipientCount) =>
+    `${recipientCount} recipient(s) are selected, but none are currently reachable for sending.`,
   failedToAcceptIncomingFile: 'Failed to accept incoming file.',
   failedToRejectIncomingFile: 'Failed to reject incoming file.',
   failedToOpenSandbox: 'Unable to open sandbox folder.',

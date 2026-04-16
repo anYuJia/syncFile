@@ -45,6 +45,22 @@ interface SelectedRecipientSnapshot extends Device {
   reachabilityError?: string;
 }
 
+interface StoredRecipientDraft {
+  deviceId: string;
+  name: string;
+  avatarDataUrl?: string;
+  hasAvatar?: boolean;
+  profileRevision?: number;
+  trustFingerprint: string;
+  platform: string;
+  version: string;
+}
+
+interface NoticeState {
+  kind: 'info' | 'warn';
+  message: string;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -61,20 +77,55 @@ function loadInitialSendDraft(): {
     }
     const parsed = JSON.parse(raw) as {
       selectedDeviceIds?: string[];
-      selectedRecipientSnapshots?: Record<string, Device>;
+      selectedRecipientSnapshots?: Record<string, StoredRecipientDraft>;
       pendingSendFiles?: PendingFile[];
     };
     return {
       selectedDeviceIds: Array.isArray(parsed.selectedDeviceIds) ? parsed.selectedDeviceIds : [],
       selectedRecipientSnapshots:
         parsed.selectedRecipientSnapshots && typeof parsed.selectedRecipientSnapshots === 'object'
-          ? parsed.selectedRecipientSnapshots
+          ? Object.fromEntries(
+              Object.entries(parsed.selectedRecipientSnapshots).map(([deviceId, snapshot]) => [
+                deviceId,
+                inflateStoredRecipientDraft(snapshot)
+              ])
+            )
           : {},
       pendingSendFiles: Array.isArray(parsed.pendingSendFiles) ? parsed.pendingSendFiles : []
     };
   } catch {
     return { selectedDeviceIds: [], selectedRecipientSnapshots: {}, pendingSendFiles: [] };
   }
+}
+
+function inflateStoredRecipientDraft(snapshot: StoredRecipientDraft): Device {
+  return {
+    deviceId: snapshot.deviceId,
+    name: snapshot.name,
+    avatarDataUrl: snapshot.avatarDataUrl,
+    hasAvatar: snapshot.hasAvatar,
+    profileRevision: snapshot.profileRevision,
+    trustFingerprint: snapshot.trustFingerprint,
+    trustPublicKey: '',
+    host: '',
+    address: '',
+    port: 0,
+    platform: snapshot.platform,
+    version: snapshot.version
+  };
+}
+
+function compactRecipientSnapshot(device: Device): StoredRecipientDraft {
+  return {
+    deviceId: device.deviceId,
+    name: device.name,
+    avatarDataUrl: device.avatarDataUrl,
+    hasAvatar: device.hasAvatar,
+    profileRevision: device.profileRevision,
+    trustFingerprint: device.trustFingerprint,
+    platform: device.platform,
+    version: device.version
+  };
 }
 
 export function App(): JSX.Element {
@@ -111,6 +162,7 @@ export function App(): JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [runtimeLogEntries, setRuntimeLogEntries] = useState<RuntimeLogEntry[]>([]);
   const [reachabilityByDeviceId, setReachabilityByDeviceId] = useState<Record<string, DeviceReachability>>({});
@@ -502,7 +554,12 @@ export function App(): JSX.Element {
       SEND_DRAFT_KEY,
       JSON.stringify({
         selectedDeviceIds,
-        selectedRecipientSnapshots,
+        selectedRecipientSnapshots: Object.fromEntries(
+          Object.entries(selectedRecipientSnapshots).map(([deviceId, device]) => [
+            deviceId,
+            compactRecipientSnapshot(device)
+          ])
+        ),
         pendingSendFiles
       })
     );
@@ -601,12 +658,18 @@ export function App(): JSX.Element {
   }, [isResizingColumns]);
 
   async function handleSendFiles(filePaths: string[]): Promise<void> {
+    setNotice(null);
     const targetDeviceIds = selectedDevices
       .filter((device) => device.isOnline && device.reachability !== 'unreachable')
       .map((device) => device.deviceId);
     if (targetDeviceIds.length === 0) {
+      setNotice({
+        kind: 'warn',
+        message: messages.sendQueueUnavailable(selectedDevices.length)
+      });
       return;
     }
+    const skippedCount = selectedDevices.length - targetDeviceIds.length;
     const batchMeta =
       targetDeviceIds.length * filePaths.length > 1
         ? {
@@ -614,15 +677,62 @@ export function App(): JSX.Element {
             batchLabel: messages.topbarDraftSummary(filePaths.length, targetDeviceIds.length)
           }
         : undefined;
+    const successfulDeviceIds = new Set<string>();
+
     for (const deviceId of targetDeviceIds) {
+      let deviceSucceeded = true;
       for (const filePath of filePaths) {
         try {
           await sendFile(deviceId, filePath, undefined, batchMeta);
         } catch {
           // Hook already stores and exposes the error message.
+          deviceSucceeded = false;
         }
       }
+
+      if (deviceSucceeded) {
+        successfulDeviceIds.add(deviceId);
+      }
     }
+
+    if (successfulDeviceIds.size === targetDeviceIds.length) {
+      setPendingSendFiles([]);
+      setSelectedDeviceIds((current) => current.filter((deviceId) => !successfulDeviceIds.has(deviceId)));
+      setSelectedRecipientSnapshots((current) => {
+        const next = { ...current };
+        for (const deviceId of successfulDeviceIds) {
+          delete next[deviceId];
+        }
+        return next;
+      });
+      setNotice({
+        kind: 'info',
+        message: messages.sendQueueStarted(filePaths.length, successfulDeviceIds.size)
+      });
+    } else if (successfulDeviceIds.size > 0) {
+      setSelectedDeviceIds((current) => current.filter((deviceId) => !successfulDeviceIds.has(deviceId)));
+      setSelectedRecipientSnapshots((current) => {
+        const next = { ...current };
+        for (const deviceId of successfulDeviceIds) {
+          delete next[deviceId];
+        }
+        return next;
+      });
+      setNotice({
+        kind: 'warn',
+        message: messages.sendQueuePartial(
+          successfulDeviceIds.size,
+          targetDeviceIds.length - successfulDeviceIds.size,
+          skippedCount
+        )
+      });
+    } else {
+      setNotice({
+        kind: 'warn',
+        message: messages.sendQueuePartial(0, targetDeviceIds.length, skippedCount)
+      });
+    }
+
     if (isCompactLayout) {
       setCompactSection('ledger');
     }
@@ -1048,6 +1158,14 @@ export function App(): JSX.Element {
         <div className="error-banner" role="alert">
           <span>{errorMessage}</span>
           <button type="button" className="button button-ghost" onClick={clearError}>
+            {messages.dismiss}
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className={`notice-banner is-${notice.kind}`} role="status">
+          <span>{notice.message}</span>
+          <button type="button" className="button button-ghost" onClick={() => setNotice(null)}>
             {messages.dismiss}
           </button>
         </div>

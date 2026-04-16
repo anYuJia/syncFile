@@ -685,7 +685,11 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
     context.logger?.debug('ipc', 'get devices requested');
-    return context.registry.list();
+    const devices = context.registry.list();
+    for (const device of devices) {
+      ensurePeerProfile(device);
+    }
+    return devices;
   });
 
   ipcMain.handle(IpcChannels.RefreshDevices, (): Device[] => {

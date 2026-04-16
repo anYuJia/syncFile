@@ -182,7 +182,7 @@ export function DropZone({
       return;
     }
     const paths = pendingFiles.map((file) => file.path);
-    void Promise.resolve(onSend(paths)).then(() => onPendingFilesChange([]));
+    void Promise.resolve(onSend(paths));
   };
 
   const hasFiles = pendingFiles.length > 0;

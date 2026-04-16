@@ -138,17 +138,20 @@ export function TransferList({
     transfers.find((item) => item.transferId === selectedTransferId) ?? null;
   const groupedVisibleTransfers = useMemo(() => {
     const groups: Array<{ key: string; batchLabel?: string; transfers: RendererTransferProgress[] }> = [];
+    const groupIndexByKey = new Map<string, number>();
     for (const item of visibleTransfers) {
-      const lastGroup = groups[groups.length - 1];
-      if (item.batchId && lastGroup?.key === item.batchId) {
-        lastGroup.transfers.push(item);
+      const key = item.batchId ?? item.transferId;
+      const existingIndex = groupIndexByKey.get(key);
+      if (existingIndex !== undefined) {
+        groups[existingIndex].transfers.push(item);
         continue;
       }
       groups.push({
-        key: item.batchId ?? item.transferId,
+        key,
         batchLabel: item.batchLabel,
         transfers: [item]
       });
+      groupIndexByKey.set(key, groups.length - 1);
     }
     return groups;
   }, [visibleTransfers]);

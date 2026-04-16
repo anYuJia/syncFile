@@ -323,6 +323,26 @@ body {
   font-size: 13px;
 }
 
+.notice-banner {
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.notice-banner.is-info {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.notice-banner.is-warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
 /* ── Content grid ─────────────────────────────────────────────── */
 
 .content-grid {
