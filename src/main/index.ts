@@ -105,6 +105,7 @@ async function bootstrapServices(): Promise<void> {
     platform: getPlatform()
   });
   const identity = loadOrCreateIdentity(userDataDir);
+  const platform = getPlatform();
   const defaultSandboxRoot = resolveDefaultSandboxRoot();
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
@@ -117,13 +118,7 @@ async function bootstrapServices(): Promise<void> {
 
   tcpServer = new TcpServer({
     sandbox,
-    selfDevice: {
-      deviceId: identity.deviceId,
-      name: identity.name,
-      trustFingerprint: identity.trustFingerprint,
-      trustPublicKey: identity.trustPublicKey,
-      trustPrivateKey: identity.trustPrivateKey
-    }
+    selfDevice: identity
   });
   const actualPort = await tcpServer
     .listen(DEFAULT_TRANSFER_PORT)
@@ -131,36 +126,47 @@ async function bootstrapServices(): Promise<void> {
   runtimeLogger.info('transfer', 'tcp server listening', { port: actualPort });
 
   const tcpClient = new TcpClient({
-    selfDevice: {
-      deviceId: identity.deviceId,
-      name: identity.name,
-      trustFingerprint: identity.trustFingerprint,
-      trustPublicKey: identity.trustPublicKey,
-      trustPrivateKey: identity.trustPrivateKey
-    }
+    selfDevice: identity
   });
+
+  const advertisedSelf = {
+    get deviceId(): string {
+      return identity.deviceId;
+    },
+    get name(): string {
+      return identity.name;
+    },
+    get hasAvatar(): boolean {
+      return Boolean(identity.avatarDataUrl);
+    },
+    get profileRevision(): number {
+      return identity.profileRevision;
+    },
+    get trustFingerprint(): string {
+      return identity.trustFingerprint;
+    },
+    port: actualPort,
+    platform
+  };
 
   mdnsService = new SyncMdnsService({
     registry,
-    self: {
-      deviceId: identity.deviceId,
-      name: identity.name,
-      trustFingerprint: identity.trustFingerprint,
-      port: actualPort,
-      platform: getPlatform()
-    }
+    self: advertisedSelf
   });
   mdnsService.start();
 
   const getSelfDevice = (): Device => ({
     deviceId: identity.deviceId,
     name: identity.name,
+    avatarDataUrl: identity.avatarDataUrl,
+    hasAvatar: Boolean(identity.avatarDataUrl),
+    profileRevision: identity.profileRevision,
     trustFingerprint: identity.trustFingerprint,
     trustPublicKey: identity.trustPublicKey,
     host: 'localhost',
     address: '127.0.0.1',
     port: actualPort,
-    platform: getPlatform(),
+    platform,
     version: '1'
   });
 
@@ -177,6 +183,7 @@ async function bootstrapServices(): Promise<void> {
       mdnsService,
       logger: runtimeLogger,
       identity,
+      userDataDir,
       getSelfDevice,
       getWindow: () => mainWindow
     });

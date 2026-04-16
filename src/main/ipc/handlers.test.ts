@@ -194,6 +194,7 @@ describe('registerIpcHandlers', () => {
         remove: vi.fn()
       } as never,
       identity: {} as never,
+      userDataDir: root,
       getSelfDevice: vi.fn(),
       getWindow: vi.fn(() => null)
     });
@@ -284,6 +285,7 @@ describe('registerIpcHandlers', () => {
         remove: vi.fn()
       } as never,
       identity: {} as never,
+      userDataDir: root,
       getSelfDevice: vi.fn(),
       getWindow: vi.fn(() => null)
     });
@@ -375,6 +377,7 @@ describe('registerIpcHandlers', () => {
         remove: vi.fn()
       } as never,
       identity: {} as never,
+      userDataDir: root,
       getSelfDevice: vi.fn(),
       getWindow: vi.fn(
         () =>
@@ -505,6 +508,7 @@ describe('registerIpcHandlers', () => {
         clearDismissible
       } as never,
       identity: {} as never,
+      userDataDir: root,
       getSelfDevice: vi.fn(),
       getWindow: vi.fn(() => null)
     });

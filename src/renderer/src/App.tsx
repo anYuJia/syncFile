@@ -1,19 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { DeviceList } from './components/DeviceList';
-import { DropZone } from './components/DropZone';
+import { DropZone, type PendingFile } from './components/DropZone';
 import { PairRequestQueuePrompt } from './components/PairRequestQueuePrompt';
 import { PairDevicePrompt } from './components/PairDevicePrompt';
 import { ReceivePrompt } from './components/ReceivePrompt';
 import { LogViewer } from './components/LogViewer';
 import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
+import { Avatar } from './components/Avatar';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
-import type { Device, IncomingOffer, PairRequest, RuntimeLogEntry, TrustedDevice } from '@shared/types';
+import type {
+  Device,
+  DeviceReachability,
+  IncomingOffer,
+  PairRequest,
+  PeerReachabilityStatus,
+  RuntimeLogEntry,
+  TrustedDevice
+} from '@shared/types';
 
 const LEFT_PANE_SPLIT_KEY = 'syncfile.left-pane-manual-split-v1';
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v4';
+const SEND_DRAFT_KEY = 'syncfile.send-draft-v1';
 const DEFAULT_LEFT_PANE_SPLIT = 0.28;
 const DEFAULT_RIGHT_PANE_SPLIT = 0.5;
 const MIN_LEFT_PANE_SPLIT = 0.2;
@@ -29,8 +39,42 @@ const COMPACT_LAYOUT_QUERY = '(max-width: 1040px)';
 
 type CompactSection = 'manifest' | 'dispatch' | 'ledger';
 
+interface SelectedRecipientSnapshot extends Device {
+  isOnline: boolean;
+  reachability: PeerReachabilityStatus;
+  reachabilityError?: string;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function loadInitialSendDraft(): {
+  selectedDeviceIds: string[];
+  selectedRecipientSnapshots: Record<string, Device>;
+  pendingSendFiles: PendingFile[];
+} {
+  try {
+    const raw = localStorage.getItem(SEND_DRAFT_KEY);
+    if (!raw) {
+      return { selectedDeviceIds: [], selectedRecipientSnapshots: {}, pendingSendFiles: [] };
+    }
+    const parsed = JSON.parse(raw) as {
+      selectedDeviceIds?: string[];
+      selectedRecipientSnapshots?: Record<string, Device>;
+      pendingSendFiles?: PendingFile[];
+    };
+    return {
+      selectedDeviceIds: Array.isArray(parsed.selectedDeviceIds) ? parsed.selectedDeviceIds : [],
+      selectedRecipientSnapshots:
+        parsed.selectedRecipientSnapshots && typeof parsed.selectedRecipientSnapshots === 'object'
+          ? parsed.selectedRecipientSnapshots
+          : {},
+      pendingSendFiles: Array.isArray(parsed.pendingSendFiles) ? parsed.pendingSendFiles : []
+    };
+  } catch {
+    return { selectedDeviceIds: [], selectedRecipientSnapshots: {}, pendingSendFiles: [] };
+  }
 }
 
 export function App(): JSX.Element {
@@ -52,7 +96,12 @@ export function App(): JSX.Element {
     openSandbox
   } = useSyncFile(messages);
 
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const initialSendDraft = useMemo(() => loadInitialSendDraft(), []);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>(initialSendDraft.selectedDeviceIds);
+  const [selectedRecipientSnapshots, setSelectedRecipientSnapshots] = useState<Record<string, Device>>(
+    initialSendDraft.selectedRecipientSnapshots
+  );
+  const [focusedDeviceId, setFocusedDeviceId] = useState<string | null>(null);
   const [selectedIncomingOfferId, setSelectedIncomingOfferId] = useState<string | null>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [pendingPairRequests, setPendingPairRequests] = useState<PairRequest[]>([]);
@@ -64,7 +113,9 @@ export function App(): JSX.Element {
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [runtimeLogEntries, setRuntimeLogEntries] = useState<RuntimeLogEntry[]>([]);
+  const [reachabilityByDeviceId, setReachabilityByDeviceId] = useState<Record<string, DeviceReachability>>({});
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
+  const [pendingSendFiles, setPendingSendFiles] = useState<PendingFile[]>(initialSendDraft.pendingSendFiles);
   const [leftPaneSplit, setLeftPaneSplit] = useState<number>(() => {
     const saved = localStorage.getItem(LEFT_PANE_SPLIT_KEY);
     const parsed = saved ? Number(saved) : Number.NaN;
@@ -97,7 +148,21 @@ export function App(): JSX.Element {
   const seenOfferIdsRef = useRef<Set<string>>(new Set());
   const seenPairRequestIdsRef = useRef<Set<string>>(new Set());
   const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
-  const selectedDevice = devices.find((device) => device.deviceId === selectedDeviceId) ?? null;
+  const probeKeyByDeviceIdRef = useRef<Map<string, string>>(new Map());
+  const selectedDevices: SelectedRecipientSnapshot[] = selectedDeviceIds.flatMap((deviceId) => {
+      const onlineDevice = devices.find((device) => device.deviceId === deviceId);
+      const snapshot = onlineDevice ?? selectedRecipientSnapshots[deviceId];
+      if (!snapshot) {
+        return [];
+      }
+      const reachability = reachabilityByDeviceId[deviceId];
+      return [{
+        ...snapshot,
+        isOnline: Boolean(onlineDevice),
+        reachability: onlineDevice ? reachability?.status ?? 'checking' : 'unknown',
+        reachabilityError: reachability?.error
+      } satisfies SelectedRecipientSnapshot];
+    });
   const pairingDevice = devices.find((device) => device.deviceId === pairingDeviceId) ?? null;
   const trustedDeviceKeys = useMemo(
     () => new Set(trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)),
@@ -141,20 +206,29 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (devices.length === 0) {
-      setSelectedDeviceId(null);
+      setFocusedDeviceId(null);
       if (isCompactLayout) {
         setCompactSection('manifest');
       }
       return;
     }
 
-    const selectedStillOnline = devices.some((item) => item.deviceId === selectedDeviceId);
-    if (selectedStillOnline) {
-      return;
-    }
-
-    setSelectedDeviceId(devices[0].deviceId);
-  }, [devices, isCompactLayout, selectedDeviceId]);
+    setSelectedRecipientSnapshots((current) => {
+      const next = { ...current };
+      for (const device of devices) {
+        if (selectedDeviceIds.includes(device.deviceId)) {
+          next[device.deviceId] = device;
+        }
+      }
+      return next;
+    });
+    setFocusedDeviceId((current) => {
+      if (current && devices.some((item) => item.deviceId === current)) {
+        return current;
+      }
+      return devices[0]?.deviceId ?? null;
+    });
+  }, [devices, isCompactLayout, selectedDeviceIds]);
 
   useEffect(() => {
     if (pendingOffers.length === 0) {
@@ -168,6 +242,59 @@ export function App(): JSX.Element {
 
     setSelectedIncomingOfferId(pendingOffers[0].offerId);
   }, [pendingOffers, selectedIncomingOfferId]);
+
+  useEffect(() => {
+    let active = true;
+    const onlineDeviceIds = new Set(devices.map((device) => device.deviceId));
+    for (const deviceId of [...probeKeyByDeviceIdRef.current.keys()]) {
+      if (!onlineDeviceIds.has(deviceId)) {
+        probeKeyByDeviceIdRef.current.delete(deviceId);
+      }
+    }
+
+    setReachabilityByDeviceId((current) => {
+      const next: Record<string, DeviceReachability> = {};
+      for (const [deviceId, reachability] of Object.entries(current)) {
+        if (onlineDeviceIds.has(deviceId)) {
+          next[deviceId] = reachability;
+        }
+      }
+      return next;
+    });
+
+    for (const device of devices) {
+      const probeKey = `${device.address}:${device.port}:${device.trustFingerprint}`;
+      const previousKey = probeKeyByDeviceIdRef.current.get(device.deviceId);
+      const previousReachability = reachabilityByDeviceId[device.deviceId];
+      if (previousKey === probeKey && previousReachability) {
+        continue;
+      }
+
+      probeKeyByDeviceIdRef.current.set(device.deviceId, probeKey);
+      setReachabilityByDeviceId((current) => ({
+        ...current,
+        [device.deviceId]: {
+          deviceId: device.deviceId,
+          status: 'checking',
+          checkedAt: Date.now()
+        }
+      }));
+
+      void window.syncFile.probeDevice(device.deviceId).then((reachability) => {
+        if (!active) {
+          return;
+        }
+        setReachabilityByDeviceId((current) => ({
+          ...current,
+          [device.deviceId]: reachability
+        }));
+      });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [devices, reachabilityByDeviceId]);
 
   useEffect(() => {
     if (pendingPairRequests.length === 0) {
@@ -371,6 +498,17 @@ export function App(): JSX.Element {
   }, [rightPaneSplit]);
 
   useEffect(() => {
+    localStorage.setItem(
+      SEND_DRAFT_KEY,
+      JSON.stringify({
+        selectedDeviceIds,
+        selectedRecipientSnapshots,
+        pendingSendFiles
+      })
+    );
+  }, [pendingSendFiles, selectedDeviceIds, selectedRecipientSnapshots]);
+
+  useEffect(() => {
     if (!isResizingRows) {
       return;
     }
@@ -463,14 +601,26 @@ export function App(): JSX.Element {
   }, [isResizingColumns]);
 
   async function handleSendFiles(filePaths: string[]): Promise<void> {
-    const fallbackTarget = devices.length === 1 ? devices[0].deviceId : null;
-    const targetDeviceId = selectedDeviceId ?? fallbackTarget;
-    if (!targetDeviceId) return;
-    for (const filePath of filePaths) {
-      try {
-        await sendFile(targetDeviceId, filePath);
-      } catch {
-        // Hook already stores and exposes the error message.
+    const targetDeviceIds = selectedDevices
+      .filter((device) => device.isOnline && device.reachability !== 'unreachable')
+      .map((device) => device.deviceId);
+    if (targetDeviceIds.length === 0) {
+      return;
+    }
+    const batchMeta =
+      targetDeviceIds.length * filePaths.length > 1
+        ? {
+            batchId: crypto.randomUUID(),
+            batchLabel: messages.topbarDraftSummary(filePaths.length, targetDeviceIds.length)
+          }
+        : undefined;
+    for (const deviceId of targetDeviceIds) {
+      for (const filePath of filePaths) {
+        try {
+          await sendFile(deviceId, filePath, undefined, batchMeta);
+        } catch {
+          // Hook already stores and exposes the error message.
+        }
       }
     }
     if (isCompactLayout) {
@@ -592,10 +742,7 @@ export function App(): JSX.Element {
   async function handleRefreshDevices(): Promise<void> {
     try {
       setIsRefreshingDevices(true);
-      const list = await refreshDevices();
-      if (list.length > 0 && !list.some((item) => item.deviceId === selectedDeviceId)) {
-        setSelectedDeviceId(list[0]?.deviceId ?? null);
-      }
+      await refreshDevices();
     } catch {
       // Best effort only.
     } finally {
@@ -720,11 +867,30 @@ export function App(): JSX.Element {
     });
   };
 
-  const handleSelectDevice = (deviceId: string): void => {
-    setSelectedDeviceId(deviceId);
+  const handleToggleDeviceSelection = (deviceId: string): void => {
+    setFocusedDeviceId(deviceId);
+    const device = devices.find((item) => item.deviceId === deviceId);
+    if (device) {
+      setSelectedRecipientSnapshots((current) => ({
+        ...current,
+        [deviceId]: device
+      }));
+    }
+    setSelectedDeviceIds((current) =>
+      current.includes(deviceId) ? current.filter((id) => id !== deviceId) : [...current, deviceId]
+    );
     if (isCompactLayout) {
       setCompactSection('dispatch');
     }
+  };
+
+  const handleRemoveRecipient = (deviceId: string): void => {
+    setSelectedDeviceIds((current) => current.filter((id) => id !== deviceId));
+    setSelectedRecipientSnapshots((current) => {
+      const next = { ...current };
+      delete next[deviceId];
+      return next;
+    });
   };
 
   const handleOpenRequestsInbox = (): void => {
@@ -765,13 +931,26 @@ export function App(): JSX.Element {
   const showManifest = !isCompactLayout || compactSection === 'manifest';
   const showDispatch = !isCompactLayout || compactSection === 'dispatch';
   const showLedger = !isCompactLayout || compactSection === 'ledger';
+  const singleSelectedDevice = selectedDevices.length === 1 ? selectedDevices[0] : null;
+  const sendDraftSummary =
+    pendingSendFiles.length > 0
+      ? messages.topbarDraftSummary(pendingSendFiles.length, selectedDevices.length)
+      : selectedDevices.length > 0
+        ? messages.topbarRecipientSummary(selectedDevices.length)
+        : messages.routeMetaIdle;
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <h1 className="topbar-title">syncFile</h1>
         {selfDevice && (
-          <span className="topbar-status">{selfDevice.name}</span>
+          <div className="topbar-status">
+            <Avatar name={selfDevice.name} avatarDataUrl={selfDevice.avatarDataUrl} size="sm" />
+            <span className="topbar-status-copy">
+              <strong>{selfDevice.name}</strong>
+              <span>{sendDraftSummary}</span>
+            </span>
+          </div>
         )}
 
         <div className="topbar-actions">
@@ -924,9 +1103,12 @@ export function App(): JSX.Element {
           </div>
           <DeviceList
             devices={devices}
-            selectedDeviceId={selectedDeviceId}
+            selectedDeviceIds={selectedDeviceIds}
+            focusedDeviceId={focusedDeviceId}
+            reachabilityByDeviceId={reachabilityByDeviceId}
             trustedDeviceKeys={trustedDeviceKeys}
-            onSelect={handleSelectDevice}
+            onToggleSelect={handleToggleDeviceSelection}
+            onFocusDevice={setFocusedDeviceId}
             onRefresh={handleRefreshDevices}
             messages={messages}
           />
@@ -956,17 +1138,19 @@ export function App(): JSX.Element {
             <div className="card-head">
               <h2>{messages.sendFile}</h2>
               <div className="card-head-actions card-head-actions-dispatch">
-                <span className={`dispatch-target-badge${selectedDevice ? ' is-active' : ''}`}>
-                  {selectedDevice ? messages.dispatchTargetReady(selectedDevice.name) : messages.dispatchTargetIdle}
+                <span className={`dispatch-target-badge${selectedDevices.length > 0 ? ' is-active' : ''}`}>
+                  {selectedDevices.length > 0
+                    ? messages.dispatchTargetReady(selectedDevices.map((device) => device.name).join(' · '))
+                    : messages.dispatchTargetIdle}
                 </span>
-                {selectedDevice && (
-                  trustedDeviceKeys.has(`${selectedDevice.deviceId}:${selectedDevice.trustFingerprint}`) ? (
+                {singleSelectedDevice && singleSelectedDevice.isOnline !== false && (
+                  trustedDeviceKeys.has(`${singleSelectedDevice.deviceId}:${singleSelectedDevice.trustFingerprint}`) ? (
                     <span className="device-item-trusted">{messages.pairedDevice}</span>
                   ) : (
                     <button
                       type="button"
                       className="button button-ghost"
-                      onClick={() => setPairingDeviceId(selectedDevice.deviceId)}
+                      onClick={() => setPairingDeviceId(singleSelectedDevice.deviceId)}
                     >
                       {messages.pairDevice}
                     </button>
@@ -977,8 +1161,11 @@ export function App(): JSX.Element {
             <DropZone
               onSend={(filePaths) => void handleSendFiles(filePaths)}
               messages={messages}
-              selectedDeviceName={selectedDevice?.name ?? null}
-              selfDeviceName={selfDevice?.name ?? null}
+              selectedDevices={selectedDevices}
+              selfDevice={selfDevice}
+              pendingFiles={pendingSendFiles}
+              onPendingFilesChange={setPendingSendFiles}
+              onRemoveRecipient={handleRemoveRecipient}
             />
           </section>
           )}

@@ -82,6 +82,7 @@ function hasMeaningfulChange(previous: Device | undefined, next: Device): boolea
 
   return (
     previous.name !== next.name ||
+    previous.avatarDataUrl !== next.avatarDataUrl ||
     previous.host !== next.host ||
     previous.address !== next.address ||
     previous.port !== next.port ||

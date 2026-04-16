@@ -25,7 +25,12 @@ interface UseSyncFileResult {
   errorMessage: string | null;
   clearError: () => void;
   refreshDevices: () => Promise<Device[]>;
-  sendFile: (deviceId: string, filePath: string, existingTransferId?: string) => Promise<TransferId>;
+  sendFile: (
+    deviceId: string,
+    filePath: string,
+    existingTransferId?: string,
+    batchMeta?: { batchId?: string; batchLabel?: string }
+  ) => Promise<TransferId>;
   pauseTransfer: (transferId: string) => Promise<void>;
   cancelTransfer: (transferId: string) => Promise<void>;
   retryTransfer: (transferId: string) => Promise<TransferId>;
@@ -93,6 +98,8 @@ function buildTransferFromEvent(
 
   return {
     transferId: incoming.transferId,
+    batchId: incoming.batchId ?? previous?.batchId,
+    batchLabel: incoming.batchLabel ?? previous?.batchLabel,
     direction: nextDirection,
     fileName: nextFileName,
     fileSize: nextFileSize,
@@ -187,6 +194,10 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       setPendingOffers((prev) => [...prev, offer]);
     });
 
+    const offSelfDeviceUpdated = window.syncFile.onSelfDeviceUpdated((device) => {
+      setSelfDevice(device);
+    });
+
     const offTransferHistoryReset = window.syncFile.onTransferHistoryReset((items) => {
       transferMapRef.current = buildTransferMap(items);
       setTransferVersion((version) => version + 1);
@@ -216,6 +227,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       offOnline();
       offOffline();
       offIncomingOffer();
+      offSelfDeviceUpdated();
       offTransferHistoryReset();
       offTransferProgress();
       offTransferComplete();
@@ -231,16 +243,19 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
   async function sendFile(
     deviceId: string,
     filePath: string,
-    existingTransferId?: string
+    existingTransferId?: string,
+    batchMeta?: { batchId?: string; batchLabel?: string }
   ): Promise<TransferId> {
     try {
-      const transferId = await window.syncFile.sendFile(deviceId, filePath, existingTransferId);
+      const transferId = await window.syncFile.sendFile(deviceId, filePath, existingTransferId, batchMeta);
       const target = devices.find((device) => device.deviceId === deviceId);
       const previous = transferMapRef.current.get(transferId.value);
       transferMapRef.current.set(
         transferId.value,
         buildTransferFromEvent(previous, {
           transferId: transferId.value,
+          batchId: batchMeta?.batchId,
+          batchLabel: batchMeta?.batchLabel,
           direction: 'send',
           fileName: basename(filePath),
           fileSize: previous?.fileSize ?? 0,

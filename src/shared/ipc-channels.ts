@@ -8,6 +8,8 @@ export const IpcChannels = {
   GetSelfDevice: 'syncfile:get-self-device',
   GetTransferHistory: 'syncfile:get-transfer-history',
   GetPendingOffers: 'syncfile:get-pending-offers',
+  ProbeDevice: 'syncfile:probe-device',
+  FetchPeerProfile: 'syncfile:fetch-peer-profile',
   PairDevice: 'syncfile:pair-device',
   AcceptPairRequest: 'syncfile:accept-pair-request',
   RejectPairRequest: 'syncfile:reject-pair-request',
@@ -27,6 +29,7 @@ export const IpcChannels = {
   SelectFile: 'syncfile:select-file',
   GetSettings: 'syncfile:get-settings',
   SaveSettings: 'syncfile:save-settings',
+  SaveProfile: 'syncfile:save-profile',
   GetRuntimeLogs: 'syncfile:get-runtime-logs',
   ClearRuntimeLogs: 'syncfile:clear-runtime-logs',
 
@@ -39,7 +42,8 @@ export const IpcChannels = {
   IncomingOffer: 'syncfile:incoming-offer',
   IncomingPairRequest: 'syncfile:incoming-pair-request',
   PairRequestRemoved: 'syncfile:pair-request-removed',
-  RuntimeLogEntry: 'syncfile:runtime-log-entry'
+  RuntimeLogEntry: 'syncfile:runtime-log-entry',
+  SelfDeviceUpdated: 'syncfile:self-device-updated'
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

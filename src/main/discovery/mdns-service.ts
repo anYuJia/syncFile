@@ -14,6 +14,8 @@ export interface MdnsServiceOptions {
   self: {
     deviceId: string;
     name: string;
+    hasAvatar: boolean;
+    profileRevision: number;
     trustFingerprint: string;
     port: number;
     platform: string;
@@ -58,7 +60,9 @@ export class MdnsService {
         displayName: this.opts.self.name,
         trustFingerprint: this.opts.self.trustFingerprint,
         platform: this.opts.self.platform,
-        version: MDNS_PROTOCOL_VERSION
+        version: MDNS_PROTOCOL_VERSION,
+        hasAvatar: this.opts.self.hasAvatar ? '1' : '0',
+        profileRevision: String(this.opts.self.profileRevision)
       }
     });
     this.published.on('up', () => {
@@ -86,6 +90,21 @@ export class MdnsService {
       this.opts.registry.clear();
     }
     this.resetBrowser();
+  }
+
+  async updateSelf(): Promise<void> {
+    logInfo('discovery', 'updating self announcement');
+    const service = this.published;
+    this.published = undefined;
+    await new Promise<void>((resolve) => {
+      if (!service?.stop) {
+        resolve();
+        return;
+      }
+      service.stop(() => resolve());
+    });
+    this.publish();
+    this.refresh(false);
   }
 
   async stop(): Promise<void> {
@@ -157,6 +176,8 @@ export class MdnsService {
     return {
       deviceId,
       name: this.readTxtValue(service.txt, 'displayName') || service.name,
+      hasAvatar: this.readTxtValue(service.txt, 'hasAvatar') === '1',
+      profileRevision: Number(this.readTxtValue(service.txt, 'profileRevision') ?? '0') || 0,
       trustFingerprint: this.readTxtValue(service.txt, 'trustFingerprint') || 'UNKNOWN',
       trustPublicKey: this.readTxtValue(service.txt, 'trustPublicKey') || '',
       host,

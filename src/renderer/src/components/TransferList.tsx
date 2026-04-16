@@ -136,6 +136,22 @@ export function TransferList({
   );
   const selectedTransfer =
     transfers.find((item) => item.transferId === selectedTransferId) ?? null;
+  const groupedVisibleTransfers = useMemo(() => {
+    const groups: Array<{ key: string; batchLabel?: string; transfers: RendererTransferProgress[] }> = [];
+    for (const item of visibleTransfers) {
+      const lastGroup = groups[groups.length - 1];
+      if (item.batchId && lastGroup?.key === item.batchId) {
+        lastGroup.transfers.push(item);
+        continue;
+      }
+      groups.push({
+        key: item.batchId ?? item.transferId,
+        batchLabel: item.batchLabel,
+        transfers: [item]
+      });
+    }
+    return groups;
+  }, [visibleTransfers]);
 
   useEffect(() => {
     if (selectedTransferId && !selectedTransfer) {
@@ -316,7 +332,16 @@ export function TransferList({
         </div>
       ) : (
       <ul className="transfer-list">
-      {visibleTransfers.map((item) => {
+      {groupedVisibleTransfers.map((group) => (
+        <li key={group.key} className="transfer-group">
+          {group.transfers[0]?.batchId && group.transfers.length > 1 && (
+            <div className="transfer-group-head">
+              <span className="transfer-group-title">{group.batchLabel ?? 'Send batch'}</span>
+              <span className="transfer-group-count">{group.transfers.length}</span>
+            </div>
+          )}
+          <ul className="transfer-group-list">
+          {group.transfers.map((item) => {
         const percent = progressPercent(item);
         const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
         const statusText = statusLabel(item.status, messages);
@@ -479,6 +504,9 @@ export function TransferList({
           </li>
         );
       })}
+          </ul>
+        </li>
+      ))}
       </ul>
       )}
       {selectedTransfer && (

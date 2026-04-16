@@ -67,6 +67,13 @@ export interface Messages {
   transferRateLabel: string;
   transferEtaLabel: string;
   transferPreparing: string;
+  selectedRecipientLabel: string;
+  topbarDraftSummary: (fileCount: number, recipientCount: number) => string;
+  topbarRecipientSummary: (recipientCount: number) => string;
+  deviceReachabilityChecking: string;
+  deviceReachabilityReachable: string;
+  deviceReachabilityUnreachable: string;
+  recipientOfflineLabel: string;
   taskFilterAll: string;
   taskFilterActive: string;
   taskFilterDone: string;
@@ -125,6 +132,16 @@ export interface Messages {
   errorPeerNoResponse: string;
   errorTransferTimedOut: string;
   settings: string;
+  settingsProfileSection: string;
+  settingsProfileSectionDesc: string;
+  settingsProfileName: string;
+  settingsProfileNameDesc: string;
+  settingsProfileAvatar: string;
+  settingsProfileAvatarDesc: string;
+  settingsProfileChangeAvatar: string;
+  settingsProfileRemoveAvatar: string;
+  settingsProfileAvatarReady: string;
+  settingsProfileAvatarLocalOnly: string;
   settingsReceiveSection: string;
   settingsReceiveSectionDesc: string;
   settingsStorageSection: string;
@@ -256,6 +273,13 @@ const zh: Messages = {
   transferRateLabel: '速率',
   transferEtaLabel: '剩余',
   transferPreparing: '准备发送中',
+  selectedRecipientLabel: '已选',
+  topbarDraftSummary: (fileCount, recipientCount) => `${fileCount} 个文件 · ${recipientCount} 个收件人`,
+  topbarRecipientSummary: (recipientCount) => `${recipientCount} 个收件人已选`,
+  deviceReachabilityChecking: '端口探测中',
+  deviceReachabilityReachable: '可发送',
+  deviceReachabilityUnreachable: '端口不可达',
+  recipientOfflineLabel: '暂时离线',
   taskFilterAll: '全部',
   taskFilterActive: '进行中',
   taskFilterDone: '已完成',
@@ -314,6 +338,16 @@ const zh: Messages = {
   errorPeerNoResponse: '对方长时间没有响应这次请求。',
   errorTransferTimedOut: '传输超时，已停止等待。',
   settings: '设置',
+  settingsProfileSection: '个人资料',
+  settingsProfileSectionDesc: '设置你的设备显示名称和头像，局域网内其他设备会看到这份资料。',
+  settingsProfileName: '设备名字',
+  settingsProfileNameDesc: '这个名字会显示在设备列表、发送目标和传输记录里。',
+  settingsProfileAvatar: '设备头像',
+  settingsProfileAvatarDesc: '头像会保存在本机，并作为压缩缩略图广播给其他设备。',
+  settingsProfileChangeAvatar: '更换头像',
+  settingsProfileRemoveAvatar: '移除头像',
+  settingsProfileAvatarReady: '这张头像会在设备被发现后通过安全通道同步给其他设备。',
+  settingsProfileAvatarLocalOnly: '头像已保存在本机。',
   settingsReceiveSection: '接收策略',
   settingsReceiveSectionDesc: '控制传入文件如何进入当前设备。',
   settingsStorageSection: '存储策略',
@@ -443,6 +477,13 @@ const en: Messages = {
   transferRateLabel: 'Rate',
   transferEtaLabel: 'ETA',
   transferPreparing: 'Preparing transfer',
+  selectedRecipientLabel: 'Selected',
+  topbarDraftSummary: (fileCount, recipientCount) => `${fileCount} files · ${recipientCount} recipients`,
+  topbarRecipientSummary: (recipientCount) => `${recipientCount} recipients selected`,
+  deviceReachabilityChecking: 'Checking port',
+  deviceReachabilityReachable: 'Ready',
+  deviceReachabilityUnreachable: 'Port unreachable',
+  recipientOfflineLabel: 'Offline for now',
   taskFilterAll: 'All',
   taskFilterActive: 'Active',
   taskFilterDone: 'Done',
@@ -501,6 +542,16 @@ const en: Messages = {
   errorPeerNoResponse: 'The peer did not respond in time.',
   errorTransferTimedOut: 'The transfer timed out.',
   settings: 'Settings',
+  settingsProfileSection: 'Profile',
+  settingsProfileSectionDesc: 'Set the device name and avatar that other devices see on this LAN.',
+  settingsProfileName: 'Device name',
+  settingsProfileNameDesc: 'This name appears in discovery, recipient chips, and transfer records.',
+  settingsProfileAvatar: 'Device avatar',
+  settingsProfileAvatarDesc: 'The avatar is stored locally and broadcast as a compressed thumbnail to peers.',
+  settingsProfileChangeAvatar: 'Change avatar',
+  settingsProfileRemoveAvatar: 'Remove avatar',
+  settingsProfileAvatarReady: 'This avatar will sync to nearby devices over the secure profile channel.',
+  settingsProfileAvatarLocalOnly: 'The avatar is saved locally.',
   settingsReceiveSection: 'Receive behavior',
   settingsReceiveSectionDesc: 'Control how incoming files enter this device.',
   settingsStorageSection: 'Storage behavior',

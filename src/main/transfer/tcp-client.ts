@@ -12,9 +12,11 @@ import { secureConnect, type ExpectedPeerIdentity, type SecureIdentity, type Sec
 import {
   isFileAccept,
   isFileCancel,
+  isProfileResponse,
   isPairResponse,
   isFileReject,
   type FileOfferMessage,
+  type ProfileResponseMessage,
   type PairRequestMessage
 } from './protocol';
 
@@ -425,6 +427,93 @@ export class TcpClient extends EventEmitter {
         responseTimeoutMs
       });
       socket.write(encodeMessage(request));
+    });
+  }
+
+  async probePeer(host: string, port: number, peer: ExpectedPeerIdentity): Promise<void> {
+    const rawSocket = await openSocket(
+      host,
+      port,
+      this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
+    );
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: this.options.selfDevice as SecureIdentity,
+      expectedPeer: peer,
+      timeoutMs: this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('error', reject);
+      socket.end(() => resolve());
+    });
+  }
+
+  async fetchPeerProfile(
+    host: string,
+    port: number,
+    peer: ExpectedPeerIdentity
+  ): Promise<ProfileResponseMessage> {
+    const rawSocket = await openSocket(
+      host,
+      port,
+      this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
+    );
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: this.options.selfDevice as SecureIdentity,
+      expectedPeer: peer,
+      timeoutMs: this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
+    });
+    const decoder = new MessageDecoder();
+
+    return await new Promise<ProfileResponseMessage>((resolve, reject) => {
+      let settled = false;
+      const responseTimeoutMs = this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+
+      const cleanup = (): void => {
+        socket.off('data', onData);
+        socket.off('error', onError);
+        socket.off('close', onClose);
+        socket.off('timeout', onTimeout);
+        socket.setTimeout(0);
+      };
+
+      const fail = (error: Error): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        socket.destroy();
+        reject(error);
+      };
+
+      const onData = (chunk: Buffer): void => {
+        try {
+          const messages = decoder.push(chunk);
+          for (const message of messages) {
+            if (!isProfileResponse(message)) {
+              fail(new Error(`unexpected message from peer: ${message.type}`));
+              return;
+            }
+            settled = true;
+            cleanup();
+            socket.end(() => resolve(message));
+            return;
+          }
+        } catch (error) {
+          fail(error as Error);
+        }
+      };
+
+      const onError = (error: Error): void => fail(error);
+      const onClose = (): void => fail(new Error('peer closed connection before profile response'));
+      const onTimeout = (): void => fail(new Error('profile request timed out'));
+
+      socket.setTimeout(responseTimeoutMs);
+      socket.on('data', onData);
+      socket.once('error', onError);
+      socket.once('close', onClose);
+      socket.once('timeout', onTimeout);
+      socket.write(encodeMessage({ type: 'profile-request' }));
     });
   }
 

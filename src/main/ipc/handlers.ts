@@ -7,7 +7,10 @@ import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'e
 import { IpcChannels, type IpcChannel } from '../../shared/ipc-channels';
 import type {
   Device,
+  DeviceReachability,
   IncomingOffer,
+  PeerProfilePayload,
+  ProfilePayload,
   RejectReason,
   RuntimeLogEntry,
   SandboxLocationInfo,
@@ -24,7 +27,7 @@ import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
 import type { SettingsStore } from '../storage/settings';
 import type { TransferHistoryStore } from '../storage/transfer-history';
-import type { DeviceIdentity } from '../storage/device-identity';
+import { saveIdentityProfile, type DeviceIdentity } from '../storage/device-identity';
 import type { RuntimeLogger } from '../logging/runtime-log';
 import type { TcpClient } from '../transfer/tcp-client';
 import { sha256File } from '../transfer/file-hash';
@@ -137,6 +140,8 @@ interface AcceptedInboundMeta {
 
 interface OutboundTransferMeta {
   transferId: string;
+  batchId?: string;
+  batchLabel?: string;
   fileName: string;
   fileSize: number;
   peerDeviceName: string;
@@ -157,6 +162,7 @@ export interface IpcContext {
   settingsStore: SettingsStore;
   transferHistoryStore: TransferHistoryStore;
   identity: DeviceIdentity;
+  userDataDir: string;
   getSelfDevice: () => Device;
   getWindow: () => BrowserWindow | null;
   logger?: RuntimeLogger;
@@ -170,6 +176,8 @@ export const handledIpcChannels = [
   IpcChannels.GetSelfDevice,
   IpcChannels.GetTransferHistory,
   IpcChannels.GetPendingOffers,
+  IpcChannels.ProbeDevice,
+  IpcChannels.FetchPeerProfile,
   IpcChannels.PairDevice,
   IpcChannels.AcceptPairRequest,
   IpcChannels.RejectPairRequest,
@@ -189,6 +197,7 @@ export const handledIpcChannels = [
   IpcChannels.SelectFile,
   IpcChannels.GetSettings,
   IpcChannels.SaveSettings,
+  IpcChannels.SaveProfile,
   IpcChannels.GetRuntimeLogs,
   IpcChannels.ClearRuntimeLogs
 ] as const;
@@ -217,6 +226,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   const hashingOutboundTransfers = new Set<string>();
   const pendingProgressEvents = new Map<string, TransferProgress>();
   const progressTimers = new Map<string, NodeJS.Timeout>();
+  const peerProfileCache = new Map<string, PeerProfilePayload>();
+  const inflightPeerProfileFetches = new Map<string, Promise<void>>();
   let activeOutboundTransferId: string | null = null;
 
   const sendToRenderer = <T>(channel: IpcChannel, payload: T): void => {
@@ -286,6 +297,81 @@ export function registerIpcHandlers(context: IpcContext): void {
     sendToRenderer(IpcChannels.TransferHistoryReset, context.transferHistoryStore.list());
   };
 
+  const mergePeerProfile = (device: Device, profile: PeerProfilePayload): Device => ({
+    ...device,
+    name: profile.name,
+    avatarDataUrl: profile.avatarDataUrl,
+    hasAvatar: profile.hasAvatar,
+    profileRevision: profile.profileRevision
+  });
+
+  const fetchPeerProfile = async (device: Device): Promise<PeerProfilePayload | null> => {
+    if (!device.hasAvatar) {
+      return null;
+    }
+    const cached = peerProfileCache.get(device.deviceId);
+    if (cached && cached.profileRevision === (device.profileRevision ?? 0)) {
+      return cached;
+    }
+
+    const profile = await context.tcpClient.fetchPeerProfile(device.address, device.port, {
+      deviceId: device.deviceId,
+      trustFingerprint: device.trustFingerprint,
+      trustPublicKey: device.trustPublicKey
+    });
+    const payload: PeerProfilePayload = {
+      deviceId: profile.deviceId,
+      name: profile.name,
+      avatarDataUrl: profile.avatarDataUrl,
+      hasAvatar: profile.hasAvatar,
+      profileRevision: profile.profileRevision
+    };
+    peerProfileCache.set(device.deviceId, payload);
+    return payload;
+  };
+
+  const ensurePeerProfile = (device: Device): void => {
+    if (!device.hasAvatar) {
+      peerProfileCache.delete(device.deviceId);
+      return;
+    }
+    const cached = peerProfileCache.get(device.deviceId);
+    if (cached && cached.profileRevision === (device.profileRevision ?? 0)) {
+      const merged = mergePeerProfile(device, cached);
+      if (merged.avatarDataUrl !== device.avatarDataUrl || merged.name !== device.name) {
+        context.registry.upsert(merged);
+      }
+      return;
+    }
+    if (inflightPeerProfileFetches.has(device.deviceId)) {
+      return;
+    }
+
+    const task = fetchPeerProfile(device)
+      .then((profile) => {
+        if (!profile) {
+          return;
+        }
+        const current = context.registry.list().find((candidate) => candidate.deviceId === device.deviceId);
+        if (!current) {
+          return;
+        }
+        context.registry.upsert(mergePeerProfile(current, profile));
+      })
+      .catch((error) => {
+        context.logger?.warn('discovery', 'peer profile fetch failed', {
+          deviceId: device.deviceId,
+          address: `${device.address}:${device.port}`,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      })
+      .finally(() => {
+        inflightPeerProfileFetches.delete(device.deviceId);
+      });
+
+    inflightPeerProfileFetches.set(device.deviceId, task);
+  };
+
   const makeOutboundProgress = (
     meta: OutboundTransferMeta,
     bytesTransferred: number,
@@ -293,6 +379,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     error?: string
   ): TransferProgress => ({
     transferId: meta.transferId,
+    batchId: meta.batchId,
+    batchLabel: meta.batchLabel,
     direction: 'send',
     fileName: meta.fileName,
     fileSize: meta.fileSize,
@@ -680,9 +768,61 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.pendingOfferStore.list();
   });
 
+  ipcMain.handle(IpcChannels.FetchPeerProfile, async (_event, deviceId: string): Promise<PeerProfilePayload | null> => {
+    const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
+    if (!device) {
+      return null;
+    }
+    return await fetchPeerProfile(device);
+  });
+
+  ipcMain.handle(IpcChannels.ProbeDevice, async (_event, deviceId: string): Promise<DeviceReachability> => {
+    const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
+    if (!device) {
+      return {
+        deviceId,
+        status: 'unknown',
+        checkedAt: Date.now(),
+        error: 'device not found'
+      };
+    }
+
+    try {
+      await context.tcpClient.probePeer(device.address, device.port, {
+        deviceId: device.deviceId,
+        trustFingerprint: device.trustFingerprint,
+        trustPublicKey: device.trustPublicKey
+      });
+      return {
+        deviceId,
+        status: 'reachable',
+        checkedAt: Date.now()
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      context.logger?.warn('discovery', 'peer reachability probe failed', {
+        deviceId,
+        address: `${device.address}:${device.port}`,
+        error: message
+      });
+      return {
+        deviceId,
+        status: 'unreachable',
+        checkedAt: Date.now(),
+        error: message
+      };
+    }
+  });
+
   ipcMain.handle(
     IpcChannels.SendFile,
-    async (_event, deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> => {
+    async (
+      _event,
+      deviceId: string,
+      filePath: string,
+      existingTransferId?: string,
+      batchMeta?: { batchId?: string; batchLabel?: string }
+    ): Promise<TransferId> => {
       const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
       if (!device) {
         context.logger?.warn('transfer', 'send requested for unknown device', { deviceId, filePath });
@@ -699,6 +839,8 @@ export function registerIpcHandlers(context: IpcContext): void {
 
       outboundTransfers.set(transferId, {
         transferId,
+        batchId: batchMeta?.batchId,
+        batchLabel: batchMeta?.batchLabel,
         fileName,
         fileSize,
         peerDeviceName: device.name,
@@ -979,6 +1121,25 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.settingsStore.save(partial);
   });
 
+  ipcMain.handle(IpcChannels.SaveProfile, async (_event, profile: ProfilePayload): Promise<Device> => {
+    const normalizedName = profile.name.trim();
+    if (normalizedName.length === 0) {
+      throw new Error('profile name cannot be empty');
+    }
+    saveIdentityProfile(context.userDataDir, context.identity, {
+      name: normalizedName,
+      avatarDataUrl: profile.avatarDataUrl
+    });
+    await context.mdnsService.updateSelf();
+    const selfDevice = context.getSelfDevice();
+    context.logger?.info('profile', 'updated local profile', {
+      name: selfDevice.name,
+      hasAvatar: Boolean(selfDevice.avatarDataUrl)
+    });
+    sendToRenderer(IpcChannels.SelfDeviceUpdated, selfDevice);
+    return selfDevice;
+  });
+
   ipcMain.handle(IpcChannels.GetRuntimeLogs, (): RuntimeLogEntry[] => {
     return context.logger?.list() ?? [];
   });
@@ -989,6 +1150,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.registry.on('device-online', (device) => {
+    ensurePeerProfile(device);
     context.logger?.info('discovery', 'device online', {
       deviceId: device.deviceId,
       name: device.name,
@@ -1194,6 +1356,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     const meta = outboundTransfers.get(progress.fileId);
     const fallbackMeta: OutboundTransferMeta = {
       transferId: progress.fileId,
+      batchId: meta?.batchId,
+      batchLabel: meta?.batchLabel,
       fileName: progress.fileName,
       fileSize: progress.totalBytes,
       peerDeviceName: meta?.peerDeviceName ?? '',

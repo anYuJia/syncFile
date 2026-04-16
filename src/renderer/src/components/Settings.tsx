@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import type { SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import type { Device, SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
 import { formatBytes } from '../utils/format';
+import { Avatar } from './Avatar';
 
 interface SettingsModalProps {
   messages: Messages;
@@ -29,6 +30,7 @@ function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
 
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [profile, setProfile] = useState<Device | null>(null);
   const [sandboxLocation, setSandboxLocation] = useState<SandboxLocationInfo | null>(null);
   const [maintenance, setMaintenance] = useState<SettingsPayload['maintenance']>({
     transferHistoryCount: 0,
@@ -42,6 +44,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     return typeof window.Notification?.permission === 'string' ? window.Notification.permission : 'default';
   });
   const api = window.syncFile as SettingsApi;
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const busy = saving || choosingSandbox;
   const handleClose = (): void => {
     if (!busy) {
@@ -53,8 +56,12 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const refreshSettings = async (): Promise<void> => {
     try {
       setInlineError(null);
-      const nextSettings = await window.syncFile.getSettings();
+      const [nextSettings, selfDevice] = await Promise.all([
+        window.syncFile.getSettings(),
+        window.syncFile.getSelfDevice()
+      ]);
       setSettings(nextSettings);
+      setProfile(selfDevice);
       if (hasSandboxLocation(nextSettings)) {
         setSandboxLocation(nextSettings.sandboxLocation);
         setMaintenance(nextSettings.maintenance);
@@ -93,6 +100,12 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     setSaving(true);
     try {
       setInlineError(null);
+      if (!profile) {
+        throw new Error(messages.failedToLoadDeviceInformation);
+      }
+      if (profile.name.trim().length === 0) {
+        throw new Error(messages.settingsProfileName);
+      }
       const normalized: Settings = {
         ...settings,
         maxSandboxSizeMB: Math.min(102400, Math.max(64, Math.round(settings.maxSandboxSizeMB) || 1024)),
@@ -109,6 +122,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
           // Best effort only.
         }
       }
+      await window.syncFile.saveProfile({
+        name: profile.name.trim(),
+        avatarDataUrl: profile.avatarDataUrl
+      });
       await window.syncFile.saveSettings(normalized);
       onClose();
     } catch (error) {
@@ -165,6 +182,31 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }));
   };
 
+  const handlePickAvatar = (): void => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarInput = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    try {
+      const avatarDataUrl = await makeAvatarDataUrl(file);
+      setProfile((current) =>
+        current
+          ? {
+              ...current,
+              avatarDataUrl
+            }
+          : current
+      );
+    } catch (error) {
+      setInlineError(error instanceof Error ? error.message : messages.settingsProfileAvatar);
+    }
+  };
+
   const handleClearTransferHistory = async (): Promise<void> => {
     setChoosingSandbox(true);
     try {
@@ -213,6 +255,93 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
         <div className="settings-body">
           {inlineError && <div className="settings-error-banner">{inlineError}</div>}
+
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h3 className="settings-section-title">{messages.settingsProfileSection}</h3>
+              <p className="settings-section-copy">{messages.settingsProfileSectionDesc}</p>
+            </div>
+
+            <div className="settings-card-list">
+              <div className="settings-card settings-profile-card">
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="drop-zone-hidden-input"
+                  onChange={(event) => void handleAvatarInput(event)}
+                />
+                <div className="settings-profile-row">
+                  <div className="settings-profile-preview">
+                    <Avatar
+                      name={profile?.name ?? messages.appNotReady}
+                      avatarDataUrl={profile?.avatarDataUrl}
+                      size="lg"
+                    />
+                    <div className="settings-profile-actions">
+                      <button
+                        type="button"
+                        className="button button-muted"
+                        onClick={handlePickAvatar}
+                        disabled={busy}
+                      >
+                        {messages.settingsProfileChangeAvatar}
+                      </button>
+                      {profile?.avatarDataUrl && (
+                        <button
+                          type="button"
+                          className="button button-ghost"
+                          onClick={() =>
+                            setProfile((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    avatarDataUrl: undefined
+                                  }
+                                : current
+                            )
+                          }
+                          disabled={busy}
+                        >
+                          {messages.settingsProfileRemoveAvatar}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="settings-profile-fields">
+                    <label className="settings-label" htmlFor="settings-profile-name">
+                      {messages.settingsProfileName}
+                    </label>
+                    <span className="settings-desc">{messages.settingsProfileNameDesc}</span>
+                    <input
+                      id="settings-profile-name"
+                      type="text"
+                      className="settings-input settings-profile-input"
+                      maxLength={64}
+                      value={profile?.name ?? ''}
+                      onChange={(event) =>
+                        setProfile((current) =>
+                          current
+                            ? {
+                                ...current,
+                                name: event.target.value
+                              }
+                            : current
+                        )
+                      }
+                    />
+                    <span className="settings-desc">{messages.settingsProfileAvatarDesc}</span>
+                    {profile?.avatarDataUrl && (
+                      <span className="settings-desc">
+                        {messages.settingsProfileAvatarReady}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section className="settings-section">
             <div className="settings-section-head">
@@ -494,4 +623,59 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       </div>
     </div>
   );
+}
+
+async function makeAvatarDataUrl(file: File): Promise<string> {
+  const imageUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(imageUrl);
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('failed to create avatar canvas');
+  }
+
+  let size = 72;
+  let quality = 0.82;
+  let output = '';
+  while (size >= 32) {
+    canvas.width = size;
+    canvas.height = size;
+    context.clearRect(0, 0, size, size);
+    const cropSize = Math.min(image.width, image.height);
+    const cropX = (image.width - cropSize) / 2;
+    const cropY = (image.height - cropSize) / 2;
+    context.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, size, size);
+    output = canvas.toDataURL('image/webp', quality);
+    if (output.length <= 950) {
+      return output;
+    }
+    size -= 8;
+    quality = Math.max(0.55, quality - 0.08);
+  }
+
+  return output;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('failed to read avatar image'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('failed to read avatar image'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('failed to decode avatar image'));
+    image.src = src;
+  });
 }

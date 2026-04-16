@@ -12,6 +12,8 @@ const IDENTITY_FILE_MODE = 0o600;
 export interface DeviceIdentity {
   deviceId: string;
   name: string;
+  avatarDataUrl?: string;
+  profileRevision: number;
   trustFingerprint: string;
   trustPublicKey: string;
   trustPrivateKey: string;
@@ -20,6 +22,8 @@ export interface DeviceIdentity {
 interface PersistedDeviceIdentity {
   deviceId: string;
   name: string;
+  avatarDataUrl?: string;
+  profileRevision?: number;
   trustFingerprint: string;
   trustPublicKey: string;
   trustPrivateKey?: string;
@@ -56,6 +60,11 @@ export function loadOrCreateIdentity(userDataDir: string): DeviceIdentity {
         const identity: DeviceIdentity = {
           deviceId: parsed.deviceId,
           name: parsed.name,
+          avatarDataUrl: normalizeAvatarDataUrl(parsed.avatarDataUrl),
+          profileRevision:
+            typeof parsed.profileRevision === 'number' && Number.isFinite(parsed.profileRevision)
+              ? Math.max(1, Math.round(parsed.profileRevision))
+              : 1,
           trustFingerprint: keypair.fingerprint,
           trustPublicKey: keypair.publicKey,
           trustPrivateKey: keypair.privateKey
@@ -76,6 +85,8 @@ export function loadOrCreateIdentity(userDataDir: string): DeviceIdentity {
   const identity: DeviceIdentity = {
     deviceId: randomUUID(),
     name: hostname(),
+    avatarDataUrl: undefined,
+    profileRevision: 1,
     trustFingerprint: keypair.fingerprint,
     trustPublicKey: keypair.publicKey,
     trustPrivateKey: keypair.privateKey
@@ -90,6 +101,9 @@ function shouldPersistIdentity(
   storedPrivateKey: string | null,
   identity: DeviceIdentity
 ): boolean {
+  if (normalizeAvatarDataUrl(persisted.avatarDataUrl) !== normalizeAvatarDataUrl(identity.avatarDataUrl)) {
+    return true;
+  }
   if (storedPrivateKey !== identity.trustPrivateKey) {
     return true;
   }
@@ -132,6 +146,8 @@ function persistIdentity(identityPath: string, identity: DeviceIdentity): void {
   const persisted: PersistedDeviceIdentity = {
     deviceId: identity.deviceId,
     name: identity.name,
+    avatarDataUrl: normalizeAvatarDataUrl(identity.avatarDataUrl),
+    profileRevision: identity.profileRevision,
     trustFingerprint: identity.trustFingerprint,
     trustPublicKey: identity.trustPublicKey
   };
@@ -160,4 +176,28 @@ function tightenIdentityFilePermissions(identityPath: string): void {
   } catch {
     // Best effort only. Some platforms ignore POSIX mode changes.
   }
+}
+
+export function saveIdentityProfile(
+  userDataDir: string,
+  identity: DeviceIdentity,
+  profile: { name: string; avatarDataUrl?: string }
+): DeviceIdentity {
+  const normalizedName = profile.name.trim() || identity.name;
+  const normalizedAvatar = normalizeAvatarDataUrl(profile.avatarDataUrl);
+  if (identity.name !== normalizedName || identity.avatarDataUrl !== normalizedAvatar) {
+    identity.profileRevision += 1;
+  }
+  identity.name = normalizedName;
+  identity.avatarDataUrl = normalizedAvatar;
+  persistIdentity(join(userDataDir, 'identity.json'), identity);
+  return identity;
+}
+
+function normalizeAvatarDataUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

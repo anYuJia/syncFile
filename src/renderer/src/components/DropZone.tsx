@@ -1,10 +1,11 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
+
+import type { Device, PeerReachabilityStatus } from '@shared/types';
 import type { Messages } from '../i18n';
 import { formatBytes } from '../utils/format';
+import { Avatar } from './Avatar';
 
-/* ── Types ────────────────────────────────────────────────────── */
-
-interface PendingFile {
+export interface PendingFile {
   path: string;
   name: string;
   label: string;
@@ -18,11 +19,12 @@ type DataTransferItemWithEntry = DataTransferItem & {
 interface DropZoneProps {
   onSend: (filePaths: string[]) => void | Promise<void>;
   messages: Messages;
-  selectedDeviceName?: string | null;
-  selfDeviceName?: string | null;
+  selectedDevices: Array<Device & { isOnline?: boolean; reachability?: PeerReachabilityStatus; reachabilityError?: string }>;
+  selfDevice?: Device | null;
+  pendingFiles: PendingFile[];
+  onPendingFilesChange: (files: PendingFile[]) => void;
+  onRemoveRecipient: (deviceId: string) => void;
 }
-
-/* ── Helpers ──────────────────────────────────────────────────── */
 
 function fileToEntry(file: File): PendingFile | null {
   const ef = file as File & { path?: string };
@@ -32,9 +34,10 @@ function fileToEntry(file: File): PendingFile | null {
       : typeof window.syncFile.getPathForFile === 'function'
         ? window.syncFile.getPathForFile(file)
         : '') || '';
-  const relativePath = typeof file.webkitRelativePath === 'string' && file.webkitRelativePath.length > 0
-    ? file.webkitRelativePath
-    : file.name;
+  const relativePath =
+    typeof file.webkitRelativePath === 'string' && file.webkitRelativePath.length > 0
+      ? file.webkitRelativePath
+      : file.name;
 
   if (filePath.length > 0) {
     return { path: filePath, name: file.name, label: relativePath, size: file.size };
@@ -47,8 +50,6 @@ function extOf(name: string): string {
   return dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
 
-/* ── File type icon system ────────────────────────────────────── */
-
 type FileCategory = 'image' | 'video' | 'audio' | 'document' | 'code' | 'archive' | 'default';
 
 const EXT_MAP: Record<string, FileCategory> = {
@@ -57,7 +58,7 @@ const EXT_MAP: Record<string, FileCategory> = {
   mp3: 'audio', wav: 'audio', flac: 'audio', aac: 'audio', ogg: 'audio', wma: 'audio', m4a: 'audio',
   pdf: 'document', doc: 'document', docx: 'document', txt: 'document', md: 'document', rtf: 'document', xls: 'document', xlsx: 'document', ppt: 'document', pptx: 'document', csv: 'document',
   js: 'code', ts: 'code', jsx: 'code', tsx: 'code', py: 'code', go: 'code', rs: 'code', java: 'code', c: 'code', cpp: 'code', h: 'code', html: 'code', css: 'code', json: 'code', yaml: 'code', yml: 'code', xml: 'code', sh: 'code', sql: 'code',
-  zip: 'archive', tar: 'archive', gz: 'archive', rar: 'archive', '7z': 'archive', bz2: 'archive', xz: 'archive', dmg: 'archive', iso: 'archive',
+  zip: 'archive', tar: 'archive', gz: 'archive', rar: 'archive', '7z': 'archive', bz2: 'archive', xz: 'archive', dmg: 'archive', iso: 'archive'
 };
 
 const CATEGORY_COLORS: Record<FileCategory, string> = {
@@ -67,7 +68,7 @@ const CATEGORY_COLORS: Record<FileCategory, string> = {
   document: '#3b82f6',
   code: '#10b981',
   archive: '#eab308',
-  default: '#94a3b8',
+  default: '#94a3b8'
 };
 
 function FileIcon({ name }: { name: string }): JSX.Element {
@@ -82,7 +83,7 @@ function FileIcon({ name }: { name: string }): JSX.Element {
     document: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></>,
     code: <><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>,
     archive: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
-    default: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>,
+    default: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>
   }[cat];
 
   return (
@@ -94,36 +95,36 @@ function FileIcon({ name }: { name: string }): JSX.Element {
   );
 }
 
-/* ── Component ────────────────────────────────────────────────── */
-
 const INPUT_ID = 'dropzone-file-input';
 
 export function DropZone({
   onSend,
   messages,
-  selectedDeviceName,
-  selfDeviceName
+  selectedDevices,
+  selfDevice,
+  pendingFiles,
+  onPendingFilesChange,
+  onRemoveRecipient
 }: DropZoneProps): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
 
   const addPendingEntries = (entries: PendingFile[]): void => {
     if (entries.length === 0) {
       return;
     }
-    setPendingFiles((prev) => {
-      const existing = new Set(prev.map((file) => file.path));
-      return [...prev, ...entries.filter((entry) => !existing.has(entry.path))];
-    });
+    const existing = new Set(pendingFiles.map((file) => file.path));
+    onPendingFilesChange([...pendingFiles, ...entries.filter((entry) => !existing.has(entry.path))]);
   };
 
   const addFiles = (fileList: FileList): void => {
     const entries: PendingFile[] = [];
-    for (let i = 0; i < fileList.length; i++) {
+    for (let i = 0; i < fileList.length; i += 1) {
       const entry = fileToEntry(fileList[i]);
-      if (entry) entries.push(entry);
+      if (entry) {
+        entries.push(entry);
+      }
     }
     addPendingEntries(entries);
   };
@@ -135,7 +136,9 @@ export function DropZone({
 
   const handleDragLeave = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
     setIsDragActive(false);
   };
 
@@ -146,7 +149,9 @@ export function DropZone({
   };
 
   const handleFileInput = (event: ChangeEvent<HTMLInputElement>): void => {
-    if (event.target.files) addFiles(event.target.files);
+    if (event.target.files) {
+      addFiles(event.target.files);
+    }
     event.target.value = '';
   };
 
@@ -161,25 +166,30 @@ export function DropZone({
   const handleRemove = (event: MouseEvent, path: string): void => {
     event.preventDefault();
     event.stopPropagation();
-    setPendingFiles((prev) => prev.filter((f) => f.path !== path));
+    onPendingFilesChange(pendingFiles.filter((file) => file.path !== path));
   };
 
   const handleClearAll = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    setPendingFiles([]);
+    onPendingFilesChange([]);
   };
 
   const handleSend = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    if (pendingFiles.length === 0 || !selectedDeviceName) return;
-    const paths = pendingFiles.map((f) => f.path);
-    void Promise.resolve(onSend(paths)).then(() => setPendingFiles([]));
+    if (pendingFiles.length === 0 || selectedDevices.length === 0) {
+      return;
+    }
+    const paths = pendingFiles.map((file) => file.path);
+    void Promise.resolve(onSend(paths)).then(() => onPendingFilesChange([]));
   };
 
-  const canSend = pendingFiles.length > 0 && Boolean(selectedDeviceName);
   const hasFiles = pendingFiles.length > 0;
+  const canSend =
+    hasFiles &&
+    selectedDevices.some((device) => device.isOnline !== false && device.reachability !== 'unreachable');
+  const selectedDeviceNames = selectedDevices.map((device) => device.name).join(' · ');
 
   return (
     <div
@@ -188,7 +198,6 @@ export function DropZone({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         id={INPUT_ID}
@@ -208,6 +217,42 @@ export function DropZone({
           directory: ''
         } as unknown as Record<string, string>)}
       />
+
+      <div className="dz-recipient-strip">
+        <span className="dz-recipient-label">
+          {selectedDevices.length > 0
+            ? messages.dispatchTargetReady(selectedDevices.length === 1 ? selectedDevices[0].name : selectedDeviceNames)
+            : messages.dispatchTargetIdle}
+        </span>
+        {selectedDevices.length > 0 && (
+          <div className="dz-recipient-list">
+            {selectedDevices.map((device) => (
+              <button
+                key={device.deviceId}
+                type="button"
+                className={`dz-recipient-chip${device.isOnline === false ? ' is-offline' : ''}${device.reachability === 'unreachable' ? ' is-unreachable' : ''}`}
+                onClick={() => onRemoveRecipient(device.deviceId)}
+                title={device.name}
+              >
+                <Avatar name={device.name} avatarDataUrl={device.avatarDataUrl} size="sm" />
+                <span className="dz-recipient-chip-copy">
+                  <span className="dz-recipient-chip-name">{device.name}</span>
+                  <span className="dz-recipient-chip-status">
+                    {device.isOnline === false
+                      ? messages.recipientOfflineLabel
+                      : device.reachability === 'unreachable'
+                        ? messages.deviceReachabilityUnreachable
+                        : device.reachability === 'checking'
+                          ? messages.deviceReachabilityChecking
+                          : messages.deviceReachabilityReachable}
+                  </span>
+                </span>
+                <span className="dz-recipient-chip-remove" aria-hidden="true">×</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       {!hasFiles ? (
         <>
@@ -243,7 +288,7 @@ export function DropZone({
                   <button
                     type="button"
                     className="dz-file-tile-remove"
-                    onClick={(e) => handleRemove(e, file.path)}
+                    onClick={(event) => handleRemove(event, file.path)}
                     title={messages.dropZoneRemoveFile}
                     aria-label={`${messages.dropZoneRemoveFile} ${file.name}`}
                   >
@@ -310,8 +355,8 @@ export function DropZone({
                 </button>
               )}
             </span>
-            {selectedDeviceName && selfDeviceName ? (
-              <span className="dz-send-bar-route">{selfDeviceName} → {selectedDeviceName}</span>
+            {selectedDevices.length > 0 && selfDevice ? (
+              <span className="dz-send-bar-route">{selfDevice.name} → {selectedDeviceNames}</span>
             ) : (
               <span className="dz-send-bar-hint">{messages.dropZoneSelectDevice}</span>
             )}
@@ -346,7 +391,7 @@ async function collectDataTransferEntries(dataTransfer: DataTransfer): Promise<P
 
 function collectFileEntries(fileList: FileList): PendingFile[] {
   const entries: PendingFile[] = [];
-  for (let i = 0; i < fileList.length; i++) {
+  for (let i = 0; i < fileList.length; i += 1) {
     const entry = fileToEntry(fileList[i]);
     if (entry) {
       entries.push(entry);

@@ -1,11 +1,15 @@
-import type { Device } from '@shared/types';
+import type { Device, DeviceReachability } from '@shared/types';
 import type { Messages } from '../i18n';
+import { Avatar } from './Avatar';
 
 interface DeviceListProps {
   devices: Device[];
-  selectedDeviceId: string | null;
+  selectedDeviceIds: string[];
+  focusedDeviceId: string | null;
+  reachabilityByDeviceId?: Record<string, DeviceReachability>;
   trustedDeviceKeys?: Set<string>;
-  onSelect: (deviceId: string) => void;
+  onToggleSelect: (deviceId: string) => void;
+  onFocusDevice: (deviceId: string) => void;
   onRefresh?: () => void | Promise<void>;
   messages: Messages;
 }
@@ -19,9 +23,12 @@ function formatPlatform(platform: string): string {
 
 export function DeviceList({
   devices,
-  selectedDeviceId,
+  selectedDeviceIds,
+  focusedDeviceId,
+  reachabilityByDeviceId,
   trustedDeviceKeys,
-  onSelect,
+  onToggleSelect,
+  onFocusDevice,
   onRefresh,
   messages
 }: DeviceListProps): JSX.Element {
@@ -45,55 +52,65 @@ export function DeviceList({
   }
 
   return (
-    <ul className="device-list" role="listbox" aria-label={messages.onlineDevicesAriaLabel}>
+    <ul className="device-list" role="listbox" aria-label={messages.onlineDevicesAriaLabel} aria-multiselectable="true">
       {devices.map((device, index) => {
-        const selected = device.deviceId === selectedDeviceId;
+        const selected = selectedDeviceIds.includes(device.deviceId);
         const trusted = trustedDeviceKeys?.has(`${device.deviceId}:${device.trustFingerprint}`) ?? false;
+        const reachability = reachabilityByDeviceId?.[device.deviceId];
         const optionId = `device-option-${device.deviceId}`;
-        const moveSelection = (targetIndex: number): void => {
+        const moveFocus = (targetIndex: number): void => {
           const nextDevice = devices[targetIndex];
           if (!nextDevice) {
             return;
           }
-          onSelect(nextDevice.deviceId);
+          onFocusDevice(nextDevice.deviceId);
           const nextElement = document.getElementById(`device-option-${nextDevice.deviceId}`);
           if (nextElement instanceof HTMLButtonElement) {
             nextElement.focus();
           }
         };
+
         return (
           <li key={device.deviceId}>
             <button
               id={optionId}
               type="button"
               className={`device-item${selected ? ' is-selected' : ''}`}
-              onClick={() => onSelect(device.deviceId)}
+              onClick={() => {
+                onFocusDevice(device.deviceId);
+                onToggleSelect(device.deviceId);
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault();
-                  moveSelection(Math.min(devices.length - 1, index + 1));
+                  moveFocus(Math.min(devices.length - 1, index + 1));
                 } else if (event.key === 'ArrowUp') {
                   event.preventDefault();
-                  moveSelection(Math.max(0, index - 1));
+                  moveFocus(Math.max(0, index - 1));
                 } else if (event.key === 'Home') {
                   event.preventDefault();
-                  moveSelection(0);
+                  moveFocus(0);
                 } else if (event.key === 'End') {
                   event.preventDefault();
-                  moveSelection(devices.length - 1);
+                  moveFocus(devices.length - 1);
+                } else if (event.key === ' ' || event.key === 'Enter') {
+                  event.preventDefault();
+                  onToggleSelect(device.deviceId);
                 }
               }}
               role="option"
               aria-selected={selected}
-              tabIndex={selected || (selectedDeviceId === null && index === 0) ? 0 : -1}
+              tabIndex={device.deviceId === (focusedDeviceId ?? devices[0]?.deviceId) ? 0 : -1}
             >
               <span className="device-item-indicator" />
+              <Avatar name={device.name} avatarDataUrl={device.avatarDataUrl} size="md" />
 
               <span className="device-item-main">
                 <span className="device-item-row">
                   <span className="device-item-title">
                     <span className="device-item-name">{device.name}</span>
                     {trusted && <span className="device-item-trusted">{messages.trustedDeviceLabel}</span>}
+                    {selected && <span className="device-item-selected-tag">{messages.selectedRecipientLabel}</span>}
                   </span>
                   <span className="device-item-platform">{formatPlatform(device.platform)}</span>
                 </span>
@@ -102,6 +119,13 @@ export function DeviceList({
                 </span>
                 <span className="device-item-submeta">
                   ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint} · v{device.version}
+                </span>
+                <span className={`device-item-reachability${reachability?.status === 'unreachable' ? ' is-error' : ''}`}>
+                  {reachability?.status === 'checking'
+                    ? messages.deviceReachabilityChecking
+                    : reachability?.status === 'unreachable'
+                      ? messages.deviceReachabilityUnreachable
+                      : messages.deviceReachabilityReachable}
                 </span>
               </span>
             </button>

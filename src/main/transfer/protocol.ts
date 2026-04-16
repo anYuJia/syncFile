@@ -64,6 +64,19 @@ export interface PairResponseMessage {
   accepted: boolean;
 }
 
+export interface ProfileRequestMessage {
+  type: 'profile-request';
+}
+
+export interface ProfileResponseMessage {
+  type: 'profile-response';
+  deviceId: string;
+  name: string;
+  avatarDataUrl?: string;
+  hasAvatar: boolean;
+  profileRevision: number;
+}
+
 export type ProtocolMessage =
   | FileOfferMessage
   | FileAcceptMessage
@@ -71,7 +84,9 @@ export type ProtocolMessage =
   | FileCompleteMessage
   | FileCancelMessage
   | PairRequestMessage
-  | PairResponseMessage;
+  | PairResponseMessage
+  | ProfileRequestMessage
+  | ProfileResponseMessage;
 
 export function isFileOffer(msg: ProtocolMessage): msg is FileOfferMessage {
   return msg.type === 'file-offer';
@@ -99,4 +114,12 @@ export function isPairRequest(msg: ProtocolMessage): msg is PairRequestMessage {
 
 export function isPairResponse(msg: ProtocolMessage): msg is PairResponseMessage {
   return msg.type === 'pair-response';
+}
+
+export function isProfileRequest(msg: ProtocolMessage): msg is ProfileRequestMessage {
+  return msg.type === 'profile-request';
+}
+
+export function isProfileResponse(msg: ProtocolMessage): msg is ProfileResponseMessage {
+  return msg.type === 'profile-response';
 }

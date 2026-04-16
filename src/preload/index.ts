@@ -3,8 +3,11 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent, webUtils } from 'ele
 import { IpcChannels } from '../shared/ipc-channels';
 import type {
   Device,
+  DeviceReachability,
   IncomingOffer,
+  PeerProfilePayload,
   PairRequest,
+  ProfilePayload,
   RejectReason,
   RuntimeLogEntry,
   SandboxLocationInfo,
@@ -29,11 +32,19 @@ const api = {
   getSelfDevice: (): Promise<Device> => ipcRenderer.invoke(IpcChannels.GetSelfDevice),
   getTransferHistory: (): Promise<TransferRecord[]> => ipcRenderer.invoke(IpcChannels.GetTransferHistory),
   getPendingOffers: (): Promise<IncomingOffer[]> => ipcRenderer.invoke(IpcChannels.GetPendingOffers),
+  probeDevice: (deviceId: string): Promise<DeviceReachability> => ipcRenderer.invoke(IpcChannels.ProbeDevice, deviceId),
+  fetchPeerProfile: (deviceId: string): Promise<PeerProfilePayload | null> =>
+    ipcRenderer.invoke(IpcChannels.FetchPeerProfile, deviceId),
   pairDevice: (deviceId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.PairDevice, deviceId),
   acceptPairRequest: (requestId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.AcceptPairRequest, requestId),
   rejectPairRequest: (requestId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.RejectPairRequest, requestId),
-  sendFile: (deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> =>
-    ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId),
+  sendFile: (
+    deviceId: string,
+    filePath: string,
+    existingTransferId?: string,
+    batchMeta?: { batchId?: string; batchLabel?: string }
+  ): Promise<TransferId> =>
+    ipcRenderer.invoke(IpcChannels.SendFile, deviceId, filePath, existingTransferId, batchMeta),
   pauseTransfer: (transferId: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.PauseTransfer, transferId),
   cancelTransfer: (transferId: string): Promise<void> =>
@@ -56,6 +67,8 @@ const api = {
   getSettings: (): Promise<SettingsPayload> => ipcRenderer.invoke(IpcChannels.GetSettings),
   saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
     ipcRenderer.invoke(IpcChannels.SaveSettings, settings),
+  saveProfile: (profile: ProfilePayload): Promise<Device> =>
+    ipcRenderer.invoke(IpcChannels.SaveProfile, profile),
   getRuntimeLogs: (): Promise<RuntimeLogEntry[]> => ipcRenderer.invoke(IpcChannels.GetRuntimeLogs),
   clearRuntimeLogs: (): Promise<void> => ipcRenderer.invoke(IpcChannels.ClearRuntimeLogs),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
@@ -76,7 +89,9 @@ const api = {
   onPairRequestRemoved: (callback: (requestId: string) => void): (() => void) =>
     subscribe(IpcChannels.PairRequestRemoved, callback),
   onRuntimeLog: (callback: (entry: RuntimeLogEntry) => void): (() => void) =>
-    subscribe(IpcChannels.RuntimeLogEntry, callback)
+    subscribe(IpcChannels.RuntimeLogEntry, callback),
+  onSelfDeviceUpdated: (callback: (device: Device) => void): (() => void) =>
+    subscribe(IpcChannels.SelfDeviceUpdated, callback)
 };
 
 export type SyncFileAPI = typeof api;

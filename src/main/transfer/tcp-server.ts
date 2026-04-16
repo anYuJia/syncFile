@@ -12,6 +12,7 @@ import {
   isFileCancel,
   isFileComplete,
   isFileOffer,
+  isProfileRequest,
   isPairRequest,
   type FileCancelMessage,
   type FileCompleteMessage,
@@ -27,7 +28,10 @@ const DEFAULT_DECISION_TIMEOUT_MS = 180000;
 
 export interface TcpServerOptions {
   sandbox: Sandbox;
-  selfDevice: SecureIdentity;
+  selfDevice: SecureIdentity & {
+    avatarDataUrl?: string;
+    profileRevision?: number;
+  };
 }
 
 export interface IncomingOfferInfo {
@@ -578,6 +582,22 @@ export class TcpServer extends EventEmitter {
               }
             };
             this.emit('pair-request', first, pairResponder);
+            return;
+          }
+          if (isProfileRequest(first)) {
+            settled = true;
+            phase = 'completed';
+            socket.write(
+              encodeMessage({
+                type: 'profile-response',
+                deviceId: this.options.selfDevice.deviceId,
+                name: this.options.selfDevice.name,
+                avatarDataUrl: this.options.selfDevice.avatarDataUrl,
+                hasAvatar: Boolean(this.options.selfDevice.avatarDataUrl),
+                profileRevision: this.options.selfDevice.profileRevision ?? 1
+              }),
+              () => socket.end()
+            );
             return;
           }
           if (!isFileOffer(first)) {

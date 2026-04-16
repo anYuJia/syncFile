@@ -4,6 +4,9 @@
 export interface Device {
   deviceId: string;
   name: string;
+  avatarDataUrl?: string;
+  hasAvatar?: boolean;
+  profileRevision?: number;
   trustFingerprint: string;
   trustPublicKey: string;
   host: string;
@@ -15,6 +18,15 @@ export interface Device {
 
 export interface TransferId {
   value: string;
+}
+
+export type PeerReachabilityStatus = 'unknown' | 'checking' | 'reachable' | 'unreachable';
+
+export interface DeviceReachability {
+  deviceId: string;
+  status: PeerReachabilityStatus;
+  checkedAt: number;
+  error?: string;
 }
 
 export type TransferDirection = 'send' | 'receive';
@@ -30,6 +42,8 @@ export type TransferStatus =
 
 export interface TransferProgress {
   transferId: string;
+  batchId?: string;
+  batchLabel?: string;
   direction: TransferDirection;
   fileName: string;
   fileSize: number;
@@ -94,6 +108,19 @@ export interface TrustedDevice {
   trustFingerprint: string;
   trustPublicKey: string;
   trustedAt: number;
+}
+
+export interface ProfilePayload {
+  name: string;
+  avatarDataUrl?: string;
+}
+
+export interface PeerProfilePayload {
+  deviceId: string;
+  name: string;
+  avatarDataUrl?: string;
+  hasAvatar: boolean;
+  profileRevision: number;
 }
 
 export interface Settings {
