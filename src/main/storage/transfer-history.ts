@@ -5,16 +5,24 @@ import { dirname, join } from 'path';
 import type { TransferRecord, TransferProgress } from '../../shared/types';
 
 const MAX_HISTORY = 200;
+const DEFAULT_ACTIVE_PROGRESS_PERSIST_MS = 1500;
+
+interface TransferHistoryStoreOptions {
+  activeProgressPersistMs?: number;
+}
 
 export class TransferHistoryStore {
   private readonly configPath: string;
+  private readonly activeProgressPersistMs: number;
   private readonly records = new Map<string, TransferRecord>();
   private persistTimer: NodeJS.Timeout | null = null;
   private persistPromise: Promise<void> | null = null;
   private persistQueued = false;
 
-  constructor(userDataDir: string) {
+  constructor(userDataDir: string, options: TransferHistoryStoreOptions = {}) {
     this.configPath = join(userDataDir, 'transfer-history.json');
+    this.activeProgressPersistMs =
+      options.activeProgressPersistMs ?? DEFAULT_ACTIVE_PROGRESS_PERSIST_MS;
     for (const record of this.load()) {
       this.records.set(record.transferId, record);
     }
@@ -49,8 +57,13 @@ export class TransferHistoryStore {
     };
     this.records.set(record.transferId, record);
     this.trim();
-    if (progress.status === 'pending' || progress.status === 'in-progress') {
-      this.schedulePersist();
+
+    if (isActiveTransferStatus(progress.status)) {
+      if (!previous || previous.status !== progress.status) {
+        void this.flush().catch(() => undefined);
+      } else {
+        this.schedulePersist(this.activeProgressPersistMs);
+      }
     } else {
       void this.flush().catch(() => undefined);
     }
@@ -136,7 +149,7 @@ export class TransferHistoryStore {
     }
   }
 
-  private schedulePersist(): void {
+  private schedulePersist(delayMs: number): void {
     if (this.persistTimer) {
       return;
     }
@@ -144,7 +157,7 @@ export class TransferHistoryStore {
       this.persistTimer = null;
       this.persistQueued = true;
       void this.ensurePersisting().catch(() => undefined);
-    }, 100);
+    }, delayMs);
   }
 
   private ensurePersisting(): Promise<void> {
@@ -181,6 +194,10 @@ export class TransferHistoryStore {
       return [];
     }
   }
+}
+
+function isActiveTransferStatus(status: TransferProgress['status']): boolean {
+  return status === 'pending' || status === 'in-progress';
 }
 
 function isTransferRecord(value: unknown): value is TransferRecord {

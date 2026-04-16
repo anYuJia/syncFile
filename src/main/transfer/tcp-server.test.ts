@@ -116,6 +116,63 @@ describe('TcpServer', () => {
     expect(progressEvents).toContain(5);
   });
 
+  it('fails integrity verification without rescanning the completed file', async () => {
+    const port = await server.listen(0);
+
+    server.on('incoming-offer', (_offer, respond) => {
+      respond.accept();
+    });
+
+    const errorPromise = new Promise<Error>((resolve) => {
+      server.once('transfer-error', (info) => resolve(info.error));
+    });
+
+    const rawSocket = connect(port, '127.0.0.1');
+    await new Promise<void>((resolve) => rawSocket.once('connect', resolve));
+    const socket = await secureConnect(rawSocket, {
+      selfDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey,
+        trustPrivateKey: senderIdentity.privateKey
+      },
+      expectedPeer: serverPeer
+    });
+
+    const unsignedOffer: Omit<FileOfferMessage, 'signature'> = {
+      type: 'file-offer',
+      version: 1,
+      fileId: 'f1-bad-hash',
+      fileName: 'bad.txt',
+      fileSize: 5,
+      sha256: createHash('sha256').update('other').digest('hex'),
+      fromDevice: {
+        deviceId: 'dev-a',
+        name: 'A',
+        trustFingerprint: senderIdentity.fingerprint,
+        trustPublicKey: senderIdentity.publicKey
+      }
+    };
+    const offer: FileOfferMessage = {
+      ...unsignedOffer,
+      signature: signFileOffer(unsignedOffer, senderIdentity.privateKey)
+    };
+
+    socket.write(encodeMessage(offer));
+
+    await new Promise<void>((resolve) => {
+      socket.once('data', () => resolve());
+    });
+
+    socket.write(Buffer.from('hello'));
+    socket.write(encodeMessage({ type: 'file-complete', fileId: 'f1-bad-hash', bytesSent: 5 }));
+
+    await expect(errorPromise).resolves.toMatchObject({
+      message: 'received file failed integrity verification'
+    });
+  });
+
   it('rejects the offer and ends the connection', async () => {
     const port = await server.listen(0);
     const decoder = new MessageDecoder();

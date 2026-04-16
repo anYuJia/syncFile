@@ -1,9 +1,9 @@
-import { createWriteStream, rmSync, type WriteStream } from 'fs';
+import { createHash, type Hash } from 'crypto';
+import { createReadStream, createWriteStream, rmSync, type WriteStream } from 'fs';
 import { createServer, type Server, type Socket } from 'net';
 import { EventEmitter } from 'events';
 
 import type { Sandbox } from '../storage/sandbox';
-import { sha256File } from './file-hash';
 import { secureAccept, type SecureIdentity, type SecureSocket } from './secure-channel';
 import { verifyFileOffer, verifyPairRequest } from '../security/trust';
 import { MessageDecoder, encodeMessage } from './codec';
@@ -122,6 +122,7 @@ export declare interface TcpServer {
 type ConnectionPhase =
   | 'awaiting-offer'
   | 'awaiting-decision'
+  | 'preparing-receive'
   | 'receiving-file'
   | 'awaiting-complete'
   | 'completed'
@@ -212,6 +213,7 @@ export class TcpServer extends EventEmitter {
     let phase: ConnectionPhase = 'awaiting-offer';
     let offer: FileOfferMessage | null = null;
     let writeStream: WriteStream | null = null;
+    let fileHash: Hash | null = null;
     let partialPath: string | null = null;
     let finalPath: string | null = null;
     let bytesReceived = 0;
@@ -262,43 +264,49 @@ export class TcpServer extends EventEmitter {
       phase = 'completed';
       const finalOffer = offer;
       writeStream.end(() => {
-        this.activeReceives.delete(finalOffer.fileId);
-        const savedPath = this.options.sandbox.completeIncomingResume(finalOffer.fileId);
-        void sha256File(savedPath)
-          .then((digest) => {
-            if (finalOffer.sha256 && finalOffer.sha256 !== digest) {
-              rmSync(savedPath, { force: true });
-              settled = true;
-              this.emit('transfer-error', {
-                error: new Error('received file failed integrity verification'),
-                offerId: finalOffer.fileId,
-                fileName: finalOffer.fileName,
-                fileSize: finalOffer.fileSize,
-                fromDevice: finalOffer.fromDevice,
-                bytesReceived
-              });
-              return;
-            }
-            settled = true;
-            this.emit('transfer-complete', {
-              offerId: finalOffer.fileId,
-              savedPath,
-              bytesReceived,
-              fromDevice: finalOffer.fromDevice
-            });
-          })
-          .catch((error) => {
+        try {
+          const digest = fileHash?.digest('hex');
+          fileHash = null;
+          this.activeReceives.delete(finalOffer.fileId);
+          const savedPath = this.options.sandbox.completeIncomingResume(finalOffer.fileId);
+          if (finalOffer.sha256 && finalOffer.sha256 !== digest) {
             rmSync(savedPath, { force: true });
             settled = true;
             this.emit('transfer-error', {
-              error: error as Error,
+              error: new Error('received file failed integrity verification'),
               offerId: finalOffer.fileId,
               fileName: finalOffer.fileName,
               fileSize: finalOffer.fileSize,
               fromDevice: finalOffer.fromDevice,
               bytesReceived
             });
+            return;
+          }
+          settled = true;
+          this.emit('transfer-complete', {
+            offerId: finalOffer.fileId,
+            savedPath,
+            bytesReceived,
+            fromDevice: finalOffer.fromDevice
           });
+        } catch (error) {
+          if (finalOffer.fileId) {
+            this.activeReceives.delete(finalOffer.fileId);
+          }
+          if (finalPath) {
+            rmSync(finalPath, { force: true });
+          }
+          this.options.sandbox.discardIncomingResume(finalOffer.fileId, true);
+          settled = true;
+          this.emit('transfer-error', {
+            error: error as Error,
+            offerId: finalOffer.fileId,
+            fileName: finalOffer.fileName,
+            fileSize: finalOffer.fileSize,
+            fromDevice: finalOffer.fromDevice,
+            bytesReceived
+          });
+        }
       });
     };
 
@@ -353,11 +361,12 @@ export class TcpServer extends EventEmitter {
     };
 
     const writeFileBytes = (chunk: Buffer): void => {
-      if (!writeStream) {
-        fail(new Error('write stream not initialized'));
+      if (!writeStream || !fileHash) {
+        fail(new Error('receive stream not initialized'));
         return;
       }
 
+      fileHash.update(chunk);
       const ok = writeStream.write(chunk);
       this.options.sandbox.markUsageDirty();
       if (!ok) {
@@ -442,28 +451,44 @@ export class TcpServer extends EventEmitter {
         partialPath = prepared.partialPath;
         finalPath = prepared.finalPath;
         bytesReceived = prepared.bytesReceived;
-        writeStream = createWriteStream(partialPath, { flags: bytesReceived > 0 ? 'a' : 'w' });
-        writeStream.once('error', fail);
-        this.activeReceives.set(offer.fileId, {
-          socket,
-          writeStream,
-          partialPath,
-          finalPath,
-          bytesReceived,
-          fromDevice: offer.fromDevice,
-          fileName: offer.fileName,
-          fileSize: offer.fileSize
-        });
+        phase = 'preparing-receive';
+        void seedHashForResume(prepared.partialPath, bytesReceived)
+          .then((nextHash) => {
+            if (!offer || settled || phase !== 'preparing-receive') {
+              return;
+            }
 
-        socket.write(
-          encodeMessage({
-            type: 'file-accept',
-            fileId: offer.fileId,
-            startOffset: bytesReceived
+            fileHash = nextHash;
+            writeStream = createWriteStream(prepared.partialPath, { flags: bytesReceived > 0 ? 'a' : 'w' });
+            writeStream.once('error', fail);
+            this.activeReceives.set(offer.fileId, {
+              socket,
+              writeStream,
+              partialPath: prepared.partialPath,
+              finalPath: prepared.finalPath,
+              bytesReceived,
+              fromDevice: offer.fromDevice,
+              fileName: offer.fileName,
+              fileSize: offer.fileSize
+            });
+
+            socket.write(
+              encodeMessage({
+                type: 'file-accept',
+                fileId: offer.fileId,
+                startOffset: bytesReceived
+              }),
+              (error?: Error | null) => {
+                if (error) {
+                  fail(error);
+                  return;
+                }
+                phase = 'receiving-file';
+                flushBufferedData();
+              }
+            );
           })
-        );
-        phase = 'receiving-file';
-        flushBufferedData();
+          .catch((error) => fail(error as Error));
       },
       reject: (reason) => {
         if (!offer || phase !== 'awaiting-decision') {
@@ -612,6 +637,11 @@ export class TcpServer extends EventEmitter {
         return;
       }
 
+      if (phase === 'preparing-receive') {
+        bufferedData = Buffer.concat([bufferedData, chunk]);
+        return;
+      }
+
       try {
         processData(chunk);
       } catch (error) {
@@ -722,4 +752,20 @@ export class TcpServer extends EventEmitter {
     this.recentPairRequests.set(requestId, timestamp);
     return false;
   }
+}
+
+function seedHashForResume(partialPath: string, existingBytes: number): Promise<Hash> {
+  const hash = createHash('sha256');
+  if (existingBytes <= 0) {
+    return Promise.resolve(hash);
+  }
+
+  return new Promise<Hash>((resolve, reject) => {
+    const stream = createReadStream(partialPath);
+    stream.on('data', (chunk) => {
+      hash.update(chunk);
+    });
+    stream.once('end', () => resolve(hash));
+    stream.once('error', reject);
+  });
 }

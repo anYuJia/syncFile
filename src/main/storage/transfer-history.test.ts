@@ -161,4 +161,75 @@ describe('TransferHistoryStore', () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0].transferId).toBe('recv-1');
   });
+
+  it('checkpoints active progress less frequently than UI updates', async () => {
+    const store = new TransferHistoryStore(root, { activeProgressPersistMs: 30 });
+    store.upsert({
+      transferId: 't3',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 0,
+      peerDeviceName: 'Peer',
+      status: 'pending'
+    });
+    await store.flush();
+
+    store.upsert({
+      transferId: 't3',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 40,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+    await store.flush();
+
+    store.upsert({
+      transferId: 't3',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 60,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+
+    const beforeCheckpoint = new TransferHistoryStore(root);
+    expect(beforeCheckpoint.get('t3')?.bytesTransferred).toBe(40);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const afterCheckpoint = new TransferHistoryStore(root);
+    expect(afterCheckpoint.get('t3')?.bytesTransferred).toBe(60);
+  });
+
+  it('flushes the latest active progress immediately when explicitly requested', async () => {
+    const store = new TransferHistoryStore(root, { activeProgressPersistMs: 10_000 });
+    store.upsert({
+      transferId: 't4',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 0,
+      peerDeviceName: 'Peer',
+      status: 'pending'
+    });
+    await store.flush();
+
+    store.upsert({
+      transferId: 't4',
+      direction: 'send',
+      fileName: 'demo.txt',
+      fileSize: 100,
+      bytesTransferred: 75,
+      peerDeviceName: 'Peer',
+      status: 'in-progress'
+    });
+    await store.flush();
+
+    const reloaded = new TransferHistoryStore(root);
+    expect(reloaded.get('t4')?.bytesTransferred).toBe(75);
+  });
 });
