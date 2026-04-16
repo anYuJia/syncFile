@@ -7,6 +7,7 @@ import type { ReadStream } from 'fs';
 
 import { MessageDecoder, encodeMessage } from './codec';
 import { signFileOffer, signPairRequest } from '../security/trust';
+import { logError, logInfo, logWarn } from '../logging/runtime-log';
 import { secureConnect, type ExpectedPeerIdentity, type SecureIdentity, type SecureSocket } from './secure-channel';
 import {
   isFileAccept,
@@ -18,7 +19,8 @@ import {
 } from './protocol';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 8000;
-const DEFAULT_RESPONSE_TIMEOUT_MS = 15000;
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 15000;
+const DEFAULT_RESPONSE_TIMEOUT_MS = 180000;
 const DEFAULT_IDLE_TIMEOUT_MS = 120000;
 
 export interface TcpClientOptions {
@@ -30,6 +32,7 @@ export interface TcpClientOptions {
     trustPrivateKey: string;
   };
   connectTimeoutMs?: number;
+  handshakeTimeoutMs?: number;
   responseTimeoutMs?: number;
   idleTimeoutMs?: number;
 }
@@ -154,13 +157,18 @@ export class TcpClient extends EventEmitter {
         params.port,
         this.options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS
       );
+      logInfo('transfer', 'connected to peer tcp socket', {
+        fileId,
+        fileName,
+        host: params.host,
+        port: params.port
+      });
       const socket = await secureConnect(rawSocket, {
         selfDevice: this.options.selfDevice as SecureIdentity,
         expectedPeer: params.peer,
-        timeoutMs: this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
+        timeoutMs: this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
       });
       activeTransfer.socket = socket;
-      socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
 
       if (activeTransfer.intent) {
         socket.destroy();
@@ -169,10 +177,16 @@ export class TcpClient extends EventEmitter {
 
       await new Promise<void>((resolve, reject) => {
         let settled = false;
+        const responseTimeoutMs = this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
         let responseTimer: NodeJS.Timeout | null = setTimeout(() => {
           responseTimer = null;
+          logWarn('transfer', 'peer did not respond to file offer before response timeout', {
+            fileId,
+            fileName,
+            timeoutMs: responseTimeoutMs
+          });
           fail(new Error('peer did not respond in time'));
-        }, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
+        }, responseTimeoutMs);
 
         const cleanup = (): void => {
           if (responseTimer) {
@@ -207,6 +221,12 @@ export class TcpClient extends EventEmitter {
             for (const message of messages) {
               if (isFileAccept(message) && message.fileId === fileId) {
                 activeTransfer.accepted = true;
+                socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
+                logInfo('transfer', 'peer accepted file offer', {
+                  fileId,
+                  fileName,
+                  startOffset: message.startOffset ?? 0
+                });
                 if (responseTimer) {
                   clearTimeout(responseTimer);
                   responseTimer = null;
@@ -230,11 +250,19 @@ export class TcpClient extends EventEmitter {
               }
 
               if (isFileCancel(message) && message.fileId === fileId) {
+                logWarn('transfer', 'peer cancelled file transfer before completion', {
+                  fileId,
+                  reason: message.reason
+                });
                 fail(new Error(`peer cancelled transfer: ${message.reason}`));
                 return;
               }
 
               if (isFileReject(message) && message.fileId === fileId) {
+                logWarn('transfer', 'peer rejected file offer', {
+                  fileId,
+                  reason: message.reason
+                });
                 fail(new Error(`peer declined transfer: ${message.reason}`));
                 return;
               }
@@ -248,6 +276,7 @@ export class TcpClient extends EventEmitter {
         };
 
         const onError = (error: Error): void => {
+          logError('transfer', 'socket error during outbound transfer', error);
           fail(error);
         };
 
@@ -271,6 +300,12 @@ export class TcpClient extends EventEmitter {
         socket.once('error', onError);
         socket.once('close', onClose);
         socket.once('timeout', onTimeout);
+        socket.setTimeout(responseTimeoutMs);
+        logInfo('transfer', 'sent file offer and waiting for peer response', {
+          fileId,
+          fileName,
+          responseTimeoutMs
+        });
         socket.write(encodeMessage(offer));
       });
     } finally {
@@ -293,7 +328,7 @@ export class TcpClient extends EventEmitter {
     const socket = await secureConnect(rawSocket, {
       selfDevice: this.options.selfDevice as SecureIdentity,
       expectedPeer: peer,
-      timeoutMs: this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
+      timeoutMs: this.options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
     });
     const decoder = new MessageDecoder();
     const unsignedRequest: Omit<PairRequestMessage, 'signature'> = {
@@ -310,10 +345,15 @@ export class TcpClient extends EventEmitter {
 
     return await new Promise<boolean>((resolve, reject) => {
       let settled = false;
+      const responseTimeoutMs = this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
       let responseTimer: NodeJS.Timeout | null = setTimeout(() => {
         responseTimer = null;
+        logWarn('pairing', 'peer did not respond to pair request before response timeout', {
+          requestId: request.requestId,
+          timeoutMs: responseTimeoutMs
+        });
         fail(new Error('pairing timed out'));
-      }, this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS);
+      }, responseTimeoutMs);
 
       const cleanup = (): void => {
         if (responseTimer) {
@@ -345,6 +385,10 @@ export class TcpClient extends EventEmitter {
               if (settled) {
                 return;
               }
+              logInfo('pairing', 'peer responded to pair request', {
+                requestId: request.requestId,
+                accepted: message.accepted
+              });
               settled = true;
               cleanup();
               socket.end(() => resolve(message.accepted));
@@ -357,6 +401,7 @@ export class TcpClient extends EventEmitter {
       };
 
       const onError = (error: Error): void => {
+        logError('pairing', 'socket error during pair request', error);
         fail(error);
       };
 
@@ -370,11 +415,15 @@ export class TcpClient extends EventEmitter {
         fail(new Error('pairing timed out'));
       };
 
-      socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
+      socket.setTimeout(responseTimeoutMs);
       socket.on('data', onData);
       socket.once('error', onError);
       socket.once('close', onClose);
       socket.once('timeout', onTimeout);
+      logInfo('pairing', 'sent pair request and waiting for peer response', {
+        requestId: request.requestId,
+        responseTimeoutMs
+      });
       socket.write(encodeMessage(request));
     });
   }

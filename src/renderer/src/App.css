@@ -1554,6 +1554,10 @@ body {
   gap: 18px;
 }
 
+.receive-prompt-shell-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .receive-prompt-main {
   min-width: 0;
 }
@@ -1761,8 +1765,6 @@ body {
   font-family: 'SF Mono', 'Menlo', monospace;
 }
 
-/* ── Settings modal ────────────────────────────────────────────── */
-
 .topbar-icon-button {
   display: inline-flex;
   align-items: center;
@@ -1770,6 +1772,138 @@ body {
   padding: 6px;
   line-height: 1;
 }
+
+/* ── Runtime logs ─────────────────────────────────────────────── */
+
+.log-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.log-viewer-panel {
+  width: min(920px, calc(100vw - 36px));
+  height: min(720px, calc(100vh - 36px));
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-xl);
+  padding: 18px;
+  outline: none;
+}
+
+.log-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.log-viewer-header h2 {
+  margin: 2px 0 0;
+  font-size: 20px;
+  letter-spacing: -0.03em;
+}
+
+.log-viewer-kicker {
+  margin: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.log-viewer-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.log-viewer-list {
+  min-height: 0;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  padding: 10px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.log-viewer-empty {
+  margin: 0;
+  padding: 22px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.log-viewer-entry {
+  border-left: 3px solid var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.log-viewer-entry.is-info {
+  border-left-color: var(--accent);
+}
+
+.log-viewer-entry.is-warn {
+  border-left-color: #f59e0b;
+}
+
+.log-viewer-entry.is-error {
+  border-left-color: var(--danger);
+}
+
+.log-viewer-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 10px;
+}
+
+.log-viewer-entry-level {
+  color: var(--text-primary);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.log-viewer-entry-scope {
+  color: var(--accent);
+}
+
+.log-viewer-entry-message {
+  margin: 6px 0 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.log-viewer-entry-details {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── Settings modal ────────────────────────────────────────────── */
 
 .settings-overlay {
   position: fixed;
@@ -2351,6 +2485,16 @@ body {
   .transfer-detail-dialog {
     width: min(100%, calc(100vw - 24px));
     padding: 16px;
+  }
+
+  .log-viewer-overlay {
+    padding: 12px;
+  }
+
+  .log-viewer-panel {
+    width: min(100%, calc(100vw - 24px));
+    height: min(100%, calc(100vh - 24px));
+    padding: 14px;
   }
 
   .receive-prompt-actions,

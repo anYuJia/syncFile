@@ -41,7 +41,7 @@ export function ReceivePrompt({
         aria-label={messages.incomingFileRequestAriaLabel}
         tabIndex={-1}
       >
-        <div className="receive-prompt-shell">
+        <div className={`receive-prompt-shell${offers.length > 1 ? '' : ' receive-prompt-shell-single'}`}>
           {offers.length > 1 && (
             <aside className="receive-prompt-queue-list" aria-label={messages.receivePromptQueueTitle}>
               <div className="receive-prompt-queue-head">

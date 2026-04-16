@@ -78,6 +78,12 @@ export interface Messages {
   taskRetryVisible: string;
   taskCancelVisible: string;
   requestsInbox: string;
+  logs: string;
+  logViewerTitle: string;
+  logViewerEmpty: string;
+  logViewerRefresh: string;
+  logViewerClear: string;
+  logViewerCopy: string;
   transferLocalPath: string;
   transferPeerId: string;
   pairDevice: string;
@@ -257,6 +263,12 @@ const zh: Messages = {
   taskRetryVisible: '重试可见异常任务',
   taskCancelVisible: '取消可见进行中任务',
   requestsInbox: '请求收件箱',
+  logs: '日志',
+  logViewerTitle: '运行日志',
+  logViewerEmpty: '暂无日志。执行发现、配对或传输后会在这里显示。',
+  logViewerRefresh: '刷新',
+  logViewerClear: '清空日志',
+  logViewerCopy: '复制日志',
   transferLocalPath: '本地路径',
   transferPeerId: '设备 ID',
   pairDevice: '配对',
@@ -434,6 +446,12 @@ const en: Messages = {
   taskRetryVisible: 'Retry visible issues',
   taskCancelVisible: 'Cancel visible active',
   requestsInbox: 'Requests inbox',
+  logs: 'Logs',
+  logViewerTitle: 'Runtime logs',
+  logViewerEmpty: 'No logs yet. Discovery, pairing, and transfer events will appear here.',
+  logViewerRefresh: 'Refresh',
+  logViewerClear: 'Clear logs',
+  logViewerCopy: 'Copy logs',
   transferLocalPath: 'Local path',
   transferPeerId: 'Peer ID',
   pairDevice: 'Pair',

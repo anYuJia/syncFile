@@ -27,6 +27,8 @@ export const IpcChannels = {
   SelectFile: 'syncfile:select-file',
   GetSettings: 'syncfile:get-settings',
   SaveSettings: 'syncfile:save-settings',
+  GetRuntimeLogs: 'syncfile:get-runtime-logs',
+  ClearRuntimeLogs: 'syncfile:clear-runtime-logs',
 
   // Main -> Renderer (send)
   DeviceOnline: 'syncfile:device-online',
@@ -36,7 +38,8 @@ export const IpcChannels = {
   TransferHistoryReset: 'syncfile:transfer-history-reset',
   IncomingOffer: 'syncfile:incoming-offer',
   IncomingPairRequest: 'syncfile:incoming-pair-request',
-  PairRequestRemoved: 'syncfile:pair-request-removed'
+  PairRequestRemoved: 'syncfile:pair-request-removed',
+  RuntimeLogEntry: 'syncfile:runtime-log-entry'
 } as const;
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels];

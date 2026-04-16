@@ -6,6 +6,7 @@ import type {
   IncomingOffer,
   PairRequest,
   RejectReason,
+  RuntimeLogEntry,
   SandboxLocationInfo,
   Settings,
   SettingsPayload,
@@ -55,6 +56,8 @@ const api = {
   getSettings: (): Promise<SettingsPayload> => ipcRenderer.invoke(IpcChannels.GetSettings),
   saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
     ipcRenderer.invoke(IpcChannels.SaveSettings, settings),
+  getRuntimeLogs: (): Promise<RuntimeLogEntry[]> => ipcRenderer.invoke(IpcChannels.GetRuntimeLogs),
+  clearRuntimeLogs: (): Promise<void> => ipcRenderer.invoke(IpcChannels.ClearRuntimeLogs),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   onDeviceOnline: (callback: (device: Device) => void): (() => void) =>
     subscribe(IpcChannels.DeviceOnline, callback),
@@ -71,7 +74,9 @@ const api = {
   onIncomingPairRequest: (callback: (request: PairRequest) => void): (() => void) =>
     subscribe(IpcChannels.IncomingPairRequest, callback),
   onPairRequestRemoved: (callback: (requestId: string) => void): (() => void) =>
-    subscribe(IpcChannels.PairRequestRemoved, callback)
+    subscribe(IpcChannels.PairRequestRemoved, callback),
+  onRuntimeLog: (callback: (entry: RuntimeLogEntry) => void): (() => void) =>
+    subscribe(IpcChannels.RuntimeLogEntry, callback)
 };
 
 export type SyncFileAPI = typeof api;

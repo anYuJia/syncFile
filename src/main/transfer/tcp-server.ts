@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import type { Sandbox } from '../storage/sandbox';
 import { secureAccept, type SecureIdentity, type SecureSocket } from './secure-channel';
 import { verifyFileOffer, verifyPairRequest } from '../security/trust';
+import { logError, logInfo, logWarn } from '../logging/runtime-log';
 import { MessageDecoder, encodeMessage } from './codec';
 import {
   isFileCancel,
@@ -22,6 +23,7 @@ import { PAIR_REQUEST_MAX_AGE_MS } from '../security/trust';
 
 type RejectReason = FileRejectMessage['reason'];
 const DEFAULT_IDLE_TIMEOUT_MS = 120000;
+const DEFAULT_DECISION_TIMEOUT_MS = 180000;
 
 export interface TcpServerOptions {
   sandbox: Sandbox;
@@ -198,9 +200,11 @@ export class TcpServer extends EventEmitter {
       selfDevice: this.options.selfDevice
     })
       .then(({ socket: secureSocket }) => {
+        logInfo('transfer', 'accepted secure peer connection');
         this.handleSocket(secureSocket);
       })
-      .catch(() => {
+      .catch((error) => {
+        logWarn('transfer', 'secure accept failed', error);
         if (!socket.destroyed) {
           socket.destroy();
         }
@@ -484,6 +488,7 @@ export class TcpServer extends EventEmitter {
                   return;
                 }
                 phase = 'receiving-file';
+                socket.setTimeout(DEFAULT_IDLE_TIMEOUT_MS);
                 flushBufferedData();
               }
             );
@@ -537,6 +542,11 @@ export class TcpServer extends EventEmitter {
             pendingPairRequestId = first.requestId;
             settled = true;
             phase = 'completed';
+            logInfo('pairing', 'received pair request', {
+              requestId: first.requestId,
+              peerDeviceId: first.fromDevice.deviceId,
+              peerDeviceName: first.fromDevice.name
+            });
             const pairResponder: PairResponder = {
               accept: () => {
                 if (pairRequestResolved || socket.destroyed) {
@@ -594,6 +604,13 @@ export class TcpServer extends EventEmitter {
 
           offer = first;
           phase = 'awaiting-decision';
+          logInfo('transfer', 'received file offer and waiting for local decision', {
+            offerId: first.fileId,
+            fileName: first.fileName,
+            fileSize: first.fileSize,
+            peerDeviceId: first.fromDevice.deviceId,
+            peerDeviceName: first.fromDevice.name
+          });
           this.emit(
             'incoming-offer',
             {
@@ -649,13 +666,21 @@ export class TcpServer extends EventEmitter {
       }
     });
 
-    socket.setTimeout(DEFAULT_IDLE_TIMEOUT_MS);
+    socket.setTimeout(DEFAULT_DECISION_TIMEOUT_MS);
     socket.on('timeout', () => {
-      socketError = new Error('transfer timed out');
+      socketError = new Error(
+        phase === 'awaiting-decision' ? 'receiver did not respond in time' : 'transfer timed out'
+      );
+      logWarn('transfer', 'secure socket timed out', {
+        phase,
+        offerId: offer?.fileId,
+        fileName: offer?.fileName
+      });
       socket.destroy();
     });
 
     socket.on('error', (error) => {
+      logError('transfer', 'secure socket error', error);
       socketError = error;
     });
 

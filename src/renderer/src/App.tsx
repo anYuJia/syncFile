@@ -5,11 +5,12 @@ import { DropZone } from './components/DropZone';
 import { PairRequestQueuePrompt } from './components/PairRequestQueuePrompt';
 import { PairDevicePrompt } from './components/PairDevicePrompt';
 import { ReceivePrompt } from './components/ReceivePrompt';
+import { LogViewer } from './components/LogViewer';
 import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
-import type { Device, IncomingOffer, PairRequest, TrustedDevice } from '@shared/types';
+import type { Device, IncomingOffer, PairRequest, RuntimeLogEntry, TrustedDevice } from '@shared/types';
 
 const LEFT_PANE_SPLIT_KEY = 'syncfile.left-pane-manual-split-v1';
 const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v4';
@@ -59,8 +60,10 @@ export function App(): JSX.Element {
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [selectedTransferId, setSelectedTransferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
+  const [runtimeLogEntries, setRuntimeLogEntries] = useState<RuntimeLogEntry[]>([]);
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
   const [leftPaneSplit, setLeftPaneSplit] = useState<number>(() => {
     const saved = localStorage.getItem(LEFT_PANE_SPLIT_KEY);
@@ -103,6 +106,16 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshAppSettings();
+  }, []);
+
+  useEffect(() => {
+    void refreshRuntimeLogs();
+    const offRuntimeLog = window.syncFile.onRuntimeLog((entry) => {
+      setRuntimeLogEntries((prev) => [entry, ...prev].slice(0, 500));
+    });
+    return () => {
+      offRuntimeLog();
+    };
   }, []);
 
   useEffect(() => {
@@ -541,6 +554,23 @@ export function App(): JSX.Element {
     }
   }
 
+  async function refreshRuntimeLogs(): Promise<void> {
+    try {
+      setRuntimeLogEntries(await window.syncFile.getRuntimeLogs());
+    } catch {
+      // Logs are diagnostic only.
+    }
+  }
+
+  async function handleClearRuntimeLogs(): Promise<void> {
+    try {
+      await window.syncFile.clearRuntimeLogs();
+      await refreshRuntimeLogs();
+    } catch {
+      // Logs are diagnostic only.
+    }
+  }
+
   async function refreshAppSettings(): Promise<void> {
     try {
       const currentSettings = await window.syncFile.getSettings();
@@ -751,6 +781,24 @@ export function App(): JSX.Element {
               </svg>
               {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
             </span>
+          </button>
+          <button
+            type="button"
+            className="button button-muted topbar-icon-button"
+            onClick={() => {
+              setIsLogViewerOpen(true);
+              void refreshRuntimeLogs();
+            }}
+            title={messages.logs}
+            aria-label={messages.logs}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path d="M14 2v6h6" />
+              <path d="M8 13h8" />
+              <path d="M8 17h8" />
+              <path d="M8 9h2" />
+            </svg>
           </button>
           <button
             type="button"
@@ -1017,6 +1065,15 @@ export function App(): JSX.Element {
             setIsSettingsOpen(false);
             void refreshAppSettings();
           }}
+        />
+      )}
+      {isLogViewerOpen && (
+        <LogViewer
+          entries={runtimeLogEntries}
+          messages={messages}
+          onRefresh={refreshRuntimeLogs}
+          onClear={handleClearRuntimeLogs}
+          onClose={() => setIsLogViewerOpen(false)}
         />
       )}
     </div>

@@ -297,6 +297,7 @@ describe('TcpClient', () => {
         trustPublicKey: clientIdentity.publicKey,
         trustPrivateKey: clientIdentity.privateKey
       },
+      handshakeTimeoutMs: 1000,
       responseTimeoutMs: 1000,
       idleTimeoutMs: 50
     });

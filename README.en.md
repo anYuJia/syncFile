@@ -78,6 +78,27 @@ Notes:
 3. Launch the app on two machines in the same LAN
 4. Pick a target device and drag a file into the drop zone
 
+#### ⚠️ Bypassing Unsigned App Warnings
+
+Since the app is currently unsigned, you may see security warnings on first launch:
+
+**macOS:**
+
+If you see "syncFile is damaged and can't be opened", run this in Terminal:
+
+```bash
+xattr -cr /Applications/syncFile.app
+```
+
+Or right-click the app → Open → Click "Open" when prompted.
+
+**Windows:**
+
+If SmartScreen blocks the app:
+
+1. Click "More info"
+2. Click "Run anyway"
+
 ### Option 2: Run from source
 
 ```bash

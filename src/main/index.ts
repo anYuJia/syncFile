@@ -18,6 +18,13 @@ import { TransferHistoryStore } from './storage/transfer-history';
 import { recoverTransferState } from './storage/transfer-recovery';
 import { TcpClient } from './transfer/tcp-client';
 import { TcpServer } from './transfer/tcp-server';
+import {
+  initRuntimeLogger,
+  installProcessLoggers,
+  logError,
+  logInfo,
+  type RuntimeLogger
+} from './logging/runtime-log';
 
 const DEFAULT_TRANSFER_PORT = 43434;
 
@@ -25,6 +32,7 @@ let mainWindow: BrowserWindow | null = null;
 let tcpServer: TcpServer | null = null;
 let mdnsService: MdnsService | null = null;
 let transferHistoryStore: TransferHistoryStore | null = null;
+let runtimeLogger: RuntimeLogger | null = null;
 let cleanupPromise: Promise<void> | null = null;
 let bootstrapPromise: Promise<void> | null = null;
 let ipcRegistered = false;
@@ -90,6 +98,12 @@ async function ensureWindow(): Promise<void> {
 
 async function bootstrapServices(): Promise<void> {
   const userDataDir = app.getPath('userData');
+  runtimeLogger = initRuntimeLogger(userDataDir);
+  installProcessLoggers();
+  runtimeLogger.info('app', 'bootstrapping services', {
+    userDataDir,
+    platform: getPlatform()
+  });
   const identity = loadOrCreateIdentity(userDataDir);
   const defaultSandboxRoot = resolveDefaultSandboxRoot();
   const sandboxLocation = new SandboxLocationStore(userDataDir);
@@ -114,6 +128,7 @@ async function bootstrapServices(): Promise<void> {
   const actualPort = await tcpServer
     .listen(DEFAULT_TRANSFER_PORT)
     .catch(() => (tcpServer as TcpServer).listen(0));
+  runtimeLogger.info('transfer', 'tcp server listening', { port: actualPort });
 
   const tcpClient = new TcpClient({
     selfDevice: {
@@ -160,6 +175,7 @@ async function bootstrapServices(): Promise<void> {
       settingsStore,
       transferHistoryStore,
       mdnsService,
+      logger: runtimeLogger,
       identity,
       getSelfDevice,
       getWindow: () => mainWindow
@@ -187,6 +203,7 @@ async function bootstrap(): Promise<void> {
       try {
         await bootstrapServices();
       } catch (error) {
+        logError('app', 'failed to bootstrap services', error);
         await cleanup();
         throw error;
       }
@@ -223,6 +240,7 @@ async function cleanup(): Promise<void> {
   }
 
   cleanupPromise = (async () => {
+    logInfo('app', 'cleaning up runtime services');
     if (ipcRegistered) {
       unregisterIpcHandlers();
       ipcRegistered = false;

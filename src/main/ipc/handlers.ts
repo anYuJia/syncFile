@@ -9,6 +9,7 @@ import type {
   Device,
   IncomingOffer,
   RejectReason,
+  RuntimeLogEntry,
   SandboxLocationInfo,
   Settings,
   SettingsPayload,
@@ -24,6 +25,7 @@ import type { Sandbox } from '../storage/sandbox';
 import type { SettingsStore } from '../storage/settings';
 import type { TransferHistoryStore } from '../storage/transfer-history';
 import type { DeviceIdentity } from '../storage/device-identity';
+import type { RuntimeLogger } from '../logging/runtime-log';
 import type { TcpClient } from '../transfer/tcp-client';
 import { sha256File } from '../transfer/file-hash';
 import type {
@@ -157,7 +159,10 @@ export interface IpcContext {
   identity: DeviceIdentity;
   getSelfDevice: () => Device;
   getWindow: () => BrowserWindow | null;
+  logger?: RuntimeLogger;
 }
+
+let cleanupRuntimeLogSubscription: (() => void) | null = null;
 
 export const handledIpcChannels = [
   IpcChannels.GetDevices,
@@ -183,16 +188,23 @@ export const handledIpcChannels = [
   IpcChannels.ChooseSandboxLocation,
   IpcChannels.SelectFile,
   IpcChannels.GetSettings,
-  IpcChannels.SaveSettings
+  IpcChannels.SaveSettings,
+  IpcChannels.GetRuntimeLogs,
+  IpcChannels.ClearRuntimeLogs
 ] as const;
 
 export function unregisterIpcHandlers(): void {
+  cleanupRuntimeLogSubscription?.();
+  cleanupRuntimeLogSubscription = null;
   for (const channel of handledIpcChannels) {
     ipcMain.removeHandler(channel);
   }
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  cleanupRuntimeLogSubscription?.();
+  cleanupRuntimeLogSubscription = null;
+
   const pendingOffers = new Map<string, PendingOffer>();
   const pendingPairRequests = new Map<string, PendingPairRequest>();
   const completedOrAcceptedOffers = new Map<string, AcceptedInboundMeta>();
@@ -212,6 +224,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!window || window.isDestroyed()) return;
     window.webContents.send(channel, payload);
   };
+
+  if (context.logger) {
+    cleanupRuntimeLogSubscription = context.logger.subscribe((entry) => {
+      sendToRenderer(IpcChannels.RuntimeLogEntry, entry);
+    });
+  }
 
   const emitTransferEvent = (
     channel: typeof IpcChannels.TransferProgress | typeof IpcChannels.TransferComplete,
@@ -460,6 +478,12 @@ export function registerIpcHandlers(context: IpcContext): void {
         });
 
         const latestMeta = outboundTransfers.get(nextTransferId) ?? preparedMeta;
+        context.logger?.info('transfer', 'outbound transfer completed', {
+          transferId: nextTransferId,
+          fileName: latestMeta.fileName,
+          fileSize: latestMeta.fileSize,
+          peerDeviceName: latestMeta.peerDeviceName
+        });
         publishTransferEvent(
           IpcChannels.TransferComplete,
           makeOutboundProgress(latestMeta, latestMeta.fileSize, 'completed')
@@ -500,6 +524,13 @@ export function registerIpcHandlers(context: IpcContext): void {
           IpcChannels.TransferProgress,
           makeOutboundProgress(currentMeta, previousBytes, 'failed', message)
         );
+        context.logger?.error('transfer', 'outbound transfer failed', {
+          transferId: nextTransferId,
+          fileName: currentMeta.fileName,
+          peerDeviceName: currentMeta.peerDeviceName,
+          bytesTransferred: previousBytes,
+          error: message
+        });
         settleOutboundTransfer(nextTransferId);
         startNextOutboundTransfer();
       }
@@ -565,10 +596,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   };
 
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
+    context.logger?.debug('ipc', 'get devices requested');
     return context.registry.list();
   });
 
   ipcMain.handle(IpcChannels.RefreshDevices, (): Device[] => {
+    context.logger?.info('discovery', 'manual device refresh requested');
     context.mdnsService.refresh(true);
     return context.registry.list();
   });
@@ -584,24 +617,45 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IpcChannels.PairDevice, async (_event, deviceId: string): Promise<void> => {
     const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
     if (!device) {
+      context.logger?.warn('pairing', 'pair requested for unknown device', { deviceId });
       throw new Error(`device ${deviceId} not found`);
     }
+    context.logger?.info('pairing', 'starting outbound pair request', {
+      deviceId: device.deviceId,
+      name: device.name,
+      address: device.address,
+      port: device.port
+    });
     const accepted = await context.tcpClient.pairWithPeer(device.address, device.port, {
       deviceId: device.deviceId,
       trustFingerprint: device.trustFingerprint,
       trustPublicKey: device.trustPublicKey
     });
     if (!accepted) {
+      context.logger?.warn('pairing', 'peer declined outbound pair request', {
+        deviceId: device.deviceId,
+        name: device.name
+      });
       throw new Error('peer declined pairing');
     }
+    context.logger?.info('pairing', 'pair request accepted', {
+      deviceId: device.deviceId,
+      name: device.name
+    });
     upsertTrustedDevice(device);
   });
 
   ipcMain.handle(IpcChannels.AcceptPairRequest, (_event, requestId: string): void => {
     const pending = pendingPairRequests.get(requestId);
     if (!pending) {
+      context.logger?.warn('pairing', 'accept requested for missing pair request', { requestId });
       throw new Error(`pair request ${requestId} not found`);
     }
+    context.logger?.info('pairing', 'incoming pair request accepted', {
+      requestId,
+      deviceId: pending.request.fromDevice.deviceId,
+      name: pending.request.fromDevice.name
+    });
     upsertTrustedDevice(pending.request.fromDevice);
     pending.responder.accept();
     pendingPairRequests.delete(requestId);
@@ -610,8 +664,14 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IpcChannels.RejectPairRequest, (_event, requestId: string): void => {
     const pending = pendingPairRequests.get(requestId);
     if (!pending) {
+      context.logger?.warn('pairing', 'reject requested for missing pair request', { requestId });
       throw new Error(`pair request ${requestId} not found`);
     }
+    context.logger?.info('pairing', 'incoming pair request rejected', {
+      requestId,
+      deviceId: pending.request.fromDevice.deviceId,
+      name: pending.request.fromDevice.name
+    });
     pending.responder.reject();
     pendingPairRequests.delete(requestId);
   });
@@ -625,6 +685,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     async (_event, deviceId: string, filePath: string, existingTransferId?: string): Promise<TransferId> => {
       const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
       if (!device) {
+        context.logger?.warn('transfer', 'send requested for unknown device', { deviceId, filePath });
         throw new Error(`device ${deviceId} not found`);
       }
 
@@ -657,6 +718,14 @@ export function registerIpcHandlers(context: IpcContext): void {
         sourceFileModifiedAt: fileStats.mtimeMs,
         existingTransferId,
         previousTransfer
+      });
+      context.logger?.info('transfer', 'queued outbound transfer', {
+        transferId,
+        fileName,
+        fileSize,
+        peerDeviceId: device.deviceId,
+        peerDeviceName: device.name,
+        peerAddress: `${device.address}:${device.port}`
       });
 
       const meta = outboundTransfers.get(transferId)!;
@@ -742,9 +811,16 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IpcChannels.AcceptIncoming, (_event, offerId: string): void => {
     const pending = pendingOffers.get(offerId);
     if (!pending) {
+      context.logger?.warn('transfer', 'accept requested for missing incoming offer', { offerId });
       throw new Error(`offer ${offerId} not found`);
     }
     const receiveMode = resolveReceiveMode(pending.info, context.settingsStore.get());
+    context.logger?.info('transfer', 'incoming offer accepted', {
+      offerId,
+      fileName: pending.info.fileName,
+      peerDeviceName: pending.info.fromDevice.name,
+      receiveMode
+    });
     completedOrAcceptedOffers.set(offerId, { info: pending.info, receiveMode });
     pending.responder.accept();
     pendingOffers.delete(offerId);
@@ -757,8 +833,14 @@ export function registerIpcHandlers(context: IpcContext): void {
     (_event, offerId: string, reason: RejectReason = 'user-declined'): void => {
       const pending = pendingOffers.get(offerId);
       if (!pending) {
+        context.logger?.warn('transfer', 'reject requested for missing incoming offer', { offerId });
         throw new Error(`offer ${offerId} not found`);
       }
+      context.logger?.info('transfer', 'incoming offer rejected', {
+        offerId,
+        fileName: pending.info.fileName,
+        reason
+      });
       pending.responder.reject(reason);
       pendingOffers.delete(offerId);
       context.pendingOfferStore.remove(offerId);
@@ -897,11 +979,28 @@ export function registerIpcHandlers(context: IpcContext): void {
     return context.settingsStore.save(partial);
   });
 
+  ipcMain.handle(IpcChannels.GetRuntimeLogs, (): RuntimeLogEntry[] => {
+    return context.logger?.list() ?? [];
+  });
+
+  ipcMain.handle(IpcChannels.ClearRuntimeLogs, (): void => {
+    context.logger?.clear();
+    context.logger?.info('logs', 'runtime log cleared');
+  });
+
   context.registry.on('device-online', (device) => {
+    context.logger?.info('discovery', 'device online', {
+      deviceId: device.deviceId,
+      name: device.name,
+      address: device.address,
+      port: device.port,
+      platform: device.platform
+    });
     sendToRenderer(IpcChannels.DeviceOnline, device);
   });
 
   context.registry.on('device-offline', (deviceId) => {
+    context.logger?.info('discovery', 'device offline', { deviceId });
     sendToRenderer(IpcChannels.DeviceOffline, deviceId);
   });
 
@@ -917,6 +1016,12 @@ export function registerIpcHandlers(context: IpcContext): void {
 
         if (canAutoAcceptOffer(info, settings)) {
           const receiveMode = resolveReceiveMode(info, settings);
+          context.logger?.info('transfer', 'incoming offer auto-accepted', {
+            offerId: info.offerId,
+            fileName: info.fileName,
+            peerDeviceName: info.fromDevice.name,
+            receiveMode
+          });
           completedOrAcceptedOffers.set(info.offerId, { info, receiveMode });
           responder.accept();
           context.pendingOfferStore.remove(info.offerId);
@@ -925,6 +1030,12 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
 
         pendingOffers.set(info.offerId, { info, responder });
+        context.logger?.info('transfer', 'incoming offer waiting for user response', {
+          offerId: info.offerId,
+          fileName: info.fileName,
+          fileSize: info.fileSize,
+          peerDeviceName: info.fromDevice.name
+        });
 
         const offer: IncomingOffer = {
           offerId: info.offerId,
@@ -939,6 +1050,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         context.pendingOfferStore.upsert(offer);
         sendToRenderer(IpcChannels.IncomingOffer, offer);
       } catch (error) {
+        context.logger?.error('transfer', 'failed to inspect incoming offer', error);
         responder.reject('user-declined');
         publishTransferEvent(IpcChannels.TransferProgress, {
           transferId: info.offerId,
@@ -956,6 +1068,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.tcpServer.on('pair-request', (request, responder) => {
+    context.logger?.info('pairing', 'incoming pair request', {
+      requestId: request.requestId,
+      peerDeviceId: request.fromDevice.deviceId,
+      peerDeviceName: request.fromDevice.name
+    });
     pendingPairRequests.set(request.requestId, { request, responder });
     sendToRenderer(IpcChannels.IncomingPairRequest, {
       requestId: request.requestId,
@@ -968,6 +1085,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!pendingPairRequests.delete(requestId)) {
       return;
     }
+    context.logger?.warn('pairing', 'incoming pair request connection closed', { requestId });
     sendToRenderer(IpcChannels.PairRequestRemoved, requestId);
   });
 
@@ -987,6 +1105,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     };
 
     completedOrAcceptedOffers.delete(info.offerId);
+    context.logger?.info('transfer', 'incoming transfer completed', {
+      offerId: info.offerId,
+      savedPath: info.savedPath,
+      bytesReceived: info.bytesReceived,
+      peerDeviceName: info.fromDevice.name
+    });
     publishTransferEvent(IpcChannels.TransferComplete, progress);
 
     if (context.settingsStore.get().openReceivedFolder) {
@@ -1018,6 +1142,11 @@ export function registerIpcHandlers(context: IpcContext): void {
       )
     );
     completedOrAcceptedOffers.delete(info.offerId);
+    context.logger?.warn('transfer', 'incoming transfer paused', {
+      offerId: info.offerId,
+      bytesReceived: info.bytesReceived,
+      reason: info.reason
+    });
   });
 
   context.tcpServer.on('transfer-cancelled', (info) => {
@@ -1027,6 +1156,11 @@ export function registerIpcHandlers(context: IpcContext): void {
       makeInboundProgress(info, info.bytesReceived, 'cancelled', receiveMode)
     );
     completedOrAcceptedOffers.delete(info.offerId);
+    context.logger?.warn('transfer', 'incoming transfer cancelled', {
+      offerId: info.offerId,
+      bytesReceived: info.bytesReceived,
+      reason: info.reason
+    });
   });
 
   context.tcpServer.on('transfer-error', (info: TransferErrorInfo) => {
@@ -1036,6 +1170,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (info.offerId) {
       completedOrAcceptedOffers.delete(info.offerId);
     }
+    context.logger?.error('transfer', 'incoming transfer failed', {
+      offerId: info.offerId,
+      fileName: info.fileName,
+      bytesReceived: info.bytesReceived,
+      error: info.error.message
+    });
     publishTransferEvent(IpcChannels.TransferProgress, {
       transferId: info.offerId ?? randomUUID(),
       direction: 'receive',

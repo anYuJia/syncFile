@@ -1,6 +1,7 @@
 import { Bonjour, type Browser, type Service } from 'bonjour-service';
 import type { Device } from '../../shared/types';
 import type { DeviceRegistry } from './device-registry';
+import { logDebug, logError, logInfo, logWarn } from '../logging/runtime-log';
 
 export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
@@ -25,10 +26,18 @@ export class MdnsService {
   private refreshTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly opts: MdnsServiceOptions) {
-    this.bonjour = new Bonjour();
+    this.bonjour = new Bonjour({}, (error: Error) => {
+      logError('discovery', 'bonjour-service socket error', error);
+    });
   }
 
   start(): void {
+    logInfo('discovery', 'starting mdns service', {
+      deviceId: this.opts.self.deviceId,
+      name: this.opts.self.name,
+      port: this.opts.self.port,
+      platform: this.opts.self.platform
+    });
     this.publish();
     this.find();
     this.scheduleRefresh();
@@ -39,7 +48,9 @@ export class MdnsService {
     this.published = this.bonjour.publish({
       name: `${this.opts.self.name}-${this.opts.self.deviceId.slice(0, 8)}`,
       type: SERVICE_TYPE,
+      protocol: 'tcp',
       port: this.opts.self.port,
+      disableIPv6: this.opts.self.platform === 'win32',
       txt: {
         deviceId: this.opts.self.deviceId,
         displayName: this.opts.self.name,
@@ -48,14 +59,27 @@ export class MdnsService {
         version: MDNS_PROTOCOL_VERSION
       }
     });
+    this.published.on('up', () => {
+      logInfo('discovery', 'mdns service published', {
+        name: this.published?.name,
+        host: this.published?.host,
+        port: this.opts.self.port,
+        ipv6Disabled: this.opts.self.platform === 'win32'
+      });
+    });
+    this.published.on('error', (error) => {
+      logError('discovery', 'mdns service publish error', error);
+    });
   }
 
   find(): void {
     if (this.browser) return;
+    logInfo('discovery', 'starting mdns browser');
     this.browser = this.createBrowser();
   }
 
   refresh(clearRegistry = false): void {
+    logInfo('discovery', 'refreshing mdns browser', { clearRegistry });
     if (clearRegistry) {
       this.opts.registry.clear();
     }
@@ -67,6 +91,7 @@ export class MdnsService {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    logInfo('discovery', 'stopping mdns service');
 
     if (this.browser) {
       this.destroyBrowser();
@@ -89,14 +114,34 @@ export class MdnsService {
 
   private readonly onServiceUp = (service: Service): void => {
     const device = this.serviceToDevice(service);
-    if (!device) return;
+    if (!device) {
+      logWarn('discovery', 'ignored mdns service without device id', {
+        name: service.name,
+        host: service.host,
+        addresses: service.addresses
+      });
+      return;
+    }
     if (device.deviceId === this.opts.self.deviceId) return;
+    logInfo('discovery', 'mdns peer discovered', {
+      deviceId: device.deviceId,
+      name: device.name,
+      host: device.host,
+      address: device.address,
+      port: device.port,
+      platform: device.platform
+    });
     this.opts.registry.upsert(device);
   };
 
   private readonly onServiceDown = (service: Service): void => {
     const deviceId = this.readTxtValue(service.txt, 'deviceId');
     if (!deviceId || deviceId === this.opts.self.deviceId) return;
+    logInfo('discovery', 'mdns peer goodbye received', {
+      deviceId,
+      name: service.name,
+      host: service.host
+    });
     this.opts.registry.remove(deviceId);
   };
 
@@ -137,19 +182,27 @@ export class MdnsService {
     this.refreshTimer = setInterval(() => {
       this.opts.registry.pruneOlderThan(Date.now() - DEVICE_STALE_MS);
       if (!this.browser) {
+        logWarn('discovery', 'mdns browser missing during refresh tick; recreating');
         this.browser = this.createBrowser();
         return;
       }
+      logDebug('discovery', 'mdns browser update');
       this.browser?.update();
     }, BROWSER_REFRESH_MS);
   }
 
   private createBrowser(): Browser {
-    const browser = this.bonjour.find({ type: SERVICE_TYPE });
+    const browser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
     browser.on('up', this.onServiceUp);
     browser.on('txt-update', this.onServiceUp);
     browser.on('down', this.onServiceDown);
     browser.update();
+    const warmupTimer = setTimeout(() => {
+      if (this.browser === browser) {
+        browser.update();
+      }
+    }, 750);
+    warmupTimer.unref?.();
     return browser;
   }
 

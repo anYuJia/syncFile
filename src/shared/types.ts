@@ -48,6 +48,17 @@ export interface TransferRecord extends TransferProgress {
   updatedAt: number;
 }
 
+export type RuntimeLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface RuntimeLogEntry {
+  sequence: number;
+  timestamp: number;
+  level: RuntimeLogLevel;
+  scope: string;
+  message: string;
+  details?: string;
+}
+
 export interface IncomingOffer {
   offerId: string;
   fromDevice: {

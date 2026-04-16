@@ -36,7 +36,7 @@ export function PairRequestQueuePrompt({
         aria-label={messages.pairPromptTitle}
         tabIndex={-1}
       >
-        <div className="receive-prompt-shell">
+        <div className={`receive-prompt-shell${requests.length > 1 ? '' : ' receive-prompt-shell-single'}`}>
           {requests.length > 1 && (
             <aside className="receive-prompt-queue-list" aria-label={messages.pairRequestQueueTitle}>
               <div className="receive-prompt-queue-head">
