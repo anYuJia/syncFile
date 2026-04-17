@@ -9,11 +9,15 @@ import type {
   TransferRecord
 } from '@shared/types';
 import type { Messages } from '../i18n';
+import { deriveTransferTelemetry, refreshTransferTelemetry } from '../utils/transfer-metrics';
 
 export interface RendererTransferProgress extends TransferProgress {
   updatedAt: number;
   transferRateBytesPerSecond?: number;
   estimatedSecondsRemaining?: number;
+  lastByteSampleAt?: number;
+  lastByteSampleBytes?: number;
+  lastProgressAt?: number;
 }
 
 interface UseSyncFileResult {
@@ -67,34 +71,15 @@ function buildTransferFromEvent(
       : ['failed', 'rejected', 'cancelled', 'paused'].includes(nextStatus)
         ? previous?.error
         : undefined;
-
-  let transferRateBytesPerSecond: number | undefined;
-  let estimatedSecondsRemaining: number | undefined;
-
-  if (nextStatus === 'in-progress') {
-    const previousBytes = previous?.bytesTransferred ?? nextBytesTransferred;
-    const previousUpdatedAt = previous?.updatedAt ?? now;
-    const deltaBytes = nextBytesTransferred - previousBytes;
-    const deltaMs = now - previousUpdatedAt;
-
-    if (deltaBytes > 0 && deltaMs > 0) {
-      const instantRate = (deltaBytes / deltaMs) * 1000;
-      transferRateBytesPerSecond = previous?.transferRateBytesPerSecond
-        ? previous.transferRateBytesPerSecond * 0.65 + instantRate * 0.35
-        : instantRate;
-    } else {
-      transferRateBytesPerSecond = previous?.transferRateBytesPerSecond;
-    }
-
-    if (
-      transferRateBytesPerSecond &&
-      transferRateBytesPerSecond > 0 &&
-      nextFileSize > nextBytesTransferred
-    ) {
-      estimatedSecondsRemaining =
-        (nextFileSize - nextBytesTransferred) / transferRateBytesPerSecond;
-    }
-  }
+  const telemetry = deriveTransferTelemetry(
+    previous,
+    {
+      status: nextStatus,
+      fileSize: nextFileSize,
+      bytesTransferred: nextBytesTransferred
+    },
+    now
+  );
 
   return {
     transferId: incoming.transferId,
@@ -113,8 +98,7 @@ function buildTransferFromEvent(
     sourceFileSha256: incoming.sourceFileSha256 ?? previous?.sourceFileSha256,
     error: nextError,
     updatedAt: now,
-    transferRateBytesPerSecond,
-    estimatedSecondsRemaining
+    ...telemetry
   };
 }
 
@@ -232,6 +216,27 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       offTransferProgress();
       offTransferComplete();
     };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      let changed = false;
+      const now = Date.now();
+
+      for (const [transferId, transfer] of transferMapRef.current.entries()) {
+        const refreshed = refreshTransferTelemetry(transfer, now);
+        if (refreshed !== transfer) {
+          transferMapRef.current.set(transferId, refreshed);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        setTransferVersion((version) => version + 1);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(interval);
   }, []);
 
   const transfers = useMemo(

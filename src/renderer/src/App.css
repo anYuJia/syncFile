@@ -1502,6 +1502,20 @@ body {
   flex-shrink: 0;
 }
 
+.transfer-item-summary-metric-stack {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.transfer-item-summary-metrics {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .transfer-item-delete {
   width: 28px;
   height: 28px;
@@ -1611,6 +1625,10 @@ body {
 
 .transfer-item.is-compact .transfer-item-percent {
   font-size: 12px;
+}
+
+.transfer-item.is-compact .transfer-item-summary-metrics {
+  display: none;
 }
 
 .transfer-item-details {

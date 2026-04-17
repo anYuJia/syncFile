@@ -76,16 +76,31 @@ describe('DeviceRegistry', () => {
     const removed = registry.pruneOlderThan(3_000);
 
     expect(removed).toEqual([]);
-    expect(registry.list()[0]?.deviceId).toBe('dev-persist');
+    expect(registry.list()).toEqual([]);
+    expect(registry.listAll()[0]?.deviceId).toBe('dev-persist');
   });
 
-  it('keeps persistent devices when preservePersistent is requested on remove', () => {
+  it('keeps persistent devices hidden from the online list when restored from cache', () => {
     const registry = new DeviceRegistry();
 
     registry.upsertPersistent(makeDevice({ deviceId: 'dev-persist' }));
+
+    expect(registry.list()).toEqual([]);
+    expect(registry.listAll()[0]?.deviceId).toBe('dev-persist');
+  });
+
+  it('keeps persistent devices cached and emits offline when preservePersistent is requested on remove', () => {
+    const registry = new DeviceRegistry();
+    const offlineListener = vi.fn();
+    registry.on('device-offline', offlineListener);
+
+    registry.upsertPersistent(makeDevice({ deviceId: 'dev-persist' }));
+    registry.upsert(makeDevice({ deviceId: 'dev-persist' }));
     registry.remove('dev-persist', { preservePersistent: true });
 
-    expect(registry.list()[0]?.deviceId).toBe('dev-persist');
+    expect(offlineListener).toHaveBeenCalledWith('dev-persist');
+    expect(registry.list()).toEqual([]);
+    expect(registry.listAll()[0]?.deviceId).toBe('dev-persist');
   });
 
   it('keeps the last persistent address when a later ephemeral discovery disagrees', () => {

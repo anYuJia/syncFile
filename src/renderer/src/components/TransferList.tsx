@@ -81,6 +81,25 @@ function canDeleteTransfer(item: RendererTransferProgress): boolean {
   return !['pending', 'in-progress', 'paused'].includes(item.status);
 }
 
+function hasLiveMetrics(item: RendererTransferProgress): boolean {
+  return Boolean(item.transferRateBytesPerSecond || item.estimatedSecondsRemaining);
+}
+
+function liveMetricSummary(item: RendererTransferProgress, messages: Messages): string | null {
+  if (!hasLiveMetrics(item)) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (item.transferRateBytesPerSecond) {
+    parts.push(formatTransferRate(item.transferRateBytesPerSecond));
+  }
+  if (item.estimatedSecondsRemaining) {
+    parts.push(`${messages.transferEtaLabel} ${formatEta(item.estimatedSecondsRemaining)}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 export function TransferList({
   transfers,
   messages,
@@ -360,7 +379,9 @@ export function TransferList({
         const canOpenPath = canOpenCompletedReceive(item);
         const isBusy = busyTransferIds?.has(item.transferId) ?? false;
         const isActiveTransfer = item.status === 'in-progress';
+        const activeMetricSummary = liveMetricSummary(item, messages);
         const showExpandedBody =
+          item.status === 'pending' ||
           isActiveTransfer ||
           item.status === 'paused' ||
           canRetry ||
@@ -393,7 +414,12 @@ export function TransferList({
                   </div>
                 </div>
                 <div className="transfer-item-summary-side">
-                  <div className="transfer-item-percent">{percent}%</div>
+                  <div className="transfer-item-summary-metric-stack">
+                    <div className="transfer-item-percent">{percent}%</div>
+                    {activeMetricSummary && (
+                      <div className="transfer-item-summary-metrics">{activeMetricSummary}</div>
+                    )}
+                  </div>
                   <span className="transfer-item-chevron" aria-hidden="true">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 6 15 12 9 18" />
@@ -435,7 +461,7 @@ export function TransferList({
                   </span>
                   <span>{item.peerDeviceName || messages.unknownDevice}</span>
                 </div>
-                {(item.transferRateBytesPerSecond || item.estimatedSecondsRemaining) && (
+                {hasLiveMetrics(item) && (
                   <div className="transfer-item-metrics">
                     {item.transferRateBytesPerSecond && (
                       <span>
@@ -604,7 +630,7 @@ function TransferDetailDialog({
             <span>{percent}%</span>
           </div>
         </div>
-        {(transfer.transferRateBytesPerSecond || transfer.estimatedSecondsRemaining) && (
+        {hasLiveMetrics(transfer) && (
           <div className="transfer-detail-metrics">
             {transfer.transferRateBytesPerSecond && (
               <span>

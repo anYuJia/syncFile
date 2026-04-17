@@ -28,7 +28,10 @@ export declare interface DeviceRegistry {
 }
 
 export class DeviceRegistry extends EventEmitter {
-  private readonly devices = new Map<string, { device: Device; lastSeenAt: number; persistent: boolean }>();
+  private readonly devices = new Map<
+    string,
+    { device: Device; lastSeenAt: number; persistent: boolean; online: boolean }
+  >();
 
   upsert(device: Device, seenAt = Date.now()): void {
     this.write(device, seenAt, false);
@@ -42,20 +45,28 @@ export class DeviceRegistry extends EventEmitter {
     const existing = this.devices.get(deviceId);
     if (!existing) return;
     if (existing.persistent && options.preservePersistent) {
+      this.markOffline(deviceId);
       return;
     }
     this.devices.delete(deviceId);
-    this.emit('device-offline', deviceId);
-    this.emit('device:offline', deviceId);
+    this.emitOfflineIfNeeded(deviceId, existing.online);
   }
 
   list(): Device[] {
+    return Array.from(this.devices.values(), (entry) => entry)
+      .filter((entry) => entry.online)
+      .map((entry) => entry.device);
+  }
+
+  listAll(): Device[] {
     return Array.from(this.devices.values(), (entry) => entry.device);
   }
 
   clear(options: { preservePersistent?: boolean } = {}): void {
     if (!options.preservePersistent) {
-      const ids = Array.from(this.devices.keys());
+      const ids = Array.from(this.devices.entries())
+        .filter(([, entry]) => entry.online)
+        .map(([id]) => id);
       this.devices.clear();
       for (const id of ids) {
         this.emit('device-offline', id);
@@ -67,10 +78,19 @@ export class DeviceRegistry extends EventEmitter {
     const removedIds: string[] = [];
     for (const [id, entry] of this.devices.entries()) {
       if (entry.persistent) {
+        if (entry.online) {
+          this.devices.set(id, {
+            ...entry,
+            online: false
+          });
+          removedIds.push(id);
+        }
         continue;
       }
       this.devices.delete(id);
-      removedIds.push(id);
+      if (entry.online) {
+        removedIds.push(id);
+      }
     }
     for (const id of removedIds) {
       this.emit('device-offline', id);
@@ -81,13 +101,16 @@ export class DeviceRegistry extends EventEmitter {
   pruneOlderThan(cutoffTime: number): string[] {
     const removedIds: string[] = [];
     for (const [id, entry] of this.devices.entries()) {
-      if (entry.persistent || entry.lastSeenAt >= cutoffTime) {
+      if (entry.lastSeenAt >= cutoffTime) {
+        continue;
+      }
+      if (entry.persistent) {
+        this.markOffline(id);
         continue;
       }
       this.devices.delete(id);
       removedIds.push(id);
-      this.emit('device-offline', id);
-      this.emit('device:offline', id);
+      this.emitOfflineIfNeeded(id, entry.online);
     }
     return removedIds;
   }
@@ -105,15 +128,37 @@ export class DeviceRegistry extends EventEmitter {
         : device;
     const previous = previousEntry?.device;
     const existed = previous !== undefined;
+    const online = persistent ? previousEntry?.online ?? false : true;
     this.devices.set(device.deviceId, {
       device: normalizedDevice,
       lastSeenAt: seenAt,
-      persistent: persistent || previousEntry?.persistent === true
+      persistent: persistent || previousEntry?.persistent === true,
+      online
     });
-    if (!existed || hasMeaningfulChange(previous, normalizedDevice)) {
+    if (online && (!previousEntry?.online || !existed || hasMeaningfulChange(previous, normalizedDevice))) {
       this.emit('device-online', normalizedDevice);
       this.emit('device:online', normalizedDevice);
     }
+  }
+
+  private markOffline(deviceId: string): void {
+    const entry = this.devices.get(deviceId);
+    if (!entry || !entry.online) {
+      return;
+    }
+    this.devices.set(deviceId, {
+      ...entry,
+      online: false
+    });
+    this.emitOfflineIfNeeded(deviceId, true);
+  }
+
+  private emitOfflineIfNeeded(deviceId: string, wasOnline: boolean): void {
+    if (!wasOnline) {
+      return;
+    }
+    this.emit('device-offline', deviceId);
+    this.emit('device:offline', deviceId);
   }
 }
 
