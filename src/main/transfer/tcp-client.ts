@@ -17,6 +17,7 @@ import {
   isFileReject,
   type FileOfferMessage,
   type ProfileResponseMessage,
+  type ProtocolDeviceInfo,
   type PairRequestMessage
 } from './protocol';
 
@@ -32,6 +33,11 @@ export interface TcpClientOptions {
     trustFingerprint: string;
     trustPublicKey: string;
     trustPrivateKey: string;
+    port?: number;
+    platform?: string;
+    version?: string;
+    hasAvatar?: boolean;
+    profileRevision?: number;
   };
   connectTimeoutMs?: number;
   handshakeTimeoutMs?: number;
@@ -146,7 +152,7 @@ export class TcpClient extends EventEmitter {
       fileName,
       fileSize: stats.size,
       sha256: params.sha256,
-      fromDevice: this.options.selfDevice
+      fromDevice: publicProtocolDevice(this.options.selfDevice)
     };
     const offer: FileOfferMessage = {
       ...unsignedOffer,
@@ -338,7 +344,7 @@ export class TcpClient extends EventEmitter {
       version: 1,
       requestId: randomUUID(),
       timestamp: Date.now(),
-      fromDevice: this.options.selfDevice
+      fromDevice: publicProtocolDevice(this.options.selfDevice)
     };
     const request: PairRequestMessage = {
       ...unsignedRequest,
@@ -599,6 +605,20 @@ export class TcpClient extends EventEmitter {
       });
     });
   }
+}
+
+function publicProtocolDevice(identity: TcpClientOptions['selfDevice']): ProtocolDeviceInfo {
+  return {
+    deviceId: identity.deviceId,
+    name: identity.name,
+    trustFingerprint: identity.trustFingerprint,
+    trustPublicKey: identity.trustPublicKey,
+    port: identity.port,
+    platform: identity.platform,
+    version: identity.version,
+    hasAvatar: identity.hasAvatar,
+    profileRevision: identity.profileRevision
+  };
 }
 
 function openSocket(host: string, port: number, timeoutMs: number): Promise<Socket> {

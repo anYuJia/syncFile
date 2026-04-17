@@ -68,4 +68,33 @@ describe('DeviceRegistry', () => {
     expect(registry.list()[0]?.deviceId).toBe('dev-fresh');
     expect(offlineListener).toHaveBeenCalledWith('dev-stale');
   });
+
+  it('does not prune persistent devices', () => {
+    const registry = new DeviceRegistry();
+
+    registry.upsertPersistent(makeDevice({ deviceId: 'dev-persist' }), 1_000);
+    const removed = registry.pruneOlderThan(3_000);
+
+    expect(removed).toEqual([]);
+    expect(registry.list()[0]?.deviceId).toBe('dev-persist');
+  });
+
+  it('keeps persistent devices when preservePersistent is requested on remove', () => {
+    const registry = new DeviceRegistry();
+
+    registry.upsertPersistent(makeDevice({ deviceId: 'dev-persist' }));
+    registry.remove('dev-persist', { preservePersistent: true });
+
+    expect(registry.list()[0]?.deviceId).toBe('dev-persist');
+  });
+
+  it('keeps the last persistent address when a later ephemeral discovery disagrees', () => {
+    const registry = new DeviceRegistry();
+
+    registry.upsertPersistent(makeDevice({ deviceId: 'dev-persist', address: '192.168.137.1', host: 'persist-host' }));
+    registry.upsert(makeDevice({ deviceId: 'dev-persist', address: '10.136.143.16', host: 'mdns-host' }));
+
+    expect(registry.list()[0]?.address).toBe('192.168.137.1');
+    expect(registry.list()[0]?.host).toBe('persist-host');
+  });
 });

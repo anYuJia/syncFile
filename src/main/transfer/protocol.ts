@@ -3,6 +3,18 @@
 
 export const PROTOCOL_VERSION = 1 as const;
 
+export interface ProtocolDeviceInfo {
+  deviceId: string;
+  name: string;
+  trustFingerprint: string;
+  trustPublicKey: string;
+  port?: number;
+  platform?: string;
+  version?: string;
+  hasAvatar?: boolean;
+  profileRevision?: number;
+}
+
 export interface FileOfferMessage {
   type: 'file-offer';
   version: typeof PROTOCOL_VERSION;
@@ -12,12 +24,7 @@ export interface FileOfferMessage {
   mimeType?: string;
   sha256?: string;
   signature?: string;
-  fromDevice: {
-    deviceId: string;
-    name: string;
-    trustFingerprint: string;
-    trustPublicKey: string;
-  };
+  fromDevice: ProtocolDeviceInfo;
 }
 
 export interface FileAcceptMessage {
@@ -49,12 +56,7 @@ export interface PairRequestMessage {
   version: typeof PROTOCOL_VERSION;
   requestId: string;
   timestamp: number;
-  fromDevice: {
-    deviceId: string;
-    name: string;
-    trustFingerprint: string;
-    trustPublicKey: string;
-  };
+  fromDevice: ProtocolDeviceInfo;
   signature?: string;
 }
 

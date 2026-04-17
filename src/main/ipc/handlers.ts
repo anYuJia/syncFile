@@ -23,6 +23,7 @@ import type {
 import type { DeviceRegistry } from '../discovery/device-registry';
 import type { MdnsService } from '../discovery/mdns-service';
 import type { PendingOfferStore } from '../storage/pending-offers';
+import type { RecentPeerStore } from '../storage/recent-peers';
 import type { SandboxLocationStore } from '../storage/sandbox-location';
 import type { Sandbox } from '../storage/sandbox';
 import type { SettingsStore } from '../storage/settings';
@@ -42,6 +43,7 @@ import type {
 import type { PairRequestMessage } from '../transfer/protocol';
 
 const PROGRESS_THROTTLE_MS = 120;
+const DEFAULT_TRANSFER_PORT = 43434;
 
 interface OutboundTransferRequest {
   host: string;
@@ -159,6 +161,7 @@ export interface IpcContext {
   sandbox: Sandbox;
   sandboxLocation: SandboxLocationStore;
   pendingOfferStore: PendingOfferStore;
+  recentPeerStore: RecentPeerStore;
   settingsStore: SettingsStore;
   transferHistoryStore: TransferHistoryStore;
   identity: DeviceIdentity;
@@ -295,6 +298,69 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   const publishTransferHistoryReset = (): void => {
     sendToRenderer(IpcChannels.TransferHistoryReset, context.transferHistoryStore.list());
+  };
+
+  const rememberInboundPeer = (info: IncomingOfferInfo): void => {
+    const address = info.peerAddress;
+    if (!address) {
+      return;
+    }
+    const device: Device = {
+      deviceId: info.fromDevice.deviceId,
+      name: info.fromDevice.name,
+      hasAvatar: info.fromDevice.hasAvatar,
+      profileRevision: info.fromDevice.profileRevision,
+      trustFingerprint: info.fromDevice.trustFingerprint,
+      trustPublicKey: info.fromDevice.trustPublicKey,
+      host: address,
+      address,
+      port: info.fromDevice.port ?? DEFAULT_TRANSFER_PORT,
+      platform: info.fromDevice.platform ?? 'unknown',
+      version: info.fromDevice.version ?? '1'
+    };
+    context.logger?.info('discovery', 'remembered inbound peer as fallback device', {
+      deviceId: device.deviceId,
+      name: device.name,
+      address: `${device.address}:${device.port}`
+    });
+    context.recentPeerStore.upsert(device);
+    context.registry.upsertPersistent(device);
+  };
+
+  const rememberConnectedPeer = (
+    peer: {
+      deviceId: string;
+      name: string;
+      trustFingerprint: string;
+      trustPublicKey: string;
+    },
+    address?: string
+  ): void => {
+    if (!address) {
+      return;
+    }
+    const current = context.registry.list().find((device) => device.deviceId === peer.deviceId);
+    const device: Device = {
+      deviceId: peer.deviceId,
+      name: peer.name,
+      avatarDataUrl: current?.avatarDataUrl,
+      hasAvatar: current?.hasAvatar,
+      profileRevision: current?.profileRevision,
+      trustFingerprint: peer.trustFingerprint,
+      trustPublicKey: peer.trustPublicKey,
+      host: current?.host ?? address,
+      address,
+      port: current?.port ?? DEFAULT_TRANSFER_PORT,
+      platform: current?.platform ?? 'unknown',
+      version: current?.version ?? '1'
+    };
+    context.logger?.info('discovery', 'remembered secure peer connection as fallback device', {
+      deviceId: device.deviceId,
+      name: device.name,
+      address: `${device.address}:${device.port}`
+    });
+    context.recentPeerStore.upsert(device);
+    context.registry.upsertPersistent(device);
   };
 
   const mergePeerProfile = (device: Device, profile: PeerProfilePayload): Device => ({
@@ -686,6 +752,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle(IpcChannels.GetDevices, (): Device[] => {
     context.logger?.debug('ipc', 'get devices requested');
     const devices = context.registry.list();
+    context.logger?.debug('ipc', 'returning device list', { count: devices.length });
     for (const device of devices) {
       ensurePeerProfile(device);
     }
@@ -694,7 +761,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   ipcMain.handle(IpcChannels.RefreshDevices, (): Device[] => {
     context.logger?.info('discovery', 'manual device refresh requested');
-    context.mdnsService.refresh(true);
+    context.mdnsService.refresh(false);
     return context.registry.list();
   });
 
@@ -1154,6 +1221,8 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.registry.on('device-online', (device) => {
+    context.recentPeerStore.upsert(device);
+    context.registry.upsertPersistent(device);
     ensurePeerProfile(device);
     context.logger?.info('discovery', 'device online', {
       deviceId: device.deviceId,
@@ -1170,7 +1239,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     sendToRenderer(IpcChannels.DeviceOffline, deviceId);
   });
 
+  context.tcpServer.on('peer-connected', (peer, address) => {
+    rememberConnectedPeer(peer, address);
+  });
+
   context.tcpServer.on('incoming-offer', (info, responder) => {
+    rememberInboundPeer(info);
     void (async () => {
       try {
         const settings = context.settingsStore.get();

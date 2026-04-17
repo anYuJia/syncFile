@@ -375,6 +375,14 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    if (!isSettingsOpen) {
+      return;
+    }
+    setIsResizingRows(false);
+    setIsResizingColumns(false);
+  }, [isSettingsOpen]);
+
+  useEffect(() => {
     for (const offer of pendingOffers) {
       if (seenOfferIdsRef.current.has(offer.offerId)) {
         continue;

@@ -176,6 +176,10 @@ describe('registerIpcHandlers', () => {
         upsert: vi.fn(),
         remove: vi.fn()
       } as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
+      } as never,
       settingsStore: {
         get: vi.fn(() => ({
           maxSandboxSizeMB: 1024,
@@ -266,6 +270,10 @@ describe('registerIpcHandlers', () => {
         save: vi.fn((path: string) => path)
       } as never,
       pendingOfferStore: pendingOfferStore as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
+      } as never,
       settingsStore: {
         get: vi.fn(() => ({
           maxSandboxSizeMB: 1,
@@ -357,6 +365,10 @@ describe('registerIpcHandlers', () => {
         list: vi.fn(() => []),
         upsert: vi.fn(),
         remove: vi.fn()
+      } as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
       } as never,
       settingsStore: {
         get: vi.fn(() => ({
@@ -486,6 +498,10 @@ describe('registerIpcHandlers', () => {
         list: vi.fn(() => []),
         upsert: vi.fn(),
         remove: vi.fn()
+      } as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
       } as never,
       settingsStore: {
         get: vi.fn(() => ({

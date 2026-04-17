@@ -7,7 +7,6 @@ export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
 const BROWSER_REFRESH_MS = 4000;
 const DEVICE_STALE_MS = 45000;
-const BROWSER_RESET_MS = 8000;
 
 export interface MdnsServiceOptions {
   registry: DeviceRegistry;
@@ -27,7 +26,6 @@ export class MdnsService {
   private published?: Service;
   private browser?: Browser;
   private refreshTimer: NodeJS.Timeout | null = null;
-  private lastBrowserResetAt = 0;
 
   constructor(private readonly opts: MdnsServiceOptions) {
     this.bonjour = new Bonjour({}, (error: Error) => {
@@ -49,12 +47,14 @@ export class MdnsService {
 
   publish(): void {
     if (this.published) return;
+    const serviceInstanceName = `${sanitizeServiceInstanceName(this.opts.self.name)}-${this.opts.self.deviceId.slice(0, 8)}`;
     this.published = this.bonjour.publish({
-      name: `${this.opts.self.name}-${this.opts.self.deviceId.slice(0, 8)}`,
+      name: serviceInstanceName,
       type: SERVICE_TYPE,
       protocol: 'tcp',
       port: this.opts.self.port,
       disableIPv6: this.opts.self.platform === 'win32',
+      probe: false,
       txt: {
         deviceId: this.opts.self.deviceId,
         displayName: this.opts.self.name,
@@ -67,7 +67,7 @@ export class MdnsService {
     });
     this.published.on('up', () => {
       logInfo('discovery', 'mdns service published', {
-        name: this.published?.name,
+        name: serviceInstanceName,
         host: this.published?.host,
         port: this.opts.self.port,
         ipv6Disabled: this.opts.self.platform === 'win32'
@@ -163,7 +163,7 @@ export class MdnsService {
       name: service.name,
       host: service.host
     });
-    this.opts.registry.remove(deviceId);
+    this.opts.registry.remove(deviceId, { preservePersistent: true });
   };
 
   private serviceToDevice(service: Service): Device | null {
@@ -215,20 +215,12 @@ export class MdnsService {
         this.browser = this.createBrowser();
         return;
       }
-      if (Date.now() - this.lastBrowserResetAt >= BROWSER_RESET_MS) {
-        // bonjour-service does not emit another "up" event for unchanged peers on plain
-        // browser.update(), so rotating the browser is what refreshes lastSeenAt reliably.
-        logDebug('discovery', 'periodic mdns browser reset for keepalive');
-        this.resetBrowser();
-        return;
-      }
       logDebug('discovery', 'mdns browser update');
       this.browser?.update();
     }, BROWSER_REFRESH_MS);
   }
 
   private createBrowser(): Browser {
-    this.lastBrowserResetAt = Date.now();
     const browser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
     browser.on('up', this.onServiceUp);
     browser.on('txt-update', this.onServiceUp);
@@ -257,6 +249,13 @@ export class MdnsService {
     this.destroyBrowser();
     this.browser = this.createBrowser();
   }
+}
+
+function sanitizeServiceInstanceName(name: string): string {
+  const trimmed = name.trim();
+  const withoutLocal = trimmed.replace(/\.local$/i, '');
+  const normalized = withoutLocal.replace(/\.+/g, '-').replace(/\s+/g, ' ').trim();
+  return normalized.length > 0 ? normalized : 'syncfile';
 }
 
 export function selectAddress(

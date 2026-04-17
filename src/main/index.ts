@@ -13,6 +13,7 @@ import { SandboxLocationStore } from './storage/sandbox-location';
 import { Sandbox } from './storage/sandbox';
 import { PendingOfferStore } from './storage/pending-offers';
 import { recoverPendingOffers } from './storage/pending-offer-recovery';
+import { RecentPeerStore } from './storage/recent-peers';
 import { SettingsStore } from './storage/settings';
 import { TransferHistoryStore } from './storage/transfer-history';
 import { recoverTransferState } from './storage/transfer-recovery';
@@ -27,6 +28,8 @@ import {
 } from './logging/runtime-log';
 
 const DEFAULT_TRANSFER_PORT = 43434;
+const DEFAULT_TRANSFER_PORT_RETRY_COUNT = 5;
+const DEFAULT_TRANSFER_PORT_RETRY_DELAY_MS = 400;
 
 let mainWindow: BrowserWindow | null = null;
 let tcpServer: TcpServer | null = null;
@@ -110,23 +113,52 @@ async function bootstrapServices(): Promise<void> {
   const sandboxLocation = new SandboxLocationStore(userDataDir);
   const sandbox = new Sandbox(sandboxLocation.resolvePath(defaultSandboxRoot));
   const pendingOfferStore = new PendingOfferStore(userDataDir);
+  const recentPeerStore = new RecentPeerStore(userDataDir);
   const settingsStore = new SettingsStore(userDataDir);
   transferHistoryStore = new TransferHistoryStore(userDataDir);
   recoverTransferState(transferHistoryStore, sandbox);
   recoverPendingOffers(pendingOfferStore, transferHistoryStore);
   const registry = new DeviceRegistry();
+  const recentPeers = recentPeerStore.list();
+  runtimeLogger.info('discovery', 'restoring recent peers', { count: recentPeers.length });
+  for (const peer of recentPeers) {
+    registry.upsertPersistent(peer);
+  }
 
   tcpServer = new TcpServer({
     sandbox,
     selfDevice: identity
   });
-  const actualPort = await tcpServer
-    .listen(DEFAULT_TRANSFER_PORT)
-    .catch(() => (tcpServer as TcpServer).listen(0));
+  const actualPort = await listenWithRetry(tcpServer, DEFAULT_TRANSFER_PORT).catch(() => (tcpServer as TcpServer).listen(0));
   runtimeLogger.info('transfer', 'tcp server listening', { port: actualPort });
 
   const tcpClient = new TcpClient({
-    selfDevice: identity
+    selfDevice: {
+      get deviceId(): string {
+        return identity.deviceId;
+      },
+      get name(): string {
+        return identity.name;
+      },
+      get trustFingerprint(): string {
+        return identity.trustFingerprint;
+      },
+      get trustPublicKey(): string {
+        return identity.trustPublicKey;
+      },
+      get trustPrivateKey(): string {
+        return identity.trustPrivateKey;
+      },
+      get hasAvatar(): boolean {
+        return Boolean(identity.avatarDataUrl);
+      },
+      get profileRevision(): number {
+        return identity.profileRevision;
+      },
+      port: actualPort,
+      platform,
+      version: '1'
+    }
   });
 
   const advertisedSelf = {
@@ -178,6 +210,7 @@ async function bootstrapServices(): Promise<void> {
       sandbox,
       sandboxLocation,
       pendingOfferStore,
+      recentPeerStore,
       settingsStore,
       transferHistoryStore,
       mdnsService,
@@ -189,6 +222,23 @@ async function bootstrapServices(): Promise<void> {
     });
     ipcRegistered = true;
   }
+}
+
+async function listenWithRetry(server: TcpServer, preferredPort: number): Promise<number> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < DEFAULT_TRANSFER_PORT_RETRY_COUNT; attempt += 1) {
+    try {
+      return await server.listen(preferredPort);
+    } catch (error) {
+      lastError = error;
+      await delay(DEFAULT_TRANSFER_PORT_RETRY_DELAY_MS);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('failed to bind preferred transfer port');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function bootstrap(): Promise<void> {

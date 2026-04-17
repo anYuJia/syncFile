@@ -31,6 +31,8 @@ function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [profile, setProfile] = useState<Device | null>(null);
+  const [profileName, setProfileName] = useState('');
+  const [profileAvatarDataUrl, setProfileAvatarDataUrl] = useState<string | undefined>(undefined);
   const [sandboxLocation, setSandboxLocation] = useState<SandboxLocationInfo | null>(null);
   const [maintenance, setMaintenance] = useState<SettingsPayload['maintenance']>({
     transferHistoryCount: 0,
@@ -62,6 +64,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       ]);
       setSettings(nextSettings);
       setProfile(selfDevice);
+      setProfileName(selfDevice.name);
+      setProfileAvatarDataUrl(selfDevice.avatarDataUrl);
       if (hasSandboxLocation(nextSettings)) {
         setSandboxLocation(nextSettings.sandboxLocation);
         setMaintenance(nextSettings.maintenance);
@@ -103,7 +107,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       if (!profile) {
         throw new Error(messages.failedToLoadDeviceInformation);
       }
-      if (profile.name.trim().length === 0) {
+      if (profileName.trim().length === 0) {
         throw new Error(messages.settingsProfileName);
       }
       const normalized: Settings = {
@@ -123,8 +127,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         }
       }
       await window.syncFile.saveProfile({
-        name: profile.name.trim(),
-        avatarDataUrl: profile.avatarDataUrl
+        name: profileName.trim(),
+        avatarDataUrl: profileAvatarDataUrl
       });
       await window.syncFile.saveSettings(normalized);
       onClose();
@@ -194,14 +198,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
     try {
       const avatarDataUrl = await makeAvatarDataUrl(file);
-      setProfile((current) =>
-        current
-          ? {
-              ...current,
-              avatarDataUrl
-            }
-          : current
-      );
+      setProfileAvatarDataUrl(avatarDataUrl);
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.settingsProfileAvatar);
     }
@@ -274,8 +271,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 <div className="settings-profile-row">
                   <div className="settings-profile-preview">
                     <Avatar
-                      name={profile?.name ?? messages.appNotReady}
-                      avatarDataUrl={profile?.avatarDataUrl}
+                      name={profileName || messages.appNotReady}
+                      avatarDataUrl={profileAvatarDataUrl}
                       size="lg"
                     />
                     <div className="settings-profile-actions">
@@ -287,20 +284,11 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                       >
                         {messages.settingsProfileChangeAvatar}
                       </button>
-                      {profile?.avatarDataUrl && (
+                      {profileAvatarDataUrl && (
                         <button
                           type="button"
                           className="button button-ghost"
-                          onClick={() =>
-                            setProfile((current) =>
-                              current
-                                ? {
-                                    ...current,
-                                    avatarDataUrl: undefined
-                                  }
-                                : current
-                            )
-                          }
+                          onClick={() => setProfileAvatarDataUrl(undefined)}
                           disabled={busy}
                         >
                           {messages.settingsProfileRemoveAvatar}
@@ -319,20 +307,11 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                       type="text"
                       className="settings-input settings-profile-input"
                       maxLength={64}
-                      value={profile?.name ?? ''}
-                      onChange={(event) =>
-                        setProfile((current) =>
-                          current
-                            ? {
-                                ...current,
-                                name: event.target.value
-                              }
-                            : current
-                        )
-                      }
+                      value={profileName}
+                      onChange={(event) => setProfileName(event.target.value)}
                     />
                     <span className="settings-desc">{messages.settingsProfileAvatarDesc}</span>
-                    {profile?.avatarDataUrl && (
+                    {profileAvatarDataUrl && (
                       <span className="settings-desc">
                         {messages.settingsProfileAvatarReady}
                       </span>

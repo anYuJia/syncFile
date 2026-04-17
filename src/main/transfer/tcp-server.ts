@@ -38,6 +38,7 @@ export interface IncomingOfferInfo {
   offerId: string;
   fileName: string;
   fileSize: number;
+  peerAddress?: string;
   sha256?: string;
   mimeType?: string;
   fromDevice: {
@@ -45,6 +46,11 @@ export interface IncomingOfferInfo {
     name: string;
     trustFingerprint: string;
     trustPublicKey: string;
+    port?: number;
+    platform?: string;
+    version?: string;
+    hasAvatar?: boolean;
+    profileRevision?: number;
   };
 }
 
@@ -105,6 +111,12 @@ export interface TransferErrorInfo {
 }
 
 export interface TcpServerEvents {
+  'peer-connected': (peer: {
+    deviceId: string;
+    name: string;
+    trustFingerprint: string;
+    trustPublicKey: string;
+  }, address?: string) => void;
   'incoming-offer': (offer: IncomingOfferInfo, respond: OfferResponder) => void;
   'pair-request': (request: PairRequestMessage, respond: PairResponder) => void;
   'pair-request-closed': (requestId: string) => void;
@@ -203,9 +215,17 @@ export class TcpServer extends EventEmitter {
     void secureAccept(socket, {
       selfDevice: this.options.selfDevice
     })
-      .then(({ socket: secureSocket }) => {
+      .then(({ socket: secureSocket, peer }) => {
         logInfo('transfer', 'accepted secure peer connection');
-        this.handleSocket(secureSocket);
+        if (peer.deviceId) {
+          this.emit('peer-connected', {
+            deviceId: peer.deviceId,
+            name: peer.name,
+            trustFingerprint: peer.trustFingerprint,
+            trustPublicKey: peer.trustPublicKey ?? ''
+          }, normalizeRemoteAddress(socket.remoteAddress));
+        }
+        this.handleSocket(secureSocket, normalizeRemoteAddress(socket.remoteAddress));
       })
       .catch((error) => {
         logWarn('transfer', 'secure accept failed', error);
@@ -215,7 +235,7 @@ export class TcpServer extends EventEmitter {
       });
   }
 
-  private handleSocket(socket: SecureSocket): void {
+  private handleSocket(socket: SecureSocket, peerAddress?: string): void {
 
     const decoder = new MessageDecoder();
     let phase: ConnectionPhase = 'awaiting-offer';
@@ -637,6 +657,7 @@ export class TcpServer extends EventEmitter {
               offerId: first.fileId,
               fileName: first.fileName,
               fileSize: first.fileSize,
+              peerAddress,
               sha256: first.sha256,
               mimeType: first.mimeType,
               fromDevice: first.fromDevice
@@ -813,4 +834,11 @@ function seedHashForResume(partialPath: string, existingBytes: number): Promise<
     stream.once('end', () => resolve(hash));
     stream.once('error', reject);
   });
+}
+
+function normalizeRemoteAddress(address: string | undefined): string | undefined {
+  if (!address) {
+    return undefined;
+  }
+  return address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
 }
