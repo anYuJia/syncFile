@@ -186,10 +186,27 @@ export function DropZone({
   };
 
   const hasFiles = pendingFiles.length > 0;
+  const totalBytes = pendingFiles.reduce((sum, file) => sum + file.size, 0);
+  const readyRecipients = selectedDevices.filter(
+    (device) => device.isOnline !== false && device.reachability !== 'unreachable' && device.reachability !== 'checking'
+  ).length;
+  const checkingRecipients = selectedDevices.filter(
+    (device) => device.isOnline !== false && device.reachability === 'checking'
+  ).length;
+  const selectedRecipientCount = selectedDevices.length;
   const canSend =
     hasFiles &&
     selectedDevices.some((device) => device.isOnline !== false && device.reachability !== 'unreachable');
   const selectedDeviceNames = selectedDevices.map((device) => device.name).join(' · ');
+  const sendStatusLabel =
+    selectedRecipientCount === 0
+      ? messages.sendQueueStatusNoRecipients
+      : readyRecipients > 0
+        ? messages.sendQueueStatusReady(readyRecipients, selectedRecipientCount)
+        : checkingRecipients > 0
+          ? messages.sendQueueStatusChecking(checkingRecipients)
+          : messages.sendQueueStatusNoReadyRecipients;
+  const sendSummary = `${messages.dropZoneFileCount(pendingFiles.length)} · ${formatBytes(totalBytes)}`;
 
   return (
     <div
@@ -348,18 +365,23 @@ export function DropZone({
 
           <div className="dz-send-bar">
             <span className="dz-send-bar-info">
-              {messages.dropZoneFileCount(pendingFiles.length)}
+              <span className="dz-send-bar-summary">{sendSummary}</span>
               {pendingFiles.length > 1 && (
                 <button type="button" className="dz-send-bar-clear" onClick={handleClearAll}>
                   {messages.dropZoneClearAll}
                 </button>
               )}
             </span>
-            {selectedDevices.length > 0 && selfDevice ? (
-              <span className="dz-send-bar-route">{selfDevice.name} → {selectedDeviceNames}</span>
-            ) : (
-              <span className="dz-send-bar-hint">{messages.dropZoneSelectDevice}</span>
-            )}
+            <span className={`dz-send-bar-status${canSend ? ' is-ready' : ' is-blocked'}`}>
+              {sendStatusLabel}
+            </span>
+            <span className="dz-send-bar-route-wrap">
+              {selectedDevices.length > 0 && selfDevice ? (
+                <span className="dz-send-bar-route">{selfDevice.name} → {selectedDeviceNames}</span>
+              ) : (
+                <span className="dz-send-bar-hint">{messages.dropZoneSelectDevice}</span>
+              )}
+            </span>
             <button
               type="button"
               className="dz-send-bar-button"

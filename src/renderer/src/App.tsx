@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerE
 
 import { DeviceList } from './components/DeviceList';
 import { DropZone, type PendingFile } from './components/DropZone';
-import { PairRequestQueuePrompt } from './components/PairRequestQueuePrompt';
 import { PairDevicePrompt } from './components/PairDevicePrompt';
-import { ReceivePrompt } from './components/ReceivePrompt';
 import { LogViewer } from './components/LogViewer';
+import { RequestsInboxDrawer } from './components/RequestsInboxDrawer';
 import { SettingsModal } from './components/Settings';
 import { TransferList } from './components/TransferList';
 import { Avatar } from './components/Avatar';
@@ -38,6 +37,7 @@ const RIGHT_PANE_RESIZER_HEIGHT = 12;
 const COMPACT_LAYOUT_QUERY = '(max-width: 1040px)';
 
 type CompactSection = 'manifest' | 'dispatch' | 'ledger';
+type RequestsInboxTab = 'files' | 'pairs';
 
 interface SelectedRecipientSnapshot extends Device {
   isOnline: boolean;
@@ -161,6 +161,8 @@ export function App(): JSX.Element {
   const [selectedTransferId, setSelectedTransferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
+  const [isRequestsInboxOpen, setIsRequestsInboxOpen] = useState(false);
+  const [requestsInboxTab, setRequestsInboxTab] = useState<RequestsInboxTab>('files');
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
@@ -184,6 +186,7 @@ export function App(): JSX.Element {
   });
   const [isResizingRows, setIsResizingRows] = useState(false);
   const [isResizingColumns, setIsResizingColumns] = useState(false);
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem('theme');
     return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -197,6 +200,7 @@ export function App(): JSX.Element {
   const [unreadPairRequestIds, setUnreadPairRequestIds] = useState<Set<string>>(new Set());
   const contentGridRef = useRef<HTMLElement>(null);
   const rightPaneRef = useRef<HTMLDivElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
   const seenOfferIdsRef = useRef<Set<string>>(new Set());
   const seenPairRequestIdsRef = useRef<Set<string>>(new Set());
   const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
@@ -380,7 +384,33 @@ export function App(): JSX.Element {
     }
     setIsResizingRows(false);
     setIsResizingColumns(false);
+    setIsToolsMenuOpen(false);
   }, [isSettingsOpen]);
+
+  useEffect(() => {
+    if (!isToolsMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!toolsMenuRef.current?.contains(event.target as Node | null)) {
+        setIsToolsMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setIsToolsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isToolsMenuOpen]);
 
   useEffect(() => {
     for (const offer of pendingOffers) {
@@ -395,6 +425,8 @@ export function App(): JSX.Element {
         messages.notificationIncomingBody(offer.fromDevice.name, offer.fileName),
         () => {
           setSelectedIncomingOfferId(offer.offerId);
+          setRequestsInboxTab('files');
+          setIsRequestsInboxOpen(true);
           if (isCompactLayout) {
             setCompactSection('manifest');
           }
@@ -431,6 +463,8 @@ export function App(): JSX.Element {
         messages.notificationPairBody(request.fromDevice.name),
         () => {
           setSelectedPairRequestId(request.requestId);
+          setRequestsInboxTab('pairs');
+          setIsRequestsInboxOpen(true);
           if (isCompactLayout) {
             setCompactSection('manifest');
           }
@@ -456,7 +490,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const clearVisibleUnread = (): void => {
-      if (document.visibilityState !== 'visible' || !document.hasFocus()) {
+      if (!isRequestsInboxOpen || document.visibilityState !== 'visible' || !document.hasFocus()) {
         return;
       }
       if (selectedIncomingOfferId) {
@@ -488,7 +522,7 @@ export function App(): JSX.Element {
       window.removeEventListener('focus', clearVisibleUnread);
       document.removeEventListener('visibilitychange', clearVisibleUnread);
     };
-  }, [selectedIncomingOfferId, selectedPairRequestId]);
+  }, [isRequestsInboxOpen, selectedIncomingOfferId, selectedPairRequestId]);
 
   useEffect(() => {
     const trackedStatuses = new Set(['completed', 'failed', 'rejected', 'cancelled']);
@@ -939,12 +973,6 @@ export function App(): JSX.Element {
     }
   }
 
-  const currentOffer =
-    pendingOffers.find((offer) => offer.offerId === selectedIncomingOfferId) ?? pendingOffers[0] ?? null;
-  const currentPairRequest =
-    pendingPairRequests.find((request) => request.requestId === selectedPairRequestId) ??
-    pendingPairRequests[0] ??
-    null;
   const contentGridStyle = {
     '--left-pane-split': leftPaneSplit
   } as CSSProperties;
@@ -1015,6 +1043,8 @@ export function App(): JSX.Element {
     const unreadOfferId = pendingOffers.find((offer) => unreadOfferIds.has(offer.offerId))?.offerId;
     if (unreadOfferId) {
       setSelectedIncomingOfferId(unreadOfferId);
+      setRequestsInboxTab('files');
+      setIsRequestsInboxOpen(true);
       if (isCompactLayout) {
         setCompactSection('manifest');
       }
@@ -1024,6 +1054,8 @@ export function App(): JSX.Element {
     const unreadPairRequestId = pendingPairRequests.find((request) => unreadPairRequestIds.has(request.requestId))?.requestId;
     if (unreadPairRequestId) {
       setSelectedPairRequestId(unreadPairRequestId);
+      setRequestsInboxTab('pairs');
+      setIsRequestsInboxOpen(true);
       if (isCompactLayout) {
         setCompactSection('manifest');
       }
@@ -1032,6 +1064,8 @@ export function App(): JSX.Element {
 
     if (pendingOffers[0]) {
       setSelectedIncomingOfferId(pendingOffers[0].offerId);
+      setRequestsInboxTab('files');
+      setIsRequestsInboxOpen(true);
       if (isCompactLayout) {
         setCompactSection('manifest');
       }
@@ -1040,10 +1074,16 @@ export function App(): JSX.Element {
 
     if (pendingPairRequests[0]) {
       setSelectedPairRequestId(pendingPairRequests[0].requestId);
+      setRequestsInboxTab('pairs');
+      setIsRequestsInboxOpen(true);
       if (isCompactLayout) {
         setCompactSection('manifest');
       }
+      return;
     }
+
+    setRequestsInboxTab('files');
+    setIsRequestsInboxOpen(true);
   };
 
   const showManifest = !isCompactLayout || compactSection === 'manifest';
@@ -1074,7 +1114,7 @@ export function App(): JSX.Element {
         <div className="topbar-actions">
           <button
             type="button"
-            className="button button-muted topbar-icon-button"
+            className={`button${unreadRequestCount > 0 ? '' : ' button-muted'} topbar-request-button`}
             onClick={handleOpenRequestsInbox}
             title={messages.requestsInbox}
             aria-label={messages.requestsInbox}
@@ -1086,79 +1126,92 @@ export function App(): JSX.Element {
               </svg>
               {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
             </span>
+            <span className="topbar-request-copy">{messages.requestsInbox}</span>
           </button>
-          <button
-            type="button"
-            className="button button-muted topbar-icon-button"
-            onClick={() => {
-              setIsLogViewerOpen(true);
-              void refreshRuntimeLogs();
-            }}
-            title={messages.logs}
-            aria-label={messages.logs}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <path d="M14 2v6h6" />
-              <path d="M8 13h8" />
-              <path d="M8 17h8" />
-              <path d="M8 9h2" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className="button button-muted topbar-icon-button"
-            onClick={() => setIsSettingsOpen(true)}
-            title={messages.settings}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-          <div className="locale-switch" aria-label={messages.languageLabel}>
+          <div ref={toolsMenuRef} className="topbar-tools">
             <button
               type="button"
-              className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
-              onClick={() => setLocale('zh')}
+              className={`button button-muted topbar-icon-button${isToolsMenuOpen ? ' is-active' : ''}`}
+              onClick={() => setIsToolsMenuOpen((prev) => !prev)}
+              title={messages.toolsMenuLabel}
+              aria-label={messages.toolsMenuLabel}
+              aria-haspopup="menu"
+              aria-expanded={isToolsMenuOpen}
             >
-              中文
-            </button>
-            <button
-              type="button"
-              className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
-              onClick={() => setLocale('en')}
-            >
-              EN
-            </button>
-          </div>
-          <button
-            type="button"
-            className="button button-muted"
-            onClick={() => setIsDarkMode((prev) => !prev)}
-            title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {isDarkMode ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2.5" />
-                <path d="M12 19.5V22" />
-                <path d="M4.93 4.93l1.77 1.77" />
-                <path d="M17.3 17.3l1.77 1.77" />
-                <path d="M2 12h2.5" />
-                <path d="M19.5 12H22" />
-                <path d="M4.93 19.07l1.77-1.77" />
-                <path d="M17.3 6.7l1.77-1.77" />
+                <circle cx="12" cy="5" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="12" cy="19" r="1.5" />
               </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
-              </svg>
+            </button>
+            {isToolsMenuOpen && (
+              <div className="topbar-tools-menu" role="menu" aria-label={messages.toolsMenuLabel}>
+                <button
+                  type="button"
+                  className="topbar-tools-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsSettingsOpen(true);
+                    setIsToolsMenuOpen(false);
+                  }}
+                >
+                  {messages.settings}
+                </button>
+                <button
+                  type="button"
+                  className="topbar-tools-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsLogViewerOpen(true);
+                    void refreshRuntimeLogs();
+                    setIsToolsMenuOpen(false);
+                  }}
+                >
+                  {messages.logs}
+                </button>
+                <button
+                  type="button"
+                  className="topbar-tools-item"
+                  role="menuitem"
+                  onClick={() => {
+                    void handleOpenSandbox();
+                    setIsToolsMenuOpen(false);
+                  }}
+                >
+                  {messages.openSandbox}
+                </button>
+                <button
+                  type="button"
+                  className="topbar-tools-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsDarkMode((prev) => !prev);
+                  }}
+                >
+                  {isDarkMode ? messages.appearanceLight : messages.appearanceDark}
+                </button>
+                <div className="topbar-tools-section">
+                  <span className="topbar-tools-label">{messages.languageLabel}</span>
+                  <div className="locale-switch locale-switch-compact" aria-label={messages.languageLabel}>
+                    <button
+                      type="button"
+                      className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
+                      onClick={() => setLocale('zh')}
+                    >
+                      中文
+                    </button>
+                    <button
+                      type="button"
+                      className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
+                      onClick={() => setLocale('en')}
+                    >
+                      EN
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
-          </button>
-          <button type="button" className="button button-muted" onClick={() => void handleOpenSandbox()}>
-            {messages.openSandbox}
-          </button>
+          </div>
         </div>
       </header>
 
@@ -1330,57 +1383,53 @@ export function App(): JSX.Element {
         )}
       </main>
 
-      {currentOffer && (
-        <ReceivePrompt
-          offers={pendingOffers}
-          selectedOfferId={currentOffer.offerId}
-          trustedDeviceKeys={trustedDeviceKeys}
-          onSelectOffer={(offerId) => {
-            setSelectedIncomingOfferId(offerId);
-            setUnreadOfferIds((current) => {
-              if (!current.has(offerId)) {
-                return current;
-              }
-              const next = new Set(current);
-              next.delete(offerId);
-              return next;
-            });
-          }}
-          busy={busyOfferId === currentOffer.offerId}
-          onAccept={handleAccept}
-          onTrustAndAccept={handleTrustAndAccept}
-          onReject={handleReject}
-          messages={messages}
-        />
-      )}
+      <RequestsInboxDrawer
+        isOpen={isRequestsInboxOpen}
+        activeTab={requestsInboxTab}
+        onTabChange={setRequestsInboxTab}
+        onClose={() => setIsRequestsInboxOpen(false)}
+        offers={pendingOffers}
+        selectedOfferId={selectedIncomingOfferId}
+        trustedDeviceKeys={trustedDeviceKeys}
+        busyOfferId={busyOfferId}
+        onSelectOffer={(offerId) => {
+          setSelectedIncomingOfferId(offerId);
+          setUnreadOfferIds((current) => {
+            if (!current.has(offerId)) {
+              return current;
+            }
+            const next = new Set(current);
+            next.delete(offerId);
+            return next;
+          });
+        }}
+        onAccept={handleAccept}
+        onTrustAndAccept={handleTrustAndAccept}
+        onReject={handleReject}
+        pairRequests={pendingPairRequests}
+        selectedPairRequestId={selectedPairRequestId}
+        selfFingerprint={selfDevice?.trustFingerprint}
+        onSelectPairRequest={(requestId) => {
+          setSelectedPairRequestId(requestId);
+          setUnreadPairRequestIds((current) => {
+            if (!current.has(requestId)) {
+              return current;
+            }
+            const next = new Set(current);
+            next.delete(requestId);
+            return next;
+          });
+        }}
+        onAcceptPairRequest={handleAcceptPairRequest}
+        onRejectPairRequest={handleRejectPairRequest}
+        messages={messages}
+      />
       {pairingDevice && selfDevice && (
         <PairDevicePrompt
           device={pairingDevice}
           selfFingerprint={selfDevice.trustFingerprint}
           onConfirm={handlePairDevice}
           onClose={() => setPairingDeviceId(null)}
-          messages={messages}
-        />
-      )}
-      {currentPairRequest && selfDevice && (
-        <PairRequestQueuePrompt
-          requests={pendingPairRequests}
-          selectedRequestId={currentPairRequest.requestId}
-          onSelectRequest={(requestId) => {
-            setSelectedPairRequestId(requestId);
-            setUnreadPairRequestIds((current) => {
-              if (!current.has(requestId)) {
-                return current;
-              }
-              const next = new Set(current);
-              next.delete(requestId);
-              return next;
-            });
-          }}
-          selfFingerprint={selfDevice.trustFingerprint}
-          busy={false}
-          onAccept={handleAcceptPairRequest}
-          onReject={handleRejectPairRequest}
           messages={messages}
         />
       )}

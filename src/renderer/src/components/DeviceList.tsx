@@ -57,6 +57,12 @@ export function DeviceList({
         const selected = selectedDeviceIds.includes(device.deviceId);
         const trusted = trustedDeviceKeys?.has(`${device.deviceId}:${device.trustFingerprint}`) ?? false;
         const reachability = reachabilityByDeviceId?.[device.deviceId];
+        const reachabilityLabel =
+          reachability?.status === 'checking'
+            ? messages.deviceReachabilityChecking
+            : reachability?.status === 'unreachable'
+              ? messages.deviceReachabilityUnreachable
+              : messages.deviceReachabilityReachable;
         const optionId = `device-option-${device.deviceId}`;
         const moveFocus = (targetIndex: number): void => {
           const nextDevice = devices[targetIndex];
@@ -102,30 +108,42 @@ export function DeviceList({
               aria-selected={selected}
               tabIndex={device.deviceId === (focusedDeviceId ?? devices[0]?.deviceId) ? 0 : -1}
             >
-              <span className="device-item-indicator" />
+              <span
+                className={`device-item-indicator${
+                  reachability?.status === 'unreachable'
+                    ? ' is-error'
+                    : reachability?.status === 'checking'
+                      ? ' is-checking'
+                      : ''
+                }`}
+              />
               <Avatar name={device.name} avatarDataUrl={device.avatarDataUrl} size="md" />
 
               <span className="device-item-main">
-                <span className="device-item-row">
+                <span className="device-item-row device-item-head">
                   <span className="device-item-title">
                     <span className="device-item-name">{device.name}</span>
                     {trusted && <span className="device-item-trusted">{messages.trustedDeviceLabel}</span>}
                     {selected && <span className="device-item-selected-tag">{messages.selectedRecipientLabel}</span>}
                   </span>
-                  <span className="device-item-platform">{formatPlatform(device.platform)}</span>
+                  <span
+                    className={`device-item-reachability${
+                      reachability?.status === 'unreachable'
+                        ? ' is-error'
+                        : reachability?.status === 'checking'
+                          ? ' is-checking'
+                          : ''
+                    }`}
+                  >
+                    {reachabilityLabel}
+                  </span>
                 </span>
-                <span className="device-item-meta">
-                  {device.address}:{device.port}
+                <span className="device-item-meta device-item-meta-line">
+                  <span className="device-item-platform">{formatPlatform(device.platform)}</span>
+                  <span className="device-item-address">{device.address}:{device.port}</span>
                 </span>
                 <span className="device-item-submeta">
-                  ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint} · v{device.version}
-                </span>
-                <span className={`device-item-reachability${reachability?.status === 'unreachable' ? ' is-error' : ''}`}>
-                  {reachability?.status === 'checking'
-                    ? messages.deviceReachabilityChecking
-                    : reachability?.status === 'unreachable'
-                      ? messages.deviceReachabilityUnreachable
-                      : messages.deviceReachabilityReachable}
+                  {messages.deviceFingerprintLabel} {device.trustFingerprint.slice(0, 13)} · v{device.version}
                 </span>
               </span>
             </button>

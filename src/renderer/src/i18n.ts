@@ -87,7 +87,14 @@ export interface Messages {
   taskRetryVisible: string;
   taskCancelVisible: string;
   requestsInbox: string;
+  requestFilesTab: string;
+  requestPairsTab: string;
+  requestsEmptyTitle: string;
+  requestsEmptyBody: string;
   logs: string;
+  toolsMenuLabel: string;
+  appearanceLight: string;
+  appearanceDark: string;
   logViewerTitle: string;
   logViewerEmpty: string;
   logViewerRefresh: string;
@@ -119,6 +126,10 @@ export interface Messages {
   sendQueueStarted: (fileCount: number, recipientCount: number) => string;
   sendQueuePartial: (queuedCount: number, failedCount: number, skippedCount: number) => string;
   sendQueueUnavailable: (recipientCount: number) => string;
+  sendQueueStatusReady: (readyCount: number, totalCount: number) => string;
+  sendQueueStatusChecking: (checkingCount: number) => string;
+  sendQueueStatusNoRecipients: string;
+  sendQueueStatusNoReadyRecipients: string;
   failedToAcceptIncomingFile: string;
   failedToRejectIncomingFile: string;
   failedToOpenSandbox: string;
@@ -296,7 +307,14 @@ const zh: Messages = {
   taskRetryVisible: '重试可见异常任务',
   taskCancelVisible: '取消可见进行中任务',
   requestsInbox: '请求收件箱',
+  requestFilesTab: '文件请求',
+  requestPairsTab: '配对请求',
+  requestsEmptyTitle: '暂时没有待处理请求。',
+  requestsEmptyBody: '新的文件请求和配对请求会集中出现在这里。',
   logs: '日志',
+  toolsMenuLabel: '工具',
+  appearanceLight: '切换到浅色模式',
+  appearanceDark: '切换到深色模式',
   logViewerTitle: '运行日志',
   logViewerEmpty: '暂无日志。执行发现、配对或传输后会在这里显示。',
   logViewerRefresh: '刷新',
@@ -329,6 +347,10 @@ const zh: Messages = {
   sendQueuePartial: (queuedCount, failedCount, skippedCount) =>
     `已加入队列 ${queuedCount} 个收件人，失败 ${failedCount} 个，未尝试 ${skippedCount} 个。草稿已为未完成目标保留。`,
   sendQueueUnavailable: (recipientCount) => `已选 ${recipientCount} 个收件人，但当前没有可发送的在线目标。`,
+  sendQueueStatusReady: (readyCount, totalCount) => `${readyCount} / ${totalCount} 个收件人可立即发送`,
+  sendQueueStatusChecking: (checkingCount) => `${checkingCount} 个收件人正在探测连通性`,
+  sendQueueStatusNoRecipients: '先选择至少一个收件设备',
+  sendQueueStatusNoReadyRecipients: '当前没有可立即发送的收件人',
   failedToAcceptIncomingFile: '接受文件失败。',
   failedToRejectIncomingFile: '拒绝文件失败。',
   failedToOpenSandbox: '打开沙箱目录失败。',
@@ -504,7 +526,14 @@ const en: Messages = {
   taskRetryVisible: 'Retry visible issues',
   taskCancelVisible: 'Cancel visible active',
   requestsInbox: 'Requests inbox',
+  requestFilesTab: 'File requests',
+  requestPairsTab: 'Pair requests',
+  requestsEmptyTitle: 'No pending requests right now.',
+  requestsEmptyBody: 'Incoming file offers and pair requests will appear here.',
   logs: 'Logs',
+  toolsMenuLabel: 'Tools',
+  appearanceLight: 'Switch to light mode',
+  appearanceDark: 'Switch to dark mode',
   logViewerTitle: 'Runtime logs',
   logViewerEmpty: 'No logs yet. Discovery, pairing, and transfer events will appear here.',
   logViewerRefresh: 'Refresh',
@@ -539,6 +568,10 @@ const en: Messages = {
     `Queued ${queuedCount} recipient(s), failed ${failedCount}, skipped ${skippedCount}. Drafts were kept for unfinished targets.`,
   sendQueueUnavailable: (recipientCount) =>
     `${recipientCount} recipient(s) are selected, but none are currently reachable for sending.`,
+  sendQueueStatusReady: (readyCount, totalCount) => `${readyCount} of ${totalCount} recipient(s) are ready`,
+  sendQueueStatusChecking: (checkingCount) => `Checking connectivity for ${checkingCount} recipient(s)`,
+  sendQueueStatusNoRecipients: 'Choose at least one recipient device',
+  sendQueueStatusNoReadyRecipients: 'No recipient is ready for immediate sending',
   failedToAcceptIncomingFile: 'Failed to accept incoming file.',
   failedToRejectIncomingFile: 'Failed to reject incoming file.',
   failedToOpenSandbox: 'Unable to open sandbox folder.',
