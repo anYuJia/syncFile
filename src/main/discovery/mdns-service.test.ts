@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { selectAddress } from './mdns-service';
+import { selectAddress, shouldRecreateBrowser } from './mdns-service';
+
+describe('shouldRecreateBrowser', () => {
+  it('requests a periodic browser reset before the stale window is reached', () => {
+    expect(shouldRecreateBrowser(23_999, 0)).toBe(false);
+    expect(shouldRecreateBrowser(24_000, 0)).toBe(true);
+  });
+});
 
 describe('selectAddress', () => {
   it('prefers the response source IPv4 address when available', () => {

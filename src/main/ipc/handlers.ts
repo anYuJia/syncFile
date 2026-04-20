@@ -231,6 +231,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   const progressTimers = new Map<string, NodeJS.Timeout>();
   const peerProfileCache = new Map<string, PeerProfilePayload>();
   const inflightPeerProfileFetches = new Map<string, Promise<void>>();
+  const deferredOfflineDeviceIds = new Set<string>();
   let activeOutboundTransferId: string | null = null;
 
   const sendToRenderer = <T>(channel: IpcChannel, payload: T): void => {
@@ -298,6 +299,34 @@ export function registerIpcHandlers(context: IpcContext): void {
 
   const publishTransferHistoryReset = (): void => {
     sendToRenderer(IpcChannels.TransferHistoryReset, context.transferHistoryStore.list());
+  };
+
+  const hasActiveTransferForDevice = (deviceId: string): boolean => {
+    for (const meta of outboundTransfers.values()) {
+      if (meta.peerDeviceId === deviceId) {
+        return true;
+      }
+    }
+
+    for (const inbound of completedOrAcceptedOffers.values()) {
+      if (inbound.info.fromDevice.deviceId === deviceId) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const flushDeferredOfflineDevice = (deviceId: string): void => {
+    if (!deferredOfflineDeviceIds.has(deviceId) || hasActiveTransferForDevice(deviceId)) {
+      return;
+    }
+    deferredOfflineDeviceIds.delete(deviceId);
+    context.logger?.info('discovery', 'device offline', {
+      deviceId,
+      deferredUntilTransferSettled: true
+    });
+    sendToRenderer(IpcChannels.DeviceOffline, deviceId);
   };
 
   const rememberInboundPeer = (info: IncomingOfferInfo): void => {
@@ -534,6 +563,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   };
 
   const settleOutboundTransfer = (transferId: string): void => {
+    const meta = outboundTransfers.get(transferId);
     pendingProgressEvents.delete(transferId);
     clearProgressTimer(transferId);
     outboundTransfers.delete(transferId);
@@ -544,6 +574,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     queuedOutboundTransferIdSet.delete(transferId);
     if (activeOutboundTransferId === transferId) {
       activeOutboundTransferId = null;
+    }
+    if (meta?.peerDeviceId) {
+      flushDeferredOfflineDevice(meta.peerDeviceId);
     }
   };
 
@@ -1235,6 +1268,13 @@ export function registerIpcHandlers(context: IpcContext): void {
   });
 
   context.registry.on('device-offline', (deviceId) => {
+    if (hasActiveTransferForDevice(deviceId)) {
+      deferredOfflineDeviceIds.add(deviceId);
+      context.logger?.info('discovery', 'device offline deferred while transfer is active', {
+        deviceId
+      });
+      return;
+    }
     context.logger?.info('discovery', 'device offline', { deviceId });
     sendToRenderer(IpcChannels.DeviceOffline, deviceId);
   });
@@ -1352,6 +1392,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       peerDeviceName: info.fromDevice.name
     });
     publishTransferEvent(IpcChannels.TransferComplete, progress);
+    flushDeferredOfflineDevice(info.fromDevice.deviceId);
 
     if (context.settingsStore.get().openReceivedFolder) {
       shell.showItemInFolder(info.savedPath);
@@ -1382,6 +1423,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       )
     );
     completedOrAcceptedOffers.delete(info.offerId);
+    flushDeferredOfflineDevice(info.fromDevice.deviceId);
     context.logger?.warn('transfer', 'incoming transfer paused', {
       offerId: info.offerId,
       bytesReceived: info.bytesReceived,
@@ -1396,6 +1438,7 @@ export function registerIpcHandlers(context: IpcContext): void {
       makeInboundProgress(info, info.bytesReceived, 'cancelled', receiveMode)
     );
     completedOrAcceptedOffers.delete(info.offerId);
+    flushDeferredOfflineDevice(info.fromDevice.deviceId);
     context.logger?.warn('transfer', 'incoming transfer cancelled', {
       offerId: info.offerId,
       bytesReceived: info.bytesReceived,
@@ -1409,6 +1452,9 @@ export function registerIpcHandlers(context: IpcContext): void {
     }
     if (info.offerId) {
       completedOrAcceptedOffers.delete(info.offerId);
+    }
+    if (info.fromDevice?.deviceId) {
+      flushDeferredOfflineDevice(info.fromDevice.deviceId);
     }
     context.logger?.error('transfer', 'incoming transfer failed', {
       offerId: info.offerId,

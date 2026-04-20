@@ -548,4 +548,122 @@ describe('registerIpcHandlers', () => {
     expect(discardIncomingResume).not.toHaveBeenCalledWith('paused-1', true);
     expect(removeMany).toHaveBeenCalledWith(['failed-1', 'done-1']);
   });
+
+  it('defers device-offline renderer events while an outbound transfer is active', async () => {
+    vi.mocked(sha256File).mockResolvedValue('demo-hash');
+
+    const filePath = join(root, 'demo.bin');
+    writeFileSync(filePath, 'hello world');
+
+    const send = vi.fn();
+    let resolveSend: (() => void) | null = null;
+    const pendingSend = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+
+    const device = {
+      deviceId: 'peer-1',
+      name: 'Peer',
+      trustFingerprint: 'AAAA-BBBB-CCCC-DDDD',
+      trustPublicKey: 'PUBKEY1',
+      host: 'peer.local',
+      address: '127.0.0.1',
+      port: 43434,
+      platform: 'darwin',
+      version: '1'
+    };
+    const registry = Object.assign(new EventEmitter(), {
+      list: vi.fn(() => [device])
+    });
+    const tcpClient = Object.assign(new EventEmitter(), {
+      sendFile: vi.fn(() => pendingSend),
+      pairWithPeer: vi.fn(),
+      pause: vi.fn().mockReturnValue(false),
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const tcpServer = Object.assign(new EventEmitter(), {
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const handle = vi.mocked(ipcMain.handle);
+
+    registerIpcHandlers({
+      registry: registry as never,
+      mdnsService: { refresh: vi.fn() } as never,
+      tcpServer: tcpServer as never,
+      tcpClient: tcpClient as never,
+      sandbox: {
+        rootPath: vi.fn(() => join(root, 'sandbox')),
+        currentUsageBytes: vi.fn().mockResolvedValue(0),
+        matchingResumeBytes: vi.fn(() => 0),
+        hasIncomingResume: vi.fn(() => false),
+        resumeCacheSummary: vi.fn(() => ({ count: 0, bytes: 0 })),
+        discardIncomingResume: vi.fn(),
+        clearResumeCache: vi.fn(() => []),
+        directoryForIncoming: vi.fn(() => join(root, 'sandbox', 'peer-1')),
+        setRoot: vi.fn(),
+        assertContainsPath: vi.fn((path: string) => path)
+      } as never,
+      sandboxLocation: {
+        currentPath: vi.fn(() => null),
+        save: vi.fn((path: string) => path)
+      } as never,
+      pendingOfferStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        remove: vi.fn()
+      } as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
+      } as never,
+      settingsStore: {
+        get: vi.fn(() => ({
+          maxSandboxSizeMB: 1024,
+          autoAccept: false,
+          autoAcceptMaxSizeMB: 64,
+          openReceivedFolder: false,
+          desktopNotifications: true,
+          trustedDevices: []
+        })),
+        save: vi.fn()
+      } as never,
+      transferHistoryStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        get: vi.fn(() => undefined),
+        count: vi.fn(() => 0),
+        remove: vi.fn()
+      } as never,
+      identity: {} as never,
+      userDataDir: root,
+      getSelfDevice: vi.fn(),
+      getWindow: vi.fn(
+        () =>
+          ({
+            isDestroyed: () => false,
+            webContents: { send }
+          }) as never
+      )
+    });
+
+    const sendFileHandler = handle.mock.calls.find(
+      ([channel]) => channel === IpcChannels.SendFile
+    )?.[1] as ((event: unknown, deviceId: string, filePath: string) => Promise<{ value: string }>);
+
+    await sendFileHandler({}, 'peer-1', filePath);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    registry.emit('device-offline', 'peer-1');
+
+    expect(send).not.toHaveBeenCalledWith(IpcChannels.DeviceOffline, 'peer-1');
+
+    if (!resolveSend) {
+      throw new Error('expected outbound transfer promise resolver');
+    }
+    const finishOutboundTransfer = resolveSend as () => void;
+    finishOutboundTransfer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(send).toHaveBeenCalledWith(IpcChannels.DeviceOffline, 'peer-1');
+  });
 });

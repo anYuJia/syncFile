@@ -10,6 +10,7 @@ import { TransferList } from './components/TransferList';
 import { Avatar } from './components/Avatar';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
+import { formatBytes, formatEta, formatTransferRate } from './utils/format';
 import type {
   Device,
   DeviceReachability,
@@ -63,6 +64,16 @@ interface NoticeState {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function progressPercent(fileSize: number, bytesTransferred: number, status?: string): number {
+  if (status === 'completed') {
+    return 100;
+  }
+  if (fileSize <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, Math.round((bytesTransferred / fileSize) * 100)));
 }
 
 function loadInitialSendDraft(): {
@@ -1090,6 +1101,21 @@ export function App(): JSX.Element {
   const showDispatch = !isCompactLayout || compactSection === 'dispatch';
   const showLedger = !isCompactLayout || compactSection === 'ledger';
   const singleSelectedDevice = selectedDevices.length === 1 ? selectedDevices[0] : null;
+  const activeSendTransfers = useMemo(
+    () =>
+      transfers.filter(
+        (item) => item.direction === 'send' && ['pending', 'in-progress'].includes(item.status)
+      ),
+    [transfers]
+  );
+  const primaryActiveSendTransfer = activeSendTransfers[0] ?? null;
+  const primaryActiveSendPercent = primaryActiveSendTransfer
+    ? progressPercent(
+        primaryActiveSendTransfer.fileSize,
+        primaryActiveSendTransfer.bytesTransferred,
+        primaryActiveSendTransfer.status
+      )
+    : 0;
   const sendDraftSummary =
     pendingSendFiles.length > 0
       ? messages.topbarDraftSummary(pendingSendFiles.length, selectedDevices.length)
@@ -1337,6 +1363,60 @@ export function App(): JSX.Element {
                 )}
               </div>
             </div>
+            {primaryActiveSendTransfer && (
+              <div className="dispatch-live-transfer">
+                <div className="dispatch-live-transfer-head">
+                  <div className="dispatch-live-transfer-copy">
+                    <span className="dispatch-live-transfer-kicker">
+                      {primaryActiveSendTransfer.status === 'pending'
+                        ? messages.transferPreparing
+                        : messages.transferStatusInProgress}
+                    </span>
+                    <strong className="dispatch-live-transfer-title">
+                      {primaryActiveSendTransfer.fileName}
+                    </strong>
+                    <span className="dispatch-live-transfer-peer">
+                      {primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}
+                    </span>
+                  </div>
+                  <div className="dispatch-live-transfer-side">
+                    <span className="dispatch-live-transfer-percent">{primaryActiveSendPercent}%</span>
+                    {activeSendTransfers.length > 1 && (
+                      <span className="dispatch-live-transfer-count">+{activeSendTransfers.length - 1}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="dispatch-live-transfer-track" aria-hidden="true">
+                  <div
+                    className="dispatch-live-transfer-fill"
+                    style={{ width: `${primaryActiveSendPercent}%` }}
+                  />
+                </div>
+                <div className="dispatch-live-transfer-meta">
+                  <span>
+                    {formatBytes(primaryActiveSendTransfer.bytesTransferred)} /{' '}
+                    {formatBytes(primaryActiveSendTransfer.fileSize)}
+                  </span>
+                  {(primaryActiveSendTransfer.transferRateBytesPerSecond ||
+                    primaryActiveSendTransfer.estimatedSecondsRemaining) && (
+                    <span className="dispatch-live-transfer-metrics">
+                      {primaryActiveSendTransfer.transferRateBytesPerSecond && (
+                        <span>
+                          {messages.transferRateLabel}{' '}
+                          {formatTransferRate(primaryActiveSendTransfer.transferRateBytesPerSecond)}
+                        </span>
+                      )}
+                      {primaryActiveSendTransfer.estimatedSecondsRemaining && (
+                        <span>
+                          {messages.transferEtaLabel}{' '}
+                          {formatEta(primaryActiveSendTransfer.estimatedSecondsRemaining)}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <DropZone
               onSend={(filePaths) => void handleSendFiles(filePaths)}
               messages={messages}
