@@ -6,8 +6,7 @@ import { logDebug, logError, logInfo, logWarn } from '../logging/runtime-log';
 export const SERVICE_TYPE = 'syncfile';
 export const MDNS_PROTOCOL_VERSION = '1';
 const BROWSER_REFRESH_MS = 4000;
-const BROWSER_RECREATE_MS = 24000;
-const DEVICE_STALE_MS = 90000;
+const DEVICE_STALE_MS = 45000;
 
 export interface MdnsServiceOptions {
   registry: DeviceRegistry;
@@ -27,7 +26,6 @@ export class MdnsService {
   private published?: Service;
   private browser?: Browser;
   private refreshTimer: NodeJS.Timeout | null = null;
-  private lastBrowserResetAt = 0;
 
   constructor(private readonly opts: MdnsServiceOptions) {
     this.bonjour = new Bonjour({}, (error: Error) => {
@@ -205,22 +203,21 @@ export class MdnsService {
     }
 
     this.refreshTimer = setInterval(() => {
-      const removedIds = this.opts.registry.pruneOlderThan(Date.now() - DEVICE_STALE_MS);
-      if (removedIds.length > 0) {
-        logWarn('discovery', 'pruned stale devices after missed mdns responses', {
-          deviceIds: removedIds,
-          staleMs: DEVICE_STALE_MS
-        });
-      }
+      const now = Date.now();
       if (!this.browser) {
         logWarn('discovery', 'mdns browser missing during refresh tick; recreating');
         this.browser = this.createBrowser();
         return;
       }
-      if (shouldRecreateBrowser(Date.now(), this.lastBrowserResetAt)) {
-        logDebug('discovery', 'mdns browser periodic reset');
-        this.resetBrowser();
-        return;
+
+      this.refreshKnownServices(now);
+
+      const removedIds = this.opts.registry.pruneOlderThan(now - DEVICE_STALE_MS);
+      if (removedIds.length > 0) {
+        logWarn('discovery', 'pruned stale devices after missed mdns responses', {
+          deviceIds: removedIds,
+          staleMs: DEVICE_STALE_MS
+        });
       }
       logDebug('discovery', 'mdns browser update');
       this.browser?.update();
@@ -228,7 +225,6 @@ export class MdnsService {
   }
 
   private createBrowser(): Browser {
-    this.lastBrowserResetAt = Date.now();
     const browser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
     browser.on('up', this.onServiceUp);
     browser.on('txt-update', this.onServiceUp);
@@ -257,10 +253,17 @@ export class MdnsService {
     this.destroyBrowser();
     this.browser = this.createBrowser();
   }
-}
 
-export function shouldRecreateBrowser(now: number, lastBrowserResetAt: number): boolean {
-  return now - lastBrowserResetAt >= BROWSER_RECREATE_MS;
+  private refreshKnownServices(seenAt: number): void {
+    const services = this.browser?.services ?? [];
+    for (const service of services) {
+      const device = this.serviceToDevice(service);
+      if (!device || device.deviceId === this.opts.self.deviceId) {
+        continue;
+      }
+      this.opts.registry.upsert(device, seenAt);
+    }
+  }
 }
 
 function sanitizeServiceInstanceName(name: string): string {

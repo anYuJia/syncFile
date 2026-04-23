@@ -1,0 +1,47 @@
+[package]
+name = "syncfile-tauri"
+version = "0.0.12"
+description = "LAN P2P file transfer tool"
+authors = ["you"]
+license = "MIT"
+repository = "https://github.com/anYuJia/syncFile"
+edition = "2021"
+rust-version = "1.70"
+
+[lib]
+name = "syncfile_tauri_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "syncfile-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+mdns-sd = "0.13"
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+thiserror = "2"
+dirs = "6"
+log = "0.4"
+env_logger = "0.11"
+bytes = "1"
+hostname = "0.4"
+base64 = "0.21"
+hex = "0.4"
+ring = "0.17"
+aes-gcm = "0.10"
+time = "0.3"
+tokio-stream = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

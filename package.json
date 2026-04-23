@@ -21,14 +21,21 @@
     "dist:win:ia32": "npm run build && electron-builder --config electron-builder.yml --win nsis --ia32 --publish never",
     "dist:mac:arm64": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --arm64 --publish never",
     "release:win:ia32": "npm run build && electron-builder --config electron-builder.yml --win nsis --ia32 --publish always",
-    "release:mac:arm64": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --arm64 --publish always"
+    "release:mac:arm64": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --arm64 --publish always",
+    "dev:vite": "vite --config vite.config.ts",
+    "build:vite": "vite build --config vite.config.ts",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
     "bonjour-service": "^1.2.1"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.73",
     "@types/react-dom": "^18.2.23",
