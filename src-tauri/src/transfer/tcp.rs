@@ -20,14 +20,18 @@ use tauri::{AppHandle, Emitter};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{oneshot, RwLock};
 use uuid::Uuid;
 
 pub const DEFAULT_PORT: u16 = 43434;
+#[allow(dead_code)]
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+#[allow(dead_code)]
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_DECISION_TIMEOUT: Duration = Duration::from_secs(180);
+#[allow(dead_code)]
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+#[allow(dead_code)]
 const MAX_SECURE_FRAME_BYTES: usize = 1024 * 1024;
 
 fn now_ms() -> u64 {
@@ -66,6 +70,7 @@ fn from_device_to_device(from_device: &FromDevice, peer_address: &str, port: u16
 // ========== TCP Server ==========
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ActiveReceive {
     bytes_received: u64,
     file_size: u64,
@@ -174,7 +179,7 @@ async fn handle_connection(
     let peer_addr = normalize_remote_address(&peer_addr);
 
     // 安全握手
-    let (mut secure_socket, peer) = secure_accept(socket, self_device.clone(), None).await?;
+    let (mut secure_socket, _peer) = secure_accept(socket, self_device.clone(), None).await?;
     let peer_port = 0;
 
     // 读取第一个消息
@@ -219,7 +224,7 @@ async fn handle_pair_request(
     msg: ProtocolMessage,
     mut socket: SecureSocket,
     peer_addr: String,
-    app_handle: AppHandle,
+    _app_handle: AppHandle,
     state: AppState,
     recent_pair_requests: Arc<RwLock<HashMap<String, u64>>>,
 ) -> std::io::Result<()> {
@@ -253,10 +258,10 @@ async fn handle_pair_request(
     requests.insert(request_id.clone(), now_ms());
 
     // 放入状态等待前端决定
-    let (tx, rx) = oneshot::channel::<bool>();
+    let (_tx, _rx) = oneshot::channel::<bool>();
     {
-        let device = from_device_to_device(&from_device, &peer_addr, 0);
-        let mut pair_requests = state.pair_requests.write().await;
+        let _device = from_device_to_device(&from_device, &peer_addr, 0);
+        let _pair_requests = state.pair_requests.write().await;
         // TODO: 需要把 responder 存在 PairRequest 中
         // 暂时简化：直接接受所有配对请求
         // 为了简化实现，直接接受
@@ -299,7 +304,7 @@ async fn handle_file_offer(
     sandbox: Sandbox,
     active_receives: Arc<RwLock<HashMap<String, ActiveReceive>>>,
 ) -> std::io::Result<()> {
-    let (version, file_id, file_name, file_size, mime_type, sha256, from_device, signature) = match msg {
+    let (_version, file_id, file_name, file_size, mime_type, sha256, from_device, _signature) = match msg {
         ProtocolMessage::FileOffer { version, file_id, file_name, file_size, mime_type, sha256, from_device, signature } => {
             (version, file_id, file_name, file_size, mime_type, sha256, from_device, signature)
         }
@@ -309,7 +314,7 @@ async fn handle_file_offer(
     let mut decoder = MessageDecoder::new();
 
     // 暂时跳过签名验证，先跑通流程
-    let from_device_copy = from_device.clone();
+    let _from_device_copy = from_device.clone();
 
     // 创建 offer 信息
     let offer_id = file_id.clone();
