@@ -6,8 +6,8 @@ use super::file_hash::seed_hash_for_resume;
 use super::protocol::{FromDevice, PairRequestMessage, ProtocolMessage, FileOfferMessage};
 use super::secure_channel::{secure_accept, secure_connect, SecureIdentity, SecureSocket, ExpectedPeerIdentity};
 
-use crate::commands::{AppState, Device, IncomingOffer, OfferDecision, PendingOffer, TransferProgress};
-use crate::security::trust::{sign_file_offer, sign_pair_request, verify_file_offer, verify_pair_request};
+use crate::commands::{AppState, Device, IncomingOffer, OfferDecision, PendingOffer, TransferProgress, TransferRecord};
+use crate::security::trust::{sign_file_offer, sign_pair_request, verify_pair_request};
 use crate::storage::sandbox::Sandbox;
 
 use sha2::{Digest, Sha256};
@@ -474,8 +474,32 @@ async fn handle_file_offer(
                     // 完成
                     let saved_path = sandbox.complete_incoming_resume(&file_id)
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    let now = now_ms();
 
                     let _ = app_handle.emit("transfer-progress", TransferProgress {
+                        transfer_id: file_id.clone(),
+                        batch_id: None,
+                        batch_label: None,
+                        direction: "receive".to_string(),
+                        file_name: file_name.clone(),
+                        file_size: file_size as u64,
+                        bytes_transferred: bytes_received,
+                        peer_device_name: Some(device.name.clone()),
+                        peer_device_id: Some(device.device_id.clone()),
+                        status: "completed".to_string(),
+                        receive_mode: None,
+                        local_path: Some(saved_path.to_string_lossy().to_string()),
+                        source_file_modified_at: None,
+                        source_file_sha256: sha256.clone(),
+                        error: None,
+                        transfer_rate_bytes_per_second: None,
+                        estimated_seconds_remaining: None,
+                        updated_at: Some(now),
+                    });
+
+                    // 持久化记录
+                    let mut history = state.transfer_history.write().await;
+                    history.insert(0, TransferRecord {
                         transfer_id: file_id.clone(),
                         batch_id: None,
                         batch_label: None,
@@ -491,14 +515,37 @@ async fn handle_file_offer(
                         source_file_modified_at: None,
                         source_file_sha256: sha256,
                         error: None,
-                        transfer_rate_bytes_per_second: None,
-                        estimated_seconds_remaining: None,
-                        updated_at: Some(now_ms()),
+                        updated_at: now,
                     });
+                    history.truncate(500);
                 } else {
                     // 哈希验证失败
                     sandbox.discard_incoming_resume(&file_id, true);
+                    let now = now_ms();
                     let _ = app_handle.emit("transfer-progress", TransferProgress {
+                        transfer_id: file_id.clone(),
+                        batch_id: None,
+                        batch_label: None,
+                        direction: "receive".to_string(),
+                        file_name: file_name.clone(),
+                        file_size: file_size as u64,
+                        bytes_transferred: bytes_received,
+                        peer_device_name: Some(device.name.clone()),
+                        peer_device_id: Some(device.device_id.clone()),
+                        status: "error".to_string(),
+                        receive_mode: None,
+                        local_path: None,
+                        source_file_modified_at: None,
+                        source_file_sha256: sha256.clone(),
+                        error: Some("hash verification failed".to_string()),
+                        transfer_rate_bytes_per_second: None,
+                        estimated_seconds_remaining: None,
+                        updated_at: Some(now),
+                    });
+
+                    // 持久化错误记录
+                    let mut history = state.transfer_history.write().await;
+                    history.insert(0, TransferRecord {
                         transfer_id: file_id.clone(),
                         batch_id: None,
                         batch_label: None,
@@ -514,10 +561,9 @@ async fn handle_file_offer(
                         source_file_modified_at: None,
                         source_file_sha256: sha256,
                         error: Some("hash verification failed".to_string()),
-                        transfer_rate_bytes_per_second: None,
-                        estimated_seconds_remaining: None,
-                        updated_at: Some(now_ms()),
+                        updated_at: now,
                     });
+                    history.truncate(500);
                 }
             }
 

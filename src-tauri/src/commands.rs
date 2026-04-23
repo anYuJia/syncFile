@@ -216,7 +216,7 @@ pub struct PendingOffer {
 // ============== 应用状态 ==============
 pub struct AppStateInner {
     pub device_registry: Arc<RwLock<DeviceRegistry>>,
-    pub identity: Arc<RwLock<DeviceIdentity>>,
+    pub identity: Arc<RwLock<crate::storage::device_identity::DeviceIdentity>>,
     pub sandbox_path: RwLock<PathBuf>,
     pub settings: RwLock<Settings>,
     pub pending_offers: RwLock<Vec<PendingOffer>>,
@@ -224,6 +224,7 @@ pub struct AppStateInner {
     pub runtime_logs: RwLock<Vec<RuntimeLogEntry>>,
     pub pair_requests: RwLock<Vec<PairRequest>>,
     pub trusted_devices: RwLock<Vec<TrustedDevice>>,
+    pub data_dir: RwLock<PathBuf>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -234,6 +235,18 @@ fn now_ms() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+async fn persist_transfer_record(
+    state: &Arc<AppStateInner>,
+    record: TransferRecord,
+) -> std::io::Result<()> {
+    let mut history = state.transfer_history.write().await;
+    history.insert(0, record.clone());
+    history.truncate(500);
+
+    let data_dir = state.data_dir.read().await;
+    crate::storage::persistent::add_transfer_record(&data_dir, record)
 }
 
 // ============== Devices ==============
@@ -395,6 +408,7 @@ pub async fn send_file(
     let device_clone = device.clone();
     let app_handle_clone = app_handle.clone();
     let file_name_clone = file_name.clone();
+    let state_clone = state.inner().clone();
 
     // 在后台任务中执行传输
     tokio::spawn(async move {
@@ -402,6 +416,7 @@ pub async fn send_file(
         let sha256 = match crate::transfer::file_hash::sha256_file(std::path::Path::new(&file_path_clone)).await {
             Ok(hash) => hash,
             Err(e) => {
+                let now = now_ms();
                 let _ = app_handle_clone.emit("transfer-progress", TransferProgress {
                     transfer_id: transfer_id_clone.clone(),
                     batch_id: batch_id.clone(),
@@ -420,8 +435,28 @@ pub async fn send_file(
                     error: Some(format!("Hash calculation failed: {}", e)),
                     transfer_rate_bytes_per_second: None,
                     estimated_seconds_remaining: None,
-                    updated_at: Some(now_ms()),
+                    updated_at: Some(now),
                 });
+
+                // 持久化错误记录
+                let _ = persist_transfer_record(&state_clone, TransferRecord {
+                    transfer_id: transfer_id_clone.clone(),
+                    batch_id: batch_id.clone(),
+                    batch_label: batch_label.clone(),
+                    direction: "send".to_string(),
+                    file_name: file_name_clone.clone(),
+                    file_size,
+                    bytes_transferred: 0,
+                    peer_device_name: Some(device_clone.name.clone()),
+                    peer_device_id: Some(device_clone.device_id.clone()),
+                    status: "error".to_string(),
+                    receive_mode: None,
+                    local_path: Some(file_path_clone.clone()),
+                    source_file_modified_at: None,
+                    source_file_sha256: None,
+                    error: Some(format!("Hash calculation failed: {}", e)),
+                    updated_at: now,
+                }).await;
                 return;
             }
         };
@@ -439,8 +474,9 @@ pub async fn send_file(
 
         match result {
             Ok(file_id) => {
+                let now = now_ms();
                 let _ = app_handle_clone.emit("transfer-progress", TransferProgress {
-                    transfer_id: file_id,
+                    transfer_id: file_id.clone(),
                     batch_id: batch_id.clone(),
                     batch_label: batch_label.clone(),
                     direction: "send".to_string(),
@@ -451,18 +487,39 @@ pub async fn send_file(
                     peer_device_id: Some(device_clone.device_id.clone()),
                     status: "completed".to_string(),
                     receive_mode: None,
+                    local_path: Some(file_path_clone.clone()),
+                    source_file_modified_at: None,
+                    source_file_sha256: Some(sha256.clone()),
+                    error: None,
+                    transfer_rate_bytes_per_second: None,
+                    estimated_seconds_remaining: None,
+                    updated_at: Some(now),
+                });
+
+                // 持久化记录
+                let _ = persist_transfer_record(&state_clone, TransferRecord {
+                    transfer_id: file_id,
+                    batch_id: batch_id.clone(),
+                    batch_label: batch_label.clone(),
+                    direction: "send".to_string(),
+                    file_name: file_name_clone,
+                    file_size,
+                    bytes_transferred: file_size,
+                    peer_device_name: Some(device_clone.name.clone()),
+                    peer_device_id: Some(device_clone.device_id.clone()),
+                    status: "completed".to_string(),
+                    receive_mode: None,
                     local_path: Some(file_path_clone),
                     source_file_modified_at: None,
                     source_file_sha256: Some(sha256),
                     error: None,
-                    transfer_rate_bytes_per_second: None,
-                    estimated_seconds_remaining: None,
-                    updated_at: Some(now_ms()),
-                });
+                    updated_at: now,
+                }).await;
             }
             Err(e) => {
+                let now = now_ms();
                 let _ = app_handle_clone.emit("transfer-progress", TransferProgress {
-                    transfer_id: transfer_id_clone,
+                    transfer_id: transfer_id_clone.clone(),
                     batch_id: batch_id.clone(),
                     batch_label: batch_label.clone(),
                     direction: "send".to_string(),
@@ -473,14 +530,34 @@ pub async fn send_file(
                     peer_device_id: Some(device_clone.device_id.clone()),
                     status: "error".to_string(),
                     receive_mode: None,
+                    local_path: Some(file_path_clone.clone()),
+                    source_file_modified_at: None,
+                    source_file_sha256: Some(sha256.clone()),
+                    error: Some(format!("Transfer failed: {}", e)),
+                    transfer_rate_bytes_per_second: None,
+                    estimated_seconds_remaining: None,
+                    updated_at: Some(now),
+                });
+
+                // 持久化错误记录
+                let _ = persist_transfer_record(&state_clone, TransferRecord {
+                    transfer_id: transfer_id_clone,
+                    batch_id: batch_id.clone(),
+                    batch_label: batch_label.clone(),
+                    direction: "send".to_string(),
+                    file_name: file_name_clone,
+                    file_size,
+                    bytes_transferred: 0,
+                    peer_device_name: Some(device_clone.name),
+                    peer_device_id: Some(device_clone.device_id),
+                    status: "error".to_string(),
+                    receive_mode: None,
                     local_path: Some(file_path_clone),
                     source_file_modified_at: None,
                     source_file_sha256: Some(sha256),
                     error: Some(format!("Transfer failed: {}", e)),
-                    transfer_rate_bytes_per_second: None,
-                    estimated_seconds_remaining: None,
-                    updated_at: Some(now_ms()),
-                });
+                    updated_at: now,
+                }).await;
             }
         }
     });
@@ -700,13 +777,24 @@ pub async fn save_settings(
         current.sandbox_location = sandbox_location.as_str().map(|s| s.to_string());
     }
 
+    // 持久化保存到磁盘
+    let data_dir = state.data_dir.read().await;
+    let persistent = crate::storage::persistent::PersistentSettings {
+        trusted_devices: current.trusted_devices.clone(),
+        desktop_notifications: current.desktop_notifications,
+        sandbox_location: current.sandbox_location.clone(),
+        transfer_history: Vec::new(),
+        version: 1,
+    };
+    let _ = crate::storage::persistent::save_settings(&data_dir, &persistent);
+
     Ok(current.clone())
 }
 
 #[command]
 pub async fn save_profile(
     profile: ProfilePayload,
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Device, String> {
     let mut identity = state.identity.write().await;
@@ -718,6 +806,10 @@ pub async fn save_profile(
         identity.avatar_data_url = Some(avatar_data_url);
     }
     identity.profile_revision += 1;
+
+    // 持久化保存到磁盘
+    let data_dir = state.data_dir.read().await;
+    let _ = crate::storage::device_identity::save_identity(&data_dir, &identity);
 
     Ok(Device {
         device_id: identity.device_id.clone(),

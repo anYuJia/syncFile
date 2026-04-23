@@ -7,13 +7,13 @@ pub mod commands;
 use commands::AppStateInner;
 use discovery::mdns_service::MdnsService;
 use discovery::device_registry::DeviceRegistry;
-use storage::sandbox::Sandbox;
-use storage::device_identity::{load_or_create_identity, DeviceIdentity};
-use transfer::tcp::{TcpClient, TcpServer};
+use storage::persistent::{load_settings, load_transfer_history};
+use storage::device_identity::{load_or_create_identity};
+use transfer::tcp::TcpServer;
 use transfer::secure_channel::SecureIdentity;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 pub type AppState = Arc<AppStateInner>;
 
@@ -72,6 +72,8 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
     let _ = std::fs::create_dir_all(&sandbox_path);
 
     let identity = load_or_create_identity(&data_dir);
+    let persistent_settings = load_settings(&data_dir);
+    let transfer_history = load_transfer_history(&data_dir);
     let device_registry = Arc::new(RwLock::new(DeviceRegistry::new()));
 
     // Start mDNS service
@@ -102,15 +104,16 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         identity: Arc::new(RwLock::new(identity)),
         sandbox_path: RwLock::new(sandbox_path.clone()),
         settings: RwLock::new(commands::Settings {
-            trusted_devices: Vec::new(),
-            desktop_notifications: true,
-            sandbox_location: None,
+            trusted_devices: persistent_settings.trusted_devices,
+            desktop_notifications: persistent_settings.desktop_notifications,
+            sandbox_location: persistent_settings.sandbox_location,
         }),
         pending_offers: RwLock::new(Vec::new()),
-        transfer_history: RwLock::new(Vec::new()),
+        transfer_history: RwLock::new(transfer_history),
         runtime_logs: RwLock::new(Vec::new()),
         pair_requests: RwLock::new(Vec::new()),
         trusted_devices: RwLock::new(Vec::new()),
+        data_dir: RwLock::new(data_dir),
     });
 
     // Start TCP server

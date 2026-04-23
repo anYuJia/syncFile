@@ -1,5 +1,6 @@
+use crate::security::trust::create_trust_keypair;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,13 +35,22 @@ fn generate_identity() -> DeviceIdentity {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|_| "syncfile-device".to_string());
 
+    let keypair = create_trust_keypair();
+
     DeviceIdentity {
         device_id,
         name: hostname,
         avatar_data_url: None,
         profile_revision: 1,
-        trust_fingerprint: String::new(),
-        trust_public_key: String::new(),
-        trust_private_key: String::new(),
+        trust_fingerprint: keypair.fingerprint,
+        trust_public_key: keypair.public_key,
+        trust_private_key: keypair.private_key,
     }
+}
+
+pub fn save_identity(data_dir: &Path, identity: &DeviceIdentity) -> std::io::Result<()> {
+    let path = data_dir.join("identity.json");
+    let json = serde_json::to_string_pretty(identity)?;
+    std::fs::write(path, json)?;
+    Ok(())
 }
