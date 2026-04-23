@@ -2,7 +2,6 @@
 //! 与 Electron ipcMain 一一对应的命令处理函数
 
 use crate::discovery::device_registry::DeviceRegistry;
-use crate::storage::device_identity::DeviceIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -297,7 +296,7 @@ pub async fn probe_device(device_id: String, state: State<'_, AppState>) -> Resu
 }
 
 #[command]
-pub async fn fetch_peer_profile(device_id: String) -> Result<Option<PeerProfilePayload>, String> {
+pub async fn fetch_peer_profile(_device_id: String) -> Result<Option<PeerProfilePayload>, String> {
     // TODO: Implement actual TCP-based profile fetch
     Ok(None)
 }
@@ -732,7 +731,7 @@ pub async fn get_sandbox_location(state: State<'_, AppState>) -> Result<SandboxL
 }
 
 #[command]
-pub async fn choose_sandbox_location(state: State<'_, AppState>) -> Result<Option<SandboxLocationInfo>, String> {
+pub async fn choose_sandbox_location(_state: State<'_, AppState>) -> Result<Option<SandboxLocationInfo>, String> {
     Ok(None)
 }
 

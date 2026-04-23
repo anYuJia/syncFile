@@ -4,8 +4,7 @@ use aes_gcm::{
 };
 use base64::Engine as _;
 use ring::agreement::{agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey as X25519PublicKey, X25519};
-use ring::digest::{digest, SHA256};
-use ring::hkdf::{Prk, Salt, HKDF_SHA256};
+use ring::hkdf::{Salt, HKDF_SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, UnparsedPublicKey as EdPublicKey, ED25519};
 use sha2::Digest;
@@ -16,6 +15,7 @@ use tokio::net::TcpStream;
 
 use super::codec::MAX_CONTROL_MESSAGE_BYTES;
 
+#[allow(dead_code)]
 const FRAME_HEADER_BYTES: usize = 4;
 const AUTH_TAG_BYTES: usize = 16;
 const MAX_SECURE_FRAME_BYTES: usize = 1024 * 1024;
@@ -115,6 +115,7 @@ pub struct SecureSocket {
     receive_nonce_prefix: [u8; 4],
     send_counter: u64,
     receive_counter: u64,
+    #[allow(dead_code)]
     receive_buffer: Vec<u8>,
 }
 
@@ -219,7 +220,7 @@ pub async fn secure_connect(
     expected_peer: ExpectedPeerIdentity,
     timeout_ms: Option<u64>,
 ) -> io::Result<SecureSocket> {
-    let timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
+    let _timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
 
     let rng = SystemRandom::new();
     let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
@@ -320,7 +321,7 @@ pub async fn secure_accept(
     self_device: SecureIdentity,
     timeout_ms: Option<u64>,
 ) -> io::Result<(SecureSocket, ExpectedPeerIdentity)> {
-    let timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
+    let _timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
     let mut stream = stream;
     stream.set_nodelay(true)?;
 

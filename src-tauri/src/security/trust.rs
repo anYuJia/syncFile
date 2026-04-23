@@ -7,6 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::transfer::protocol::{FileOfferMessage, PairRequestMessage, FromDevice};
 
+use base64::Engine;
+
 pub const PAIR_REQUEST_MAX_AGE_MS: u64 = 5 * 60 * 1000;
 pub const PAIR_REQUEST_MAX_FUTURE_SKEW_MS: u64 = 30 * 1000;
 
@@ -23,8 +25,8 @@ pub fn create_trust_keypair() -> TrustKeypair {
     let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
 
     let public_key_der = key_pair.public_key().as_ref();
-    let public_key_b64 = base64::encode(public_key_der);
-    let private_key_b64 = base64::encode(pkcs8.as_ref());
+    let public_key_b64 = base64::engine::general_purpose::STANDARD.encode(public_key_der);
+    let private_key_b64 = base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref());
 
     TrustKeypair {
         public_key: public_key_b64.clone(),
@@ -46,18 +48,18 @@ pub fn fingerprint_for_public_key(public_key: &str) -> String {
 }
 
 pub fn sign_payload(payload: &str, private_key: &str) -> String {
-    let private_key_der = base64::decode(private_key).unwrap();
+    let private_key_der = base64::engine::general_purpose::STANDARD.decode(private_key).unwrap();
     let key_pair = Ed25519KeyPair::from_pkcs8(&private_key_der).unwrap();
     let signature = key_pair.sign(payload.as_bytes());
-    base64::encode(signature.as_ref())
+    base64::engine::general_purpose::STANDARD.encode(signature.as_ref())
 }
 
 pub fn verify_payload(payload: &str, signature: &str, public_key: &str) -> bool {
-    let public_key_der = match base64::decode(public_key) {
+    let public_key_der = match base64::engine::general_purpose::STANDARD.decode(public_key) {
         Ok(k) => k,
         Err(_) => return false,
     };
-    let signature_bytes = match base64::decode(signature) {
+    let signature_bytes = match base64::engine::general_purpose::STANDARD.decode(signature) {
         Ok(s) => s,
         Err(_) => return false,
     };
