@@ -39,15 +39,13 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: win-ia32
-            command: npm run release:win:ia32
+            target: x86_64-pc-windows-msvc
           - os: macos-latest
-            target: mac-arm64
-            command: npm run release:mac:arm64
+            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
     steps:
@@ -60,8 +58,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
       - name: Install dependencies
         run: npm ci
 
       - name: Build and publish ${{ matrix.target }}
-        run: ${{ matrix.command }}
+        uses: tauri-apps/tauri-action@v0
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "syncFile ${{ github.ref_name }}"
+          releaseBody: "See the assets to download and install this version."
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.conf.json

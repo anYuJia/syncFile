@@ -1,6 +1,6 @@
 [package]
 name = "syncfile-tauri"
-version = "0.0.12"
+version = "0.0.13"
 description = "LAN P2P file transfer tool"
 authors = ["you"]
 license = "MIT"
@@ -40,6 +40,7 @@ ring = "0.17"
 aes-gcm = "0.10"
 time = "0.3"
 tokio-stream = "0.1"
+rfd = "0.15"
 
 [profile.release]
 opt-level = 3

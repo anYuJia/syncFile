@@ -1,19 +1,20 @@
-pub mod discovery;
-pub mod transfer;
-pub mod storage;
-pub mod security;
 pub mod commands;
+pub mod discovery;
+pub mod security;
+pub mod storage;
+pub mod transfer;
 
 use commands::AppStateInner;
-use discovery::mdns_service::MdnsService;
 use discovery::device_registry::DeviceRegistry;
-use storage::persistent::{load_settings, load_transfer_history};
-use storage::device_identity::{load_or_create_identity};
-use transfer::tcp::TcpServer;
-use transfer::secure_channel::SecureIdentity;
+use discovery::mdns_service::MdnsService;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use storage::device_identity::load_or_create_identity;
+use storage::persistent::{load_settings, load_transfer_history};
+use storage::sandbox::Sandbox;
 use tauri::Manager;
+use tokio::sync::{Mutex, RwLock};
+use transfer::secure_channel::SecureIdentity;
+use transfer::tcp::TcpServer;
 
 pub type AppState = Arc<AppStateInner>;
 
@@ -68,12 +69,56 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         .unwrap_or_else(|_| std::path::PathBuf::from("./data"));
 
     let _ = std::fs::create_dir_all(&data_dir);
-    let sandbox_path = data_dir.join("sandbox");
-    let _ = std::fs::create_dir_all(&sandbox_path);
 
     let identity = load_or_create_identity(&data_dir);
     let persistent_settings = load_settings(&data_dir);
-    let transfer_history = load_transfer_history(&data_dir);
+    let trusted_devices = persistent_settings.trusted_devices.clone();
+    let sandbox_path = persistent_settings
+        .sandbox_location
+        .clone()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("sandbox"));
+    let sandbox = Sandbox::new(sandbox_path.clone());
+    let mut transfer_history = load_transfer_history(&data_dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    for record in &mut transfer_history {
+        if record.direction == "send" && matches!(record.status.as_str(), "pending" | "in-progress")
+        {
+            record.status = "failed".to_string();
+            record.error =
+                Some("App restarted before transfer completion. Retry to continue.".to_string());
+            record.updated_at = now;
+        }
+    }
+    for resume in sandbox.list_resume_entries() {
+        if transfer_history
+            .iter()
+            .any(|record| record.transfer_id == resume.file_id)
+        {
+            continue;
+        }
+        transfer_history.push(commands::TransferRecord {
+            transfer_id: resume.file_id,
+            batch_id: None,
+            batch_label: None,
+            direction: "receive".to_string(),
+            file_name: resume.file_name,
+            file_size: resume.file_size,
+            bytes_transferred: resume.bytes_received,
+            peer_device_name: Some(resume.device_name),
+            peer_device_id: Some(resume.device_id),
+            status: "failed".to_string(),
+            receive_mode: Some("manual".to_string()),
+            local_path: Some(resume.partial_path),
+            source_file_modified_at: None,
+            source_file_sha256: Some(resume.sha256),
+            error: Some("Partial receive cached. Sender retry can resume.".to_string()),
+            updated_at: now,
+        });
+    }
     let device_registry = Arc::new(RwLock::new(DeviceRegistry::new()));
 
     // Start mDNS service
@@ -84,11 +129,13 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         43434,
         std::env::consts::OS.to_string(),
         identity.trust_fingerprint.clone(),
-        false,
-        1,
+        identity.trust_public_key.clone(),
+        identity.avatar_data_url.is_some(),
+        identity.profile_revision,
     );
 
-    let _ = mdns_service.start();
+    let _ = mdns_service.start(app_handle.clone());
+    let mdns_service = Arc::new(Mutex::new(mdns_service));
 
     // Create secure identity for TCP server
     let secure_identity = SecureIdentity {
@@ -101,28 +148,32 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
 
     let state = Arc::new(AppStateInner {
         device_registry,
+        mdns_service,
         identity: Arc::new(RwLock::new(identity)),
-        sandbox_path: RwLock::new(sandbox_path.clone()),
+        sandbox: sandbox.clone(),
         settings: RwLock::new(commands::Settings {
-            trusted_devices: persistent_settings.trusted_devices,
+            max_sandbox_size_mb: persistent_settings.max_sandbox_size_mb,
+            auto_accept: persistent_settings.auto_accept,
+            auto_accept_max_size_mb: persistent_settings.auto_accept_max_size_mb,
+            open_received_folder: persistent_settings.open_received_folder,
+            trusted_devices: trusted_devices.clone(),
             desktop_notifications: persistent_settings.desktop_notifications,
             sandbox_location: persistent_settings.sandbox_location,
         }),
         pending_offers: RwLock::new(Vec::new()),
+        pending_pair_responses: RwLock::new(std::collections::HashMap::new()),
         transfer_history: RwLock::new(transfer_history),
         runtime_logs: RwLock::new(Vec::new()),
         pair_requests: RwLock::new(Vec::new()),
-        trusted_devices: RwLock::new(Vec::new()),
+        trusted_devices: RwLock::new(trusted_devices),
+        inbound_cancel_transfers: RwLock::new(std::collections::HashSet::new()),
+        outbound_transfer_controls: RwLock::new(std::collections::HashMap::new()),
         data_dir: RwLock::new(data_dir),
+        app_handle: app_handle.clone(),
     });
 
     // Start TCP server
-    let tcp_server = TcpServer::new(
-        app_handle.clone(),
-        state.clone(),
-        sandbox_path,
-        secure_identity,
-    );
+    let tcp_server = TcpServer::new(app_handle.clone(), state.clone(), sandbox, secure_identity);
     if let Err(e) = tcp_server.listen(43434).await {
         eprintln!("Failed to start TCP server: {}", e);
     }

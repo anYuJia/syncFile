@@ -6,7 +6,16 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistentSettings {
+    #[serde(default)]
+    pub max_sandbox_size_mb: u64,
+    #[serde(default)]
+    pub auto_accept: bool,
+    #[serde(default)]
+    pub auto_accept_max_size_mb: u64,
+    #[serde(default)]
+    pub open_received_folder: bool,
     #[serde(default)]
     pub trusted_devices: Vec<TrustedDevice>,
     #[serde(default)]
@@ -22,6 +31,18 @@ pub struct PersistentSettings {
 impl From<PersistentSettings> for Settings {
     fn from(persistent: PersistentSettings) -> Self {
         Settings {
+            max_sandbox_size_mb: if persistent.max_sandbox_size_mb == 0 {
+                1024
+            } else {
+                persistent.max_sandbox_size_mb
+            },
+            auto_accept: persistent.auto_accept,
+            auto_accept_max_size_mb: if persistent.auto_accept_max_size_mb == 0 {
+                64
+            } else {
+                persistent.auto_accept_max_size_mb
+            },
+            open_received_folder: persistent.open_received_folder,
             trusted_devices: persistent.trusted_devices,
             desktop_notifications: persistent.desktop_notifications,
             sandbox_location: persistent.sandbox_location,
@@ -32,6 +53,10 @@ impl From<PersistentSettings> for Settings {
 impl From<Settings> for PersistentSettings {
     fn from(settings: Settings) -> Self {
         PersistentSettings {
+            max_sandbox_size_mb: settings.max_sandbox_size_mb,
+            auto_accept: settings.auto_accept,
+            auto_accept_max_size_mb: settings.auto_accept_max_size_mb,
+            open_received_folder: settings.open_received_folder,
             trusted_devices: settings.trusted_devices,
             desktop_notifications: settings.desktop_notifications,
             sandbox_location: settings.sandbox_location,
@@ -50,6 +75,10 @@ pub fn load_settings(data_dir: &Path) -> PersistentSettings {
         }
     }
     PersistentSettings {
+        max_sandbox_size_mb: 1024,
+        auto_accept: false,
+        auto_accept_max_size_mb: 64,
+        open_received_folder: false,
         desktop_notifications: true,
         version: 1,
         ..Default::default()
