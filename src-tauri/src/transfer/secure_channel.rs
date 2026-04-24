@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{self, ErrorKind};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::timeout as tokio_timeout;
 
 use super::codec::MAX_CONTROL_MESSAGE_BYTES;
 
@@ -220,98 +221,101 @@ pub async fn secure_connect(
     expected_peer: ExpectedPeerIdentity,
     timeout_ms: Option<u64>,
 ) -> io::Result<SecureSocket> {
-    let _timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
+    let timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
+    tokio_timeout(std::time::Duration::from_millis(timeout_ms), async move {
+        let rng = SystemRandom::new();
+        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
+        let ephemeral_public = ephemeral_private
+            .compute_public_key()
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
 
-    let rng = SystemRandom::new();
-    let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
-    let ephemeral_public = ephemeral_private
-        .compute_public_key()
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
+        let mut client_nonce = [0u8; 16];
+        rng.fill(&mut client_nonce)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
 
-    let mut client_nonce = [0u8; 16];
-    rng.fill(&mut client_nonce)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
+        let unsigned_hello = UnsignedClientHello {
+            msg_type: "secure-client-hello".to_string(),
+            version: HANDSHAKE_VERSION,
+            client_ephemeral_public_key: base64_encode(ephemeral_public.as_ref()),
+            client_nonce: base64_encode(&client_nonce),
+            from_device: FromDeviceIdentity {
+                device_id: self_device.device_id,
+                name: self_device.name,
+                trust_fingerprint: self_device.trust_fingerprint,
+                trust_public_key: self_device.trust_public_key,
+            },
+        };
 
-    let unsigned_hello = UnsignedClientHello {
-        msg_type: "secure-client-hello".to_string(),
-        version: HANDSHAKE_VERSION,
-        client_ephemeral_public_key: base64_encode(ephemeral_public.as_ref()),
-        client_nonce: base64_encode(&client_nonce),
-        from_device: FromDeviceIdentity {
-            device_id: self_device.device_id,
-            name: self_device.name,
-            trust_fingerprint: self_device.trust_fingerprint,
-            trust_public_key: self_device.trust_public_key,
-        },
-    };
+        let payload = client_hello_payload(&unsigned_hello);
+        let signature = sign_payload(&payload, &self_device.trust_private_key)?;
 
-    let payload = client_hello_payload(&unsigned_hello);
-    let signature = sign_payload(&payload, &self_device.trust_private_key)?;
+        let hello = ClientHello {
+            msg_type: unsigned_hello.msg_type.clone(),
+            version: unsigned_hello.version,
+            client_ephemeral_public_key: unsigned_hello.client_ephemeral_public_key.clone(),
+            client_nonce: unsigned_hello.client_nonce.clone(),
+            from_device: unsigned_hello.from_device.clone(),
+            signature,
+        };
 
-    let hello = ClientHello {
-        msg_type: unsigned_hello.msg_type.clone(),
-        version: unsigned_hello.version,
-        client_ephemeral_public_key: unsigned_hello.client_ephemeral_public_key.clone(),
-        client_nonce: unsigned_hello.client_nonce.clone(),
-        from_device: unsigned_hello.from_device.clone(),
-        signature,
-    };
+        let hello_json = serde_json::to_vec(&hello)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Serialize failed: {}", e)))?;
 
-    let hello_json = serde_json::to_vec(&hello)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Serialize failed: {}", e)))?;
+        let mut stream = stream;
+        stream.set_nodelay(true)?;
+        stream.write_u32(hello_json.len() as u32).await?;
+        stream.write_all(&hello_json).await?;
+        stream.flush().await?;
 
-    let mut stream = stream;
-    stream.set_nodelay(true)?;
-    stream.write_u32(hello_json.len() as u32).await?;
-    stream.write_all(&hello_json).await?;
-    stream.flush().await?;
+        let payload_len = stream.read_u32().await? as usize;
+        if payload_len > MAX_CONTROL_MESSAGE_BYTES {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Server hello too large",
+            ));
+        }
 
-    let payload_len = stream.read_u32().await? as usize;
-    if payload_len > MAX_CONTROL_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Server hello too large",
-        ));
-    }
+        let mut server_hello_buf = vec![0u8; payload_len];
+        stream.read_exact(&mut server_hello_buf).await?;
 
-    let mut server_hello_buf = vec![0u8; payload_len];
-    stream.read_exact(&mut server_hello_buf).await?;
+        let server_hello: ServerHello = serde_json::from_slice(&server_hello_buf)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse server hello failed: {}", e)))?;
 
-    let server_hello: ServerHello = serde_json::from_slice(&server_hello_buf)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse server hello failed: {}", e)))?;
+        verify_server_hello(&server_hello, &unsigned_hello, &expected_peer)?;
 
-    verify_server_hello(&server_hello, &unsigned_hello, &expected_peer)?;
+        let unsigned_server_hello = UnsignedServerHello {
+            msg_type: server_hello.msg_type.clone(),
+            version: server_hello.version,
+            client_ephemeral_public_key: server_hello.client_ephemeral_public_key.clone(),
+            client_nonce: server_hello.client_nonce.clone(),
+            server_ephemeral_public_key: server_hello.server_ephemeral_public_key.clone(),
+            server_nonce: server_hello.server_nonce.clone(),
+            from_device: server_hello.from_device.clone(),
+        };
 
-    let unsigned_server_hello = UnsignedServerHello {
-        msg_type: server_hello.msg_type.clone(),
-        version: server_hello.version,
-        client_ephemeral_public_key: server_hello.client_ephemeral_public_key.clone(),
-        client_nonce: server_hello.client_nonce.clone(),
-        server_ephemeral_public_key: server_hello.server_ephemeral_public_key.clone(),
-        server_nonce: server_hello.server_nonce.clone(),
-        from_device: server_hello.from_device.clone(),
-    };
+        let peer_public_key_bytes = base64_decode(&server_hello.server_ephemeral_public_key)?;
+        let peer_public_key = X25519PublicKey::new(&X25519, peer_public_key_bytes.as_slice());
 
-    let peer_public_key_bytes = base64_decode(&server_hello.server_ephemeral_public_key)?;
-    let peer_public_key = X25519PublicKey::new(&X25519, peer_public_key_bytes.as_slice());
+        let shared_secret = agree_ephemeral(ephemeral_private, &peer_public_key, |key_material| {
+            let mut secret = [0u8; 32];
+            secret.copy_from_slice(key_material);
+            Ok::<[u8; 32], ()>(secret)
+        })
+        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Key agreement failed: {:?}", e)))?
+        .map_err(|_| io::Error::new(ErrorKind::Other, "Failed to derive shared secret"))?;
 
-    let shared_secret = agree_ephemeral(ephemeral_private, &peer_public_key, |key_material| {
-        let mut secret = [0u8; 32];
-        secret.copy_from_slice(key_material);
-        Ok::<[u8; 32], ()>(secret)
+        let keys = derive_session_keys(
+            Role::Client,
+            &shared_secret,
+            &unsigned_hello,
+            &unsigned_server_hello,
+        )?;
+
+        Ok(SecureSocket::new(stream, keys))
     })
-    .map_err(|e| io::Error::new(ErrorKind::Other, format!("Key agreement failed: {:?}", e)))?
-    .map_err(|_| io::Error::new(ErrorKind::Other, "Failed to derive shared secret"))?;
-
-    let keys = derive_session_keys(
-        Role::Client,
-        &shared_secret,
-        &unsigned_hello,
-        &unsigned_server_hello,
-    )?;
-
-    Ok(SecureSocket::new(stream, keys))
+    .await
+    .map_err(|_| io::Error::new(ErrorKind::TimedOut, "Secure connect handshake timed out"))?
 }
 
 /// 服务端安全接收
@@ -321,101 +325,105 @@ pub async fn secure_accept(
     self_device: SecureIdentity,
     timeout_ms: Option<u64>,
 ) -> io::Result<(SecureSocket, ExpectedPeerIdentity)> {
-    let _timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
-    let mut stream = stream;
-    stream.set_nodelay(true)?;
+    let timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
+    tokio_timeout(std::time::Duration::from_millis(timeout_ms), async move {
+        let mut stream = stream;
+        stream.set_nodelay(true)?;
 
-    let payload_len = stream.read_u32().await? as usize;
-    if payload_len > MAX_CONTROL_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "Client hello too large",
-        ));
-    }
+        let payload_len = stream.read_u32().await? as usize;
+        if payload_len > MAX_CONTROL_MESSAGE_BYTES {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Client hello too large",
+            ));
+        }
 
-    let mut client_hello_buf = vec![0u8; payload_len];
-    stream.read_exact(&mut client_hello_buf).await?;
+        let mut client_hello_buf = vec![0u8; payload_len];
+        stream.read_exact(&mut client_hello_buf).await?;
 
-    let client_hello: ClientHello = serde_json::from_slice(&client_hello_buf)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse client hello failed: {}", e)))?;
+        let client_hello: ClientHello = serde_json::from_slice(&client_hello_buf)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse client hello failed: {}", e)))?;
 
-    verify_client_hello(&client_hello)?;
+        verify_client_hello(&client_hello)?;
 
-    let unsigned_client_hello = UnsignedClientHello {
-        msg_type: client_hello.msg_type,
-        version: client_hello.version,
-        client_ephemeral_public_key: client_hello.client_ephemeral_public_key.clone(),
-        client_nonce: client_hello.client_nonce.clone(),
-        from_device: client_hello.from_device.clone(),
-    };
+        let unsigned_client_hello = UnsignedClientHello {
+            msg_type: client_hello.msg_type,
+            version: client_hello.version,
+            client_ephemeral_public_key: client_hello.client_ephemeral_public_key.clone(),
+            client_nonce: client_hello.client_nonce.clone(),
+            from_device: client_hello.from_device.clone(),
+        };
 
-    let rng = SystemRandom::new();
-    let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
-    let ephemeral_public = ephemeral_private
-        .compute_public_key()
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
+        let rng = SystemRandom::new();
+        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
+        let ephemeral_public = ephemeral_private
+            .compute_public_key()
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
 
-    let mut server_nonce = [0u8; 16];
-    rng.fill(&mut server_nonce)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
+        let mut server_nonce = [0u8; 16];
+        rng.fill(&mut server_nonce)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
 
-    let unsigned_hello = UnsignedServerHello {
-        msg_type: "secure-server-hello".to_string(),
-        version: HANDSHAKE_VERSION,
-        client_ephemeral_public_key: client_hello.client_ephemeral_public_key.clone(),
-        client_nonce: client_hello.client_nonce.clone(),
-        server_ephemeral_public_key: base64_encode(ephemeral_public.as_ref()),
-        server_nonce: base64_encode(&server_nonce),
-        from_device: FromDeviceIdentity {
-            device_id: self_device.device_id,
-            name: self_device.name,
-            trust_fingerprint: self_device.trust_fingerprint,
-            trust_public_key: self_device.trust_public_key,
-        },
-    };
+        let unsigned_hello = UnsignedServerHello {
+            msg_type: "secure-server-hello".to_string(),
+            version: HANDSHAKE_VERSION,
+            client_ephemeral_public_key: client_hello.client_ephemeral_public_key.clone(),
+            client_nonce: client_hello.client_nonce.clone(),
+            server_ephemeral_public_key: base64_encode(ephemeral_public.as_ref()),
+            server_nonce: base64_encode(&server_nonce),
+            from_device: FromDeviceIdentity {
+                device_id: self_device.device_id,
+                name: self_device.name,
+                trust_fingerprint: self_device.trust_fingerprint,
+                trust_public_key: self_device.trust_public_key,
+            },
+        };
 
-    let payload = server_hello_payload(&unsigned_hello);
-    let signature = sign_payload(&payload, &self_device.trust_private_key)?;
+        let payload = server_hello_payload(&unsigned_hello);
+        let signature = sign_payload(&payload, &self_device.trust_private_key)?;
 
-    let hello = ServerHello {
-        msg_type: unsigned_hello.msg_type.clone(),
-        version: unsigned_hello.version,
-        client_ephemeral_public_key: unsigned_hello.client_ephemeral_public_key.clone(),
-        client_nonce: unsigned_hello.client_nonce.clone(),
-        server_ephemeral_public_key: unsigned_hello.server_ephemeral_public_key.clone(),
-        server_nonce: unsigned_hello.server_nonce.clone(),
-        from_device: unsigned_hello.from_device.clone(),
-        signature,
-    };
+        let hello = ServerHello {
+            msg_type: unsigned_hello.msg_type.clone(),
+            version: unsigned_hello.version,
+            client_ephemeral_public_key: unsigned_hello.client_ephemeral_public_key.clone(),
+            client_nonce: unsigned_hello.client_nonce.clone(),
+            server_ephemeral_public_key: unsigned_hello.server_ephemeral_public_key.clone(),
+            server_nonce: unsigned_hello.server_nonce.clone(),
+            from_device: unsigned_hello.from_device.clone(),
+            signature,
+        };
 
-    let hello_json = serde_json::to_vec(&hello)
-        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Serialize failed: {}", e)))?;
+        let hello_json = serde_json::to_vec(&hello)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Serialize failed: {}", e)))?;
 
-    stream.write_u32(hello_json.len() as u32).await?;
-    stream.write_all(&hello_json).await?;
-    stream.flush().await?;
+        stream.write_u32(hello_json.len() as u32).await?;
+        stream.write_all(&hello_json).await?;
+        stream.flush().await?;
 
-    let peer_public_key_bytes = base64_decode(&client_hello.client_ephemeral_public_key)?;
-    let peer_public_key = X25519PublicKey::new(&X25519, peer_public_key_bytes.as_slice());
+        let peer_public_key_bytes = base64_decode(&client_hello.client_ephemeral_public_key)?;
+        let peer_public_key = X25519PublicKey::new(&X25519, peer_public_key_bytes.as_slice());
 
-    let shared_secret = agree_ephemeral(ephemeral_private, &peer_public_key, |key_material| {
-        let mut secret = [0u8; 32];
-        secret.copy_from_slice(key_material);
-        Ok::<[u8; 32], ()>(secret)
+        let shared_secret = agree_ephemeral(ephemeral_private, &peer_public_key, |key_material| {
+            let mut secret = [0u8; 32];
+            secret.copy_from_slice(key_material);
+            Ok::<[u8; 32], ()>(secret)
+        })
+        .map_err(|e| io::Error::new(ErrorKind::Other, format!("Key agreement failed: {:?}", e)))?
+        .map_err(|_| io::Error::new(ErrorKind::Other, "Failed to derive shared secret"))?;
+
+        let keys = derive_session_keys(Role::Server, &shared_secret, &unsigned_client_hello, &unsigned_hello)?;
+
+        let peer_identity = ExpectedPeerIdentity {
+            device_id: Some(client_hello.from_device.device_id),
+            trust_fingerprint: client_hello.from_device.trust_fingerprint,
+            trust_public_key: Some(client_hello.from_device.trust_public_key),
+        };
+
+        Ok((SecureSocket::new(stream, keys), peer_identity))
     })
-    .map_err(|e| io::Error::new(ErrorKind::Other, format!("Key agreement failed: {:?}", e)))?
-    .map_err(|_| io::Error::new(ErrorKind::Other, "Failed to derive shared secret"))?;
-
-    let keys = derive_session_keys(Role::Server, &shared_secret, &unsigned_client_hello, &unsigned_hello)?;
-
-    let peer_identity = ExpectedPeerIdentity {
-        device_id: Some(client_hello.from_device.device_id),
-        trust_fingerprint: client_hello.from_device.trust_fingerprint,
-        trust_public_key: Some(client_hello.from_device.trust_public_key),
-    };
-
-    Ok((SecureSocket::new(stream, keys), peer_identity))
+    .await
+    .map_err(|_| io::Error::new(ErrorKind::TimedOut, "Secure accept handshake timed out"))?
 }
 
 fn nonce_for_counter(prefix: &[u8; 4], counter: u64) -> [u8; 12] {

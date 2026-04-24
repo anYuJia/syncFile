@@ -1245,6 +1245,8 @@ export function App(): JSX.Element {
               <strong className="overview-chip-value">{activeTransferCount}</strong>
               <span className="overview-chip-meta">{completedTransferCount}/{issueTransferCount}</span>
             </button>
+          </div>
+          <div className="topbar-actions">
             <div ref={toolsMenuRef} className="topbar-tools">
               <button
                 type="button"

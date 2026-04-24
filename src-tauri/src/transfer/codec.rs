@@ -50,7 +50,7 @@ impl MessageDecoder {
     pub fn push_with_remainder(&mut self, chunk: &[u8]) -> Result<(Vec<ProtocolMessage>, Bytes), Box<dyn std::error::Error + Send + Sync>> {
         self.buffer.extend_from_slice(chunk);
         let (messages, remainder) = self.drain_messages(true)?;
-        Ok((messages, remainder.into()))
+        Ok((messages, remainder.freeze()))
     }
 
     fn drain_messages(&mut self, allow_trailing_data: bool) -> Result<(Vec<ProtocolMessage>, BytesMut), Box<dyn std::error::Error + Send + Sync>> {

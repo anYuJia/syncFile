@@ -240,7 +240,7 @@ pub struct PendingOffer {
 
 // ============== 应用状态 ==============
 pub struct AppStateInner {
-    pub device_registry: Arc<RwLock<DeviceRegistry>>,
+    pub device_registry: Arc<DeviceRegistry>,
     pub mdns_service: Arc<Mutex<MdnsService>>,
     pub identity: Arc<RwLock<DeviceIdentity>>,
     pub sandbox: Sandbox,
@@ -331,7 +331,7 @@ fn validate_sandbox_root(root_path: PathBuf) -> Result<PathBuf, String> {
         })
         .map_err(|e| format!("Failed to prepare sandbox path: {}", e))?;
 
-    if resolved == PathBuf::from("/") {
+    if resolved == std::path::Path::new("/") {
         return Err("sandbox folder cannot be the filesystem root".to_string());
     }
 
@@ -408,16 +408,14 @@ async fn push_runtime_log(
 // ============== Devices ==============
 #[command]
 pub async fn get_devices(state: State<'_, AppState>) -> Result<Vec<Device>, String> {
-    let registry = state.device_registry.read().await;
-    let devices = registry.list().await;
+    let devices = state.device_registry.list().await;
     Ok(devices)
 }
 
 #[command]
 pub async fn refresh_devices(state: State<'_, AppState>) -> Result<Vec<Device>, String> {
     state.mdns_service.lock().await.refresh().await;
-    let registry = state.device_registry.read().await;
-    let devices = registry.list().await;
+    let devices = state.device_registry.list().await;
     Ok(devices)
 }
 
@@ -446,8 +444,7 @@ pub async fn probe_device(
     state: State<'_, AppState>,
 ) -> Result<DeviceReachability, String> {
     let device = {
-        let registry = state.device_registry.read().await;
-        let devices = registry.list().await;
+        let devices = state.device_registry.list().await;
         devices
             .into_iter()
             .find(|candidate| candidate.device_id == device_id)
@@ -498,8 +495,7 @@ pub async fn fetch_peer_profile(
     state: State<'_, AppState>,
 ) -> Result<Option<PeerProfilePayload>, String> {
     let device = {
-        let registry = state.device_registry.read().await;
-        let devices = registry.list().await;
+        let devices = state.device_registry.list().await;
         devices
             .into_iter()
             .find(|candidate| candidate.device_id == device_id)
@@ -531,18 +527,16 @@ pub async fn fetch_peer_profile(
         return Ok(None);
     };
 
-    {
-        let registry = state.device_registry.read().await;
-        registry
-            .upsert(Device {
-                avatar_data_url: profile.avatar_data_url.clone(),
-                name: profile.name.clone(),
-                has_avatar: Some(profile.has_avatar),
-                profile_revision: Some(profile.profile_revision),
-                ..device.clone()
-            })
-            .await;
-    }
+    state
+        .device_registry
+        .upsert(Device {
+            avatar_data_url: profile.avatar_data_url.clone(),
+            name: profile.name.clone(),
+            has_avatar: Some(profile.has_avatar),
+            profile_revision: Some(profile.profile_revision),
+            ..device.clone()
+        })
+        .await;
 
     Ok(Some(profile))
 }
@@ -555,8 +549,7 @@ pub async fn pair_device(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let device = {
-        let registry = state.device_registry.read().await;
-        let devices = registry.list().await;
+        let devices = state.device_registry.list().await;
         devices
             .into_iter()
             .find(|candidate| candidate.device_id == device_id)
@@ -677,8 +670,7 @@ pub async fn send_file(
 
     // 获取目标设备信息
     let device = {
-        let registry = state.device_registry.read().await;
-        let devices = registry.list().await;
+        let devices = state.device_registry.list().await;
         devices.into_iter().find(|d| d.device_id == device_id)
     };
 

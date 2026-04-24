@@ -14,6 +14,7 @@ use crate::commands::{
 };
 use crate::security::trust::{
     sign_file_offer, sign_pair_request, verify_file_offer, verify_pair_request,
+    PAIR_REQUEST_MAX_AGE_MS,
 };
 use crate::storage::sandbox::Sandbox;
 
@@ -51,11 +52,20 @@ fn now_ms() -> u64 {
 }
 
 fn normalize_remote_address(addr: &str) -> String {
-    if let Some(rest) = addr.strip_prefix("::ffff:") {
-        rest.to_string()
-    } else {
-        addr.to_string()
+    addr.strip_prefix("::ffff:").unwrap_or(addr).to_string()
+}
+
+fn decode_control_frame(frame: &[u8]) -> Option<ProtocolMessage> {
+    if frame.len() < 4 {
+        return None;
     }
+
+    let declared_len = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]) as usize;
+    if declared_len != frame.len().saturating_sub(4) {
+        return None;
+    }
+
+    serde_json::from_slice::<ProtocolMessage>(&frame[4..]).ok()
 }
 
 fn from_device_to_device(from_device: &FromDevice, peer_address: &str, port: u16) -> Device {
@@ -183,11 +193,12 @@ impl TcpServer {
                         let self_device = self_device.clone();
                         let active_receives = active_receives.clone();
                         let recent_pair_requests = recent_pair_requests.clone();
+                        let peer_addr = addr.ip().to_string();
 
                         tokio::spawn(async move {
                             if let Err(e) = handle_connection(
                                 socket,
-                                addr.to_string(),
+                                peer_addr,
                                 state,
                                 app_handle,
                                 sandbox,
@@ -234,14 +245,13 @@ async fn handle_connection(
 
     // 安全握手
     let (mut secure_socket, _peer) = secure_accept(socket, self_device.clone(), None).await?;
-    let peer_port = 0;
 
     // 读取第一个消息
     let first_frame = secure_socket.read_frame().await?;
     let mut decoder = MessageDecoder::new();
     let messages = decoder.push(&first_frame).unwrap_or_default();
 
-    for msg in messages {
+    if let Some(msg) = messages.into_iter().next() {
         match msg {
             ProtocolMessage::PairRequest { .. } => {
                 handle_pair_request(
@@ -264,7 +274,6 @@ async fn handle_connection(
                     msg,
                     secure_socket,
                     peer_addr,
-                    peer_port,
                     app_handle,
                     state,
                     sandbox,
@@ -319,6 +328,8 @@ async fn handle_pair_request(
     // 检查是否是重放
     {
         let mut requests = recent_pair_requests.write().await;
+        let cutoff = now_ms().saturating_sub(PAIR_REQUEST_MAX_AGE_MS);
+        requests.retain(|_, seen_at| *seen_at >= cutoff);
         if requests.contains_key(&request_id) {
             return Ok(());
         }
@@ -326,7 +337,11 @@ async fn handle_pair_request(
     }
 
     let (tx, rx) = oneshot::channel::<bool>();
-    let device = from_device_to_device(&from_device, &peer_addr, 0);
+    let device = from_device_to_device(
+        &from_device,
+        &peer_addr,
+        from_device.port.unwrap_or(DEFAULT_PORT),
+    );
     {
         state.pair_requests.write().await.push(PairRequest {
             request_id: request_id.clone(),
@@ -397,7 +412,6 @@ async fn handle_file_offer(
     msg: ProtocolMessage,
     mut socket: SecureSocket,
     peer_addr: String,
-    peer_port: u16,
     app_handle: AppHandle,
     state: AppState,
     sandbox: Sandbox,
@@ -427,8 +441,6 @@ async fn handle_file_offer(
             _ => return Ok(()),
         };
 
-    let mut decoder = MessageDecoder::new();
-
     let signed_offer = FileOfferMessage {
         msg_type: "file-offer".to_string(),
         version: 1,
@@ -454,7 +466,11 @@ async fn handle_file_offer(
 
     // 创建 offer 信息
     let offer_id = file_id.clone();
-    let device = from_device_to_device(&from_device, &peer_addr, peer_port);
+    let device = from_device_to_device(
+        &from_device,
+        &peer_addr,
+        from_device.port.unwrap_or(DEFAULT_PORT),
+    );
     let received_at = now_ms();
     let save_directory = sandbox
         .directory_for_incoming(&device.device_id)
@@ -465,7 +481,7 @@ async fn handle_file_offer(
         offer_id: offer_id.clone(),
         file_id: file_id.clone(),
         file_name: file_name.clone(),
-        file_size: file_size as u64,
+        file_size,
         sha256: sha256.clone(),
         mime_type: mime_type.clone(),
         from_device: device.clone(),
@@ -580,7 +596,7 @@ async fn handle_file_offer(
                 &device.trust_fingerprint,
                 &device.trust_public_key,
                 &file_name,
-                file_size as u64,
+                file_size,
                 sha256.as_deref().unwrap_or(""),
             );
 
@@ -612,7 +628,7 @@ async fn handle_file_offer(
                     file_id.clone(),
                     ActiveReceive {
                         bytes_received,
-                        file_size: file_size as u64,
+                        file_size,
                         file_name: file_name.clone(),
                         partial_path: resume_info.partial_path.clone(),
                         final_path: resume_info.final_path.clone(),
@@ -624,7 +640,7 @@ async fn handle_file_offer(
 
             // 接收文件数据
             loop {
-                if bytes_received >= file_size as u64 {
+                if bytes_received >= file_size {
                     break;
                 }
 
@@ -648,7 +664,7 @@ async fn handle_file_offer(
                             batch_label: None,
                             direction: "receive".to_string(),
                             file_name: file_name.clone(),
-                            file_size: file_size as u64,
+                            file_size,
                             bytes_transferred: bytes_received,
                             peer_device_name: Some(device.name.clone()),
                             peer_device_id: Some(device.device_id.clone()),
@@ -671,7 +687,7 @@ async fn handle_file_offer(
                             batch_label: None,
                             direction: "receive".to_string(),
                             file_name: file_name.clone(),
-                            file_size: file_size as u64,
+                            file_size,
                             bytes_transferred: bytes_received,
                             peer_device_name: Some(device.name.clone()),
                             peer_device_id: Some(device.device_id.clone()),
@@ -690,81 +706,78 @@ async fn handle_file_offer(
 
                 let frame = socket.read_frame().await?;
 
-                // 检查是否是控制消息（file-cancel）
-                if let Ok(messages) = decoder.push(&frame) {
-                    for msg in messages {
-                        if let ProtocolMessage::FileCancel { reason, .. } = msg {
-                            let now = now_ms();
-                            let status = if reason == "sender-paused" {
-                                "paused"
-                            } else {
-                                "cancelled"
-                            };
-                            if status == "cancelled" {
-                                sandbox.discard_incoming_resume(&file_id, true);
-                            }
-                            let local_path = if status == "paused" {
-                                Some(resume_info.partial_path.to_string_lossy().to_string())
-                            } else {
-                                None
-                            };
-                            let error = if status == "paused" {
-                                Some("Sender paused the transfer. Retry from the sender to continue.".to_string())
-                            } else {
-                                Some("Sender cancelled the transfer.".to_string())
-                            };
-                            {
-                                let mut receives = active_receives.write().await;
-                                receives.remove(&file_id);
-                            }
-                            let _ = app_handle.emit(
-                                "transfer-progress",
-                                TransferProgress {
-                                    transfer_id: file_id.clone(),
-                                    batch_id: None,
-                                    batch_label: None,
-                                    direction: "receive".to_string(),
-                                    file_name: file_name.clone(),
-                                    file_size: file_size as u64,
-                                    bytes_transferred: bytes_received,
-                                    peer_device_name: Some(device.name.clone()),
-                                    peer_device_id: Some(device.device_id.clone()),
-                                    status: status.to_string(),
-                                    receive_mode: Some(accepted_receive_mode.clone()),
-                                    local_path: local_path.clone(),
-                                    source_file_modified_at: None,
-                                    source_file_sha256: sha256.clone(),
-                                    error: error.clone(),
-                                    transfer_rate_bytes_per_second: None,
-                                    estimated_seconds_remaining: None,
-                                    updated_at: Some(now),
-                                },
-                            );
-                            let _ = persist_transfer_record(
-                                &state,
-                                TransferRecord {
-                                    transfer_id: file_id.clone(),
-                                    batch_id: None,
-                                    batch_label: None,
-                                    direction: "receive".to_string(),
-                                    file_name: file_name.clone(),
-                                    file_size: file_size as u64,
-                                    bytes_transferred: bytes_received,
-                                    peer_device_name: Some(device.name.clone()),
-                                    peer_device_id: Some(device.device_id.clone()),
-                                    status: status.to_string(),
-                                    receive_mode: Some(accepted_receive_mode.clone()),
-                                    local_path,
-                                    source_file_modified_at: None,
-                                    source_file_sha256: sha256.clone(),
-                                    error,
-                                    updated_at: now,
-                                },
-                            )
-                            .await;
-                            return Ok(());
-                        }
+                if let Some(ProtocolMessage::FileCancel { reason, .. }) =
+                    decode_control_frame(&frame)
+                {
+                    let now = now_ms();
+                    let status = if reason == "sender-paused" {
+                        "paused"
+                    } else {
+                        "cancelled"
+                    };
+                    if status == "cancelled" {
+                        sandbox.discard_incoming_resume(&file_id, true);
                     }
+                    let local_path = if status == "paused" {
+                        Some(resume_info.partial_path.to_string_lossy().to_string())
+                    } else {
+                        None
+                    };
+                    let error = if status == "paused" {
+                        Some("Sender paused the transfer. Retry from the sender to continue.".to_string())
+                    } else {
+                        Some("Sender cancelled the transfer.".to_string())
+                    };
+                    {
+                        let mut receives = active_receives.write().await;
+                        receives.remove(&file_id);
+                    }
+                    let _ = app_handle.emit(
+                        "transfer-progress",
+                        TransferProgress {
+                            transfer_id: file_id.clone(),
+                            batch_id: None,
+                            batch_label: None,
+                            direction: "receive".to_string(),
+                            file_name: file_name.clone(),
+                            file_size,
+                            bytes_transferred: bytes_received,
+                            peer_device_name: Some(device.name.clone()),
+                            peer_device_id: Some(device.device_id.clone()),
+                            status: status.to_string(),
+                            receive_mode: Some(accepted_receive_mode.clone()),
+                            local_path: local_path.clone(),
+                            source_file_modified_at: None,
+                            source_file_sha256: sha256.clone(),
+                            error: error.clone(),
+                            transfer_rate_bytes_per_second: None,
+                            estimated_seconds_remaining: None,
+                            updated_at: Some(now),
+                        },
+                    );
+                    let _ = persist_transfer_record(
+                        &state,
+                        TransferRecord {
+                            transfer_id: file_id.clone(),
+                            batch_id: None,
+                            batch_label: None,
+                            direction: "receive".to_string(),
+                            file_name: file_name.clone(),
+                            file_size,
+                            bytes_transferred: bytes_received,
+                            peer_device_name: Some(device.name.clone()),
+                            peer_device_id: Some(device.device_id.clone()),
+                            status: status.to_string(),
+                            receive_mode: Some(accepted_receive_mode.clone()),
+                            local_path,
+                            source_file_modified_at: None,
+                            source_file_sha256: sha256.clone(),
+                            error,
+                            updated_at: now,
+                        },
+                    )
+                    .await;
+                    return Ok(());
                 }
 
                 // 写入文件
@@ -789,7 +802,7 @@ async fn handle_file_offer(
                         batch_label: None,
                         direction: "receive".to_string(),
                         file_name: file_name.clone(),
-                        file_size: file_size as u64,
+                        file_size,
                         bytes_transferred: bytes_received,
                         peer_device_name: Some(device.name.clone()),
                         peer_device_id: Some(device.device_id.clone()),
@@ -808,14 +821,10 @@ async fn handle_file_offer(
 
             // 读取 file-complete
             let complete_frame = socket.read_frame().await?;
-            let messages = decoder.push(&complete_frame).unwrap_or_default();
-            let mut completed = false;
-            for msg in messages {
-                if let ProtocolMessage::FileComplete { .. } = msg {
-                    completed = true;
-                    break;
-                }
-            }
+            let completed = matches!(
+                decode_control_frame(&complete_frame),
+                Some(ProtocolMessage::FileComplete { .. })
+            );
 
             if completed {
                 // 验证哈希
@@ -836,7 +845,7 @@ async fn handle_file_offer(
                         batch_label: None,
                         direction: "receive".to_string(),
                         file_name: file_name.clone(),
-                        file_size: file_size as u64,
+                        file_size,
                         bytes_transferred: bytes_received,
                         peer_device_name: Some(device.name.clone()),
                         peer_device_id: Some(device.device_id.clone()),
@@ -862,7 +871,7 @@ async fn handle_file_offer(
                             batch_label: None,
                             direction: "receive".to_string(),
                             file_name: file_name.clone(),
-                            file_size: file_size as u64,
+                            file_size,
                             bytes_transferred: bytes_received,
                             peer_device_name: Some(device.name),
                             peer_device_id: Some(device.device_id),
@@ -900,7 +909,7 @@ async fn handle_file_offer(
                             batch_label: None,
                             direction: "receive".to_string(),
                             file_name: file_name.clone(),
-                            file_size: file_size as u64,
+                            file_size,
                             bytes_transferred: bytes_received,
                             peer_device_name: Some(device.name.clone()),
                             peer_device_id: Some(device.device_id.clone()),
@@ -924,7 +933,7 @@ async fn handle_file_offer(
                             batch_label: None,
                             direction: "receive".to_string(),
                             file_name: file_name.clone(),
-                            file_size: file_size as u64,
+                            file_size,
                             bytes_transferred: bytes_received,
                             peer_device_name: Some(device.name),
                             peer_device_id: Some(device.device_id),
@@ -1027,7 +1036,9 @@ impl TcpClient {
         })?;
         secure_socket.write_frame(&encoded).await?;
 
-        let response_frame = secure_socket.read_frame().await?;
+        let response_frame = tokio::time::timeout(DEFAULT_HANDSHAKE_TIMEOUT, secure_socket.read_frame())
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "profile request timed out"))??;
         let mut decoder = MessageDecoder::new();
         for msg in decoder.push(&response_frame).unwrap_or_default() {
             if let ProtocolMessage::ProfileResponse {
@@ -1116,7 +1127,7 @@ impl TcpClient {
             version: 1,
             file_id: file_id.clone(),
             file_name: file_name.clone(),
-            file_size: file_size,
+            file_size,
             mime_type: None,
             sha256: Some(sha256),
             from_device,
@@ -1129,7 +1140,15 @@ impl TcpClient {
         secure_socket.write_frame(&encoded_offer).await?;
 
         // 等待接受/拒绝
-        let response_frame = secure_socket.read_frame().await?;
+        let response_frame =
+            tokio::time::timeout(DEFAULT_DECISION_TIMEOUT, secure_socket.read_frame())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "waiting for file accept timed out",
+                    )
+                })??;
         let mut decoder = MessageDecoder::new();
         let messages = decoder.push(&response_frame).unwrap_or_default();
 
@@ -1274,7 +1293,15 @@ impl TcpClient {
         secure_socket.write_frame(&encoded).await?;
 
         // 等待响应
-        let response_frame = secure_socket.read_frame().await?;
+        let response_frame =
+            tokio::time::timeout(DEFAULT_DECISION_TIMEOUT, secure_socket.read_frame())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "waiting for pair response timed out",
+                    )
+                })??;
         let mut decoder = MessageDecoder::new();
         let messages = decoder.push(&response_frame).unwrap_or_default();
 
@@ -1289,5 +1316,43 @@ impl TcpClient {
         }
 
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_control_frame, normalize_remote_address};
+    use crate::transfer::codec::encode_message;
+    use crate::transfer::protocol::ProtocolMessage;
+
+    #[test]
+    fn normalize_remote_address_strips_ipv4_mapped_prefix() {
+        assert_eq!(
+            normalize_remote_address("::ffff:192.168.1.4"),
+            "192.168.1.4".to_string()
+        );
+    }
+
+    #[test]
+    fn decode_control_frame_accepts_valid_control_message() {
+        let encoded = encode_message(&ProtocolMessage::FileComplete {
+            file_id: "file-1".to_string(),
+            bytes_sent: 42,
+        })
+        .expect("encode control frame");
+
+        match decode_control_frame(&encoded) {
+            Some(ProtocolMessage::FileComplete { file_id, bytes_sent }) => {
+                assert_eq!(file_id, "file-1");
+                assert_eq!(bytes_sent, 42);
+            }
+            other => panic!("unexpected decoded frame: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_control_frame_rejects_plain_file_bytes() {
+        let payload = b"hello world this is file data";
+        assert!(decode_control_frame(payload).is_none());
     }
 }

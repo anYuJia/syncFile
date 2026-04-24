@@ -73,7 +73,7 @@ impl Sandbox {
             .unwrap_or_default()
             .as_secs();
 
-        let sanitized = original_name.replace('/', "_").replace('\\', "_");
+        let sanitized = original_name.replace(['/', '\\'], "_");
 
         let filename = format!("{}_{}", timestamp, sanitized);
         device_dir.join(filename)

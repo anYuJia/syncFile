@@ -119,7 +119,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
             updated_at: now,
         });
     }
-    let device_registry = Arc::new(RwLock::new(DeviceRegistry::new()));
+    let device_registry = Arc::new(DeviceRegistry::new());
 
     // Start mDNS service
     let mdns_service = MdnsService::new(

@@ -6,8 +6,8 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::RwLock;
 
 pub const SERVICE_TYPE: &str = "_syncfile._tcp.local.";
 pub const MDNS_PROTOCOL_VERSION: &str = "1";
@@ -15,7 +15,7 @@ const BROWSER_REFRESH_SECS: u64 = 4;
 const DEVICE_STALE_SECS: u64 = 45;
 
 pub struct MdnsService {
-    registry: Arc<RwLock<DeviceRegistry>>,
+    registry: Arc<DeviceRegistry>,
     self_device_id: String,
     self_name: String,
     self_port: u16,
@@ -31,7 +31,7 @@ pub struct MdnsService {
 
 impl MdnsService {
     pub fn new(
-        registry: Arc<RwLock<DeviceRegistry>>,
+        registry: Arc<DeviceRegistry>,
         self_device_id: String,
         self_name: String,
         self_port: u16,
@@ -120,7 +120,7 @@ impl MdnsService {
             Some(format!("type={} port={}", SERVICE_TYPE, self.self_port)),
         );
 
-        tokio::spawn(async move {
+        thread::spawn(move || {
             loop {
                 if shutdown_flag_task.load(Ordering::SeqCst) {
                     break;
@@ -131,15 +131,20 @@ impl MdnsService {
                         let Some(device) = service_info_to_device(&info, &self_device_id) else {
                             continue;
                         };
-                        registry.read().await.upsert(device.clone()).await;
-                        let _ = app_handle.emit("device-online", device);
-                        append_runtime_log(
-                            &app_handle,
-                            "info",
-                            "discovery",
-                            "device resolved",
-                            Some(info.get_fullname().to_string()),
-                        );
+                        let registry = registry.clone();
+                        let app_handle = app_handle.clone();
+                        let fullname = info.get_fullname().to_string();
+                        tauri::async_runtime::spawn(async move {
+                            registry.upsert(device.clone()).await;
+                            let _ = app_handle.emit("device-online", device);
+                            append_runtime_log(
+                                &app_handle,
+                                "info",
+                                "discovery",
+                                "device resolved",
+                                Some(fullname),
+                            );
+                        });
                     }
                     Ok(ServiceEvent::ServiceRemoved(_, _)) => {}
                     Ok(_) => {}
@@ -149,10 +154,14 @@ impl MdnsService {
                             .unwrap_or_default()
                             .as_millis() as u64;
                         let cutoff = now.saturating_sub(DEVICE_STALE_SECS * 1000);
-                        let removed_ids = registry.read().await.prune_older_than(cutoff).await;
-                        for device_id in removed_ids {
-                            let _ = app_handle.emit("device-offline", device_id);
-                        }
+                        let registry = registry.clone();
+                        let app_handle = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let removed_ids = registry.prune_older_than(cutoff).await;
+                            for device_id in removed_ids {
+                                let _ = app_handle.emit("device-offline", device_id);
+                            }
+                        });
                     }
                 }
             }
@@ -287,7 +296,7 @@ fn service_info_to_device(info: &ServiceInfo, self_device_id: &str) -> Option<De
 fn sanitize_service_instance_name(name: &str) -> String {
     let trimmed = name.trim();
     let without_local = trimmed.trim_end_matches(".local");
-    let normalized = without_local.replace('.', "-").replace(' ', " ");
+    let normalized = without_local.replace('.', "-");
     let result = normalized.trim();
     if result.is_empty() {
         "syncfile".to_string()
@@ -342,4 +351,31 @@ fn is_private_ipv4(address: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sanitize_service_instance_name, select_address};
+
+    #[test]
+    fn sanitize_service_instance_name_strips_local_suffix_and_dots() {
+        assert_eq!(
+            sanitize_service_instance_name(" Mac.Book.local "),
+            "Mac-Book"
+        );
+    }
+
+    #[test]
+    fn select_address_prefers_private_ipv4() {
+        let addresses = vec![
+            "fe80::1".to_string(),
+            "203.0.113.10".to_string(),
+            "192.168.1.88".to_string(),
+        ];
+
+        assert_eq!(
+            select_address(&addresses, "host.local."),
+            "192.168.1.88".to_string()
+        );
+    }
 }
