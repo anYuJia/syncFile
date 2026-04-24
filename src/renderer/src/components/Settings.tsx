@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { Device, SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -230,7 +231,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
   };
 
-  return (
+  const content = (
     <div className="settings-overlay" onClick={handleClose}>
       <div
         ref={dialogRef}
@@ -602,6 +603,8 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }
 
 async function makeAvatarDataUrl(file: File): Promise<string> {

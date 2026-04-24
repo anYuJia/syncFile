@@ -619,6 +619,18 @@ export function App(): JSX.Element {
   }, [pendingSendFiles, selectedDeviceIds, selectedRecipientSnapshots]);
 
   useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, notice.kind === 'warn' ? 5200 : 3600);
+
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     if (!isResizingRows) {
       return;
     }
@@ -991,6 +1003,24 @@ export function App(): JSX.Element {
     '--right-pane-split': rightPaneSplit
   } as CSSProperties;
   const unreadRequestCount = unreadOfferIds.size + unreadPairRequestIds.size;
+  const reachableDeviceCount = useMemo(
+    () =>
+      devices.filter((device) => reachabilityByDeviceId[device.deviceId]?.status === 'reachable').length,
+    [devices, reachabilityByDeviceId]
+  );
+  const activeTransferCount = useMemo(
+    () => transfers.filter((item) => ['pending', 'in-progress', 'paused'].includes(item.status)).length,
+    [transfers]
+  );
+  const issueTransferCount = useMemo(
+    () => transfers.filter((item) => ['failed', 'rejected', 'cancelled'].includes(item.status)).length,
+    [transfers]
+  );
+  const completedTransferCount = useMemo(
+    () => transfers.filter((item) => item.status === 'completed').length,
+    [transfers]
+  );
+  const pendingRequestCount = pendingOffers.length + pendingPairRequests.length;
 
   const handlePaneResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     event.preventDefault();
@@ -1097,6 +1127,27 @@ export function App(): JSX.Element {
     setIsRequestsInboxOpen(true);
   };
 
+  const focusDispatchDeck = (): void => {
+    if (isCompactLayout) {
+      setCompactSection('dispatch');
+    }
+  };
+
+  const focusLedger = (): void => {
+    if (isCompactLayout) {
+      setCompactSection('ledger');
+    }
+    if (transfers[0]) {
+      setSelectedTransferId(transfers[0].transferId);
+    }
+  };
+
+  const focusManifest = (): void => {
+    if (isCompactLayout) {
+      setCompactSection('manifest');
+    }
+  };
+
   const showManifest = !isCompactLayout || compactSection === 'manifest';
   const showDispatch = !isCompactLayout || compactSection === 'dispatch';
   const showLedger = !isCompactLayout || compactSection === 'ledger';
@@ -1122,121 +1173,162 @@ export function App(): JSX.Element {
       : selectedDevices.length > 0
         ? messages.topbarRecipientSummary(selectedDevices.length)
         : messages.routeMetaIdle;
+  const statusHeadline = primaryActiveSendTransfer
+    ? primaryActiveSendTransfer.fileName
+    : pendingRequestCount > 0
+      ? messages.requestsInbox
+      : selectedDevices.length > 0
+        ? sendDraftSummary
+        : messages.routeMetaIdle;
+  const statusDetail = primaryActiveSendTransfer
+    ? `${primaryActiveSendPercent}% · ${primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}`
+    : `${pendingOffers.length} · ${pendingPairRequests.length} · ${activeTransferCount}`;
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <h1 className="topbar-title">syncFile</h1>
+        <div className="topbar-heading">
+          <h1 className="topbar-title">syncFile</h1>
+        </div>
         {selfDevice && (
           <div className="topbar-status">
             <Avatar name={selfDevice.name} avatarDataUrl={selfDevice.avatarDataUrl} size="sm" />
             <span className="topbar-status-copy">
               <strong>{selfDevice.name}</strong>
-              <span>{sendDraftSummary}</span>
+              <span>{statusHeadline} · {statusDetail}</span>
             </span>
           </div>
         )}
 
-        <div className="topbar-actions">
-          <button
-            type="button"
-            className={`button${unreadRequestCount > 0 ? '' : ' button-muted'} topbar-request-button`}
-            onClick={handleOpenRequestsInbox}
-            title={messages.requestsInbox}
-            aria-label={messages.requestsInbox}
-          >
-            <span className="topbar-button-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-                <path d="M22 7l-10 7L2 7" />
-              </svg>
-              {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
-            </span>
-            <span className="topbar-request-copy">{messages.requestsInbox}</span>
-          </button>
-          <div ref={toolsMenuRef} className="topbar-tools">
+        <div className="topbar-toolbar">
+          <div className="overview-strip" aria-label="workspace overview">
             <button
               type="button"
-              className={`button button-muted topbar-icon-button${isToolsMenuOpen ? ' is-active' : ''}`}
-              onClick={() => setIsToolsMenuOpen((prev) => !prev)}
-              title={messages.toolsMenuLabel}
-              aria-label={messages.toolsMenuLabel}
-              aria-haspopup="menu"
-              aria-expanded={isToolsMenuOpen}
+              className="overview-chip overview-chip-devices"
+              onClick={() => {
+                focusManifest();
+                void handleRefreshDevices();
+              }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="12" cy="5" r="1.5" />
-                <circle cx="12" cy="12" r="1.5" />
-                <circle cx="12" cy="19" r="1.5" />
-              </svg>
+              <span className="overview-chip-label">{messages.onlineDevices}</span>
+              <strong className="overview-chip-value">{devices.length}</strong>
+              <span className="overview-chip-meta">{reachableDeviceCount}/{devices.length || 0}</span>
             </button>
-            {isToolsMenuOpen && (
-              <div className="topbar-tools-menu" role="menu" aria-label={messages.toolsMenuLabel}>
-                <button
-                  type="button"
-                  className="topbar-tools-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setIsSettingsOpen(true);
-                    setIsToolsMenuOpen(false);
-                  }}
-                >
-                  {messages.settings}
-                </button>
-                <button
-                  type="button"
-                  className="topbar-tools-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setIsLogViewerOpen(true);
-                    void refreshRuntimeLogs();
-                    setIsToolsMenuOpen(false);
-                  }}
-                >
-                  {messages.logs}
-                </button>
-                <button
-                  type="button"
-                  className="topbar-tools-item"
-                  role="menuitem"
-                  onClick={() => {
-                    void handleOpenSandbox();
-                    setIsToolsMenuOpen(false);
-                  }}
-                >
-                  {messages.openSandbox}
-                </button>
-                <button
-                  type="button"
-                  className="topbar-tools-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setIsDarkMode((prev) => !prev);
-                  }}
-                >
-                  {isDarkMode ? messages.appearanceLight : messages.appearanceDark}
-                </button>
-                <div className="topbar-tools-section">
-                  <span className="topbar-tools-label">{messages.languageLabel}</span>
-                  <div className="locale-switch locale-switch-compact" aria-label={messages.languageLabel}>
-                    <button
-                      type="button"
-                      className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
-                      onClick={() => setLocale('zh')}
-                    >
-                      中文
-                    </button>
-                    <button
-                      type="button"
-                      className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
-                      onClick={() => setLocale('en')}
-                    >
-                      EN
-                    </button>
+
+            <button
+              type="button"
+              className={`overview-chip overview-chip-requests${unreadRequestCount > 0 ? ' is-unread' : ''}`}
+              onClick={handleOpenRequestsInbox}
+              title={messages.requestsInbox}
+              aria-label={messages.requestsInbox}
+            >
+              <span className="topbar-button-icon overview-chip-icon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                  <path d="M22 7l-10 7L2 7" />
+                </svg>
+                {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
+              </span>
+              <span className="overview-chip-label">{messages.requestsInbox}</span>
+              <strong className="overview-chip-value">{pendingRequestCount}</strong>
+              <span className="overview-chip-meta">{unreadRequestCount}/{pendingRequestCount || 0}</span>
+            </button>
+
+            <button type="button" className="overview-chip overview-chip-dispatch" onClick={focusDispatchDeck}>
+              <span className="overview-chip-label">{messages.sendFile}</span>
+              <strong className="overview-chip-value">{pendingSendFiles.length}</strong>
+              <span className="overview-chip-meta">{selectedDevices.length}/{activeSendTransfers.length}</span>
+            </button>
+
+            <button type="button" className="overview-chip overview-chip-ledger" onClick={focusLedger}>
+              <span className="overview-chip-label">{messages.transferActivity}</span>
+              <strong className="overview-chip-value">{activeTransferCount}</strong>
+              <span className="overview-chip-meta">{completedTransferCount}/{issueTransferCount}</span>
+            </button>
+            <div ref={toolsMenuRef} className="topbar-tools">
+              <button
+                type="button"
+                className={`button button-muted topbar-icon-button${isToolsMenuOpen ? ' is-active' : ''}`}
+                onClick={() => setIsToolsMenuOpen((prev) => !prev)}
+                title={messages.toolsMenuLabel}
+                aria-label={messages.toolsMenuLabel}
+                aria-haspopup="menu"
+                aria-expanded={isToolsMenuOpen}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="5" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="12" cy="19" r="1.5" />
+                </svg>
+              </button>
+              {isToolsMenuOpen && (
+                <div className="topbar-tools-menu" role="menu" aria-label={messages.toolsMenuLabel}>
+                  <button
+                    type="button"
+                    className="topbar-tools-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsSettingsOpen(true);
+                      setIsToolsMenuOpen(false);
+                    }}
+                  >
+                    {messages.settings}
+                  </button>
+                  <button
+                    type="button"
+                    className="topbar-tools-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsLogViewerOpen(true);
+                      void refreshRuntimeLogs();
+                      setIsToolsMenuOpen(false);
+                    }}
+                  >
+                    {messages.logs}
+                  </button>
+                  <button
+                    type="button"
+                    className="topbar-tools-item"
+                    role="menuitem"
+                    onClick={() => {
+                      void handleOpenSandbox();
+                      setIsToolsMenuOpen(false);
+                    }}
+                  >
+                    {messages.openSandbox}
+                  </button>
+                  <button
+                    type="button"
+                    className="topbar-tools-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsDarkMode((prev) => !prev);
+                    }}
+                  >
+                    {isDarkMode ? messages.appearanceLight : messages.appearanceDark}
+                  </button>
+                  <div className="topbar-tools-section">
+                    <span className="topbar-tools-label">{messages.languageLabel}</span>
+                    <div className="locale-switch locale-switch-compact" aria-label={messages.languageLabel}>
+                      <button
+                        type="button"
+                        className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
+                        onClick={() => setLocale('zh')}
+                      >
+                        中文
+                      </button>
+                      <button
+                        type="button"
+                        className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
+                        onClick={() => setLocale('en')}
+                      >
+                        EN
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -1287,7 +1379,10 @@ export function App(): JSX.Element {
         {showManifest && (
         <section className="card card-manifest">
           <div className="card-head">
-            <h2>{messages.onlineDevices}</h2>
+            <div className="card-head-copy">
+              <h2>{messages.onlineDevices}</h2>
+              <span className="card-head-caption">{reachableDeviceCount}/{devices.length || 0}</span>
+            </div>
             <div className="card-head-actions">
               <button
                 type="button"
@@ -1341,7 +1436,10 @@ export function App(): JSX.Element {
           {showDispatch && (
           <section className="card card-dispatch">
             <div className="card-head">
-              <h2>{messages.sendFile}</h2>
+              <div className="card-head-copy">
+                <h2>{messages.sendFile}</h2>
+                <span className="card-head-caption">{pendingSendFiles.length}/{selectedDevices.length}</span>
+              </div>
               <div className="card-head-actions card-head-actions-dispatch">
                 <span className={`dispatch-target-badge${selectedDevices.length > 0 ? ' is-active' : ''}`}>
                   {selectedDevices.length > 0
@@ -1444,7 +1542,10 @@ export function App(): JSX.Element {
           {showLedger && (
           <section className="card card-ledger">
             <div className="card-head">
-              <h2>{messages.transferActivity}</h2>
+              <div className="card-head-copy">
+                <h2>{messages.transferActivity}</h2>
+                <span className="card-head-caption">{activeTransferCount}/{issueTransferCount}</span>
+              </div>
             </div>
             <TransferList
               transfers={transfers}

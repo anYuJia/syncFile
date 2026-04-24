@@ -1,14 +1,15 @@
-use crate::commands::Device;
+use crate::commands::{Device, RuntimeLogEntry};
 use crate::discovery::device_registry::DeviceRegistry;
+use crate::AppState;
 use crate::storage::device_identity::DeviceIdentity;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::RwLock;
 
-pub const SERVICE_TYPE: &str = "_syncfile._tcp";
+pub const SERVICE_TYPE: &str = "_syncfile._tcp.local.";
 pub const MDNS_PROTOCOL_VERSION: &str = "1";
 const BROWSER_REFRESH_SECS: u64 = 4;
 const DEVICE_STALE_SECS: u64 = 45;
@@ -96,8 +97,8 @@ impl MdnsService {
         );
 
         let service_info = ServiceInfo::new(
-            &format!("{}.{}", instance_name, SERVICE_TYPE),
             SERVICE_TYPE,
+            &instance_name,
             &format!("{}.local.", instance_name),
             "0.0.0.0",
             self.self_port,
@@ -111,6 +112,13 @@ impl MdnsService {
         let self_device_id = self.self_device_id.clone();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_task = shutdown_flag.clone();
+        append_runtime_log(
+            &app_handle,
+            "info",
+            "discovery",
+            "mDNS service started",
+            Some(format!("type={} port={}", SERVICE_TYPE, self.self_port)),
+        );
 
         tokio::spawn(async move {
             loop {
@@ -125,6 +133,13 @@ impl MdnsService {
                         };
                         registry.read().await.upsert(device.clone()).await;
                         let _ = app_handle.emit("device-online", device);
+                        append_runtime_log(
+                            &app_handle,
+                            "info",
+                            "discovery",
+                            "device resolved",
+                            Some(info.get_fullname().to_string()),
+                        );
                     }
                     Ok(ServiceEvent::ServiceRemoved(_, _)) => {}
                     Ok(_) => {}
@@ -152,6 +167,7 @@ impl MdnsService {
         let Some(app_handle) = self.app_handle.clone() else {
             return;
         };
+        append_runtime_log(&app_handle, "info", "discovery", "mDNS refresh requested", None);
         let _ = self.stop();
         let _ = self.start(app_handle);
     }
@@ -178,6 +194,44 @@ impl MdnsService {
         }
         Ok(())
     }
+}
+
+fn append_runtime_log(
+    app_handle: &AppHandle,
+    level: &str,
+    scope: &str,
+    message: &str,
+    details: Option<String>,
+) {
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        return;
+    };
+    let state = state.inner().clone();
+    let app_handle = app_handle.clone();
+    let level = level.to_string();
+    let scope = scope.to_string();
+    let message = message.to_string();
+    tokio::spawn(async move {
+        let entry = {
+            let mut logs = state.runtime_logs.write().await;
+            let sequence = logs.first().map(|entry| entry.sequence + 1).unwrap_or(1);
+            let entry = RuntimeLogEntry {
+                sequence,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+                level,
+                scope,
+                message,
+                details,
+            };
+            logs.insert(0, entry.clone());
+            logs.truncate(500);
+            entry
+        };
+        let _ = app_handle.emit("runtime-log", entry);
+    });
 }
 
 fn service_info_to_device(info: &ServiceInfo, self_device_id: &str) -> Option<Device> {

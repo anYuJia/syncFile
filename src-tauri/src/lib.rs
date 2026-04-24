@@ -122,7 +122,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
     let device_registry = Arc::new(RwLock::new(DeviceRegistry::new()));
 
     // Start mDNS service
-    let mut mdns_service = MdnsService::new(
+    let mdns_service = MdnsService::new(
         device_registry.clone(),
         identity.device_id.clone(),
         identity.name.clone(),
@@ -133,8 +133,6 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         identity.avatar_data_url.is_some(),
         identity.profile_revision,
     );
-
-    let _ = mdns_service.start(app_handle.clone());
     let mdns_service = Arc::new(Mutex::new(mdns_service));
 
     // Create secure identity for TCP server
@@ -148,7 +146,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
 
     let state = Arc::new(AppStateInner {
         device_registry,
-        mdns_service,
+        mdns_service: mdns_service.clone(),
         identity: Arc::new(RwLock::new(identity)),
         sandbox: sandbox.clone(),
         settings: RwLock::new(commands::Settings {
@@ -172,11 +170,16 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         app_handle: app_handle.clone(),
     });
 
+    app_handle.manage(state.clone());
+
+    // Start mDNS service
+    if let Err(error) = mdns_service.lock().await.start(app_handle.clone()) {
+        eprintln!("Failed to start mDNS service: {}", error);
+    }
+
     // Start TCP server
     let tcp_server = TcpServer::new(app_handle.clone(), state.clone(), sandbox, secure_identity);
     if let Err(e) = tcp_server.listen(43434).await {
         eprintln!("Failed to start TCP server: {}", e);
     }
-
-    app_handle.manage(state);
 }
