@@ -1,7 +1,7 @@
 {
   "name": "syncfile",
   "productName": "syncFile",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "LAN P2P file transfer tool",
   "main": "./out/main/index.js",
   "author": "",
@@ -24,6 +24,7 @@
     "release:mac:arm64": "npm run build && electron-builder --config electron-builder.yml --mac dmg zip --arm64 --publish always",
     "dev:vite": "vite --config vite.config.ts",
     "build:vite": "vite build --config vite.config.ts",
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
