@@ -1,7 +1,7 @@
 {
   "name": "syncfile",
   "productName": "syncFile",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "LAN P2P file transfer tool",
   "main": "./out/main/index.js",
   "author": "",
