@@ -73,6 +73,7 @@ impl MdnsService {
             sanitize_service_instance_name(&self.self_name),
             &self.self_device_id[..8]
         );
+        let host_name = format!("syncfile-{}.local.", &self.self_device_id[..8]);
 
         let mut txt_properties = HashMap::new();
         txt_properties.insert("deviceId".to_string(), self.self_device_id.clone());
@@ -99,13 +100,24 @@ impl MdnsService {
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
             &instance_name,
-            &format!("{}.local.", instance_name),
-            "0.0.0.0",
+            &host_name,
+            "",
             self.self_port,
             txt_properties,
-        )?;
+        )?
+        .enable_addr_auto();
 
         mdns.register(service_info)?;
+        append_runtime_log(
+            &app_handle,
+            "info",
+            "discovery",
+            "mDNS service published",
+            Some(format!(
+                "instance={} host={} port={}",
+                instance_name, host_name, self.self_port
+            )),
+        );
 
         let receiver = mdns.browse(SERVICE_TYPE)?;
         let registry = self.registry.clone();
@@ -118,6 +130,13 @@ impl MdnsService {
             "discovery",
             "mDNS service started",
             Some(format!("type={} port={}", SERVICE_TYPE, self.self_port)),
+        );
+        append_runtime_log(
+            &app_handle,
+            "info",
+            "discovery",
+            "mDNS browser started",
+            Some(SERVICE_TYPE.to_string()),
         );
 
         thread::spawn(move || {
@@ -212,15 +231,13 @@ fn append_runtime_log(
     message: &str,
     details: Option<String>,
 ) {
-    let Some(state) = app_handle.try_state::<AppState>() else {
-        return;
-    };
+    let state = app_handle.state::<AppState>();
     let state = state.inner().clone();
     let app_handle = app_handle.clone();
     let level = level.to_string();
     let scope = scope.to_string();
     let message = message.to_string();
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let entry = {
             let mut logs = state.runtime_logs.write().await;
             let sequence = logs.first().map(|entry| entry.sequence + 1).unwrap_or(1);

@@ -38,14 +38,22 @@ export function LogViewer({
         aria-label={messages.logViewerTitle}
         tabIndex={-1}
       >
+        <button
+          type="button"
+          className="log-viewer-close"
+          onClick={onClose}
+          aria-label={messages.dismiss}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
         <header className="log-viewer-header">
           <div>
             <p className="log-viewer-kicker">{messages.logs}</p>
             <h2>{messages.logViewerTitle}</h2>
           </div>
-          <button type="button" className="button button-ghost" onClick={onClose}>
-            {messages.dismiss}
-          </button>
         </header>
 
         <div className="log-viewer-toolbar">

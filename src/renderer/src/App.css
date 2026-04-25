@@ -2947,6 +2947,7 @@ body {
 }
 
 .log-viewer-panel {
+  position: relative;
   width: min(920px, calc(100vw - 36px));
   height: min(720px, calc(100vh - 36px));
   display: grid;
@@ -2957,6 +2958,36 @@ body {
   box-shadow: var(--shadow-xl);
   padding: 18px;
   outline: none;
+}
+
+.log-viewer-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.log-viewer-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 .log-viewer-header {
