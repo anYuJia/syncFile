@@ -1,6 +1,6 @@
 [package]
 name = "syncfile-tauri"
-version = "0.0.19"
+version = "0.0.20"
 description = "LAN P2P file transfer tool"
 authors = ["you"]
 license = "MIT"
