@@ -39,11 +39,59 @@ jobs:
       matrix:
         include:
           - os: windows-latest
+            name: windows-x64-installer
             target: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc --bundles nsis,msi --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+          - os: windows-latest
+            name: windows-x64-portable
+            target: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc --no-bundle --config src-tauri/tauri.conf.json
+            upload_plain_binary: true
+            asset_pattern: "[name]_[version]_[platform]_[arch]_portable[ext]"
+          - os: windows-latest
+            name: windows-x86-installer
+            target: i686-pc-windows-msvc
+            args: --target i686-pc-windows-msvc --bundles nsis,msi --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+          - os: windows-latest
+            name: windows-x86-portable
+            target: i686-pc-windows-msvc
+            args: --target i686-pc-windows-msvc --no-bundle --config src-tauri/tauri.conf.json
+            upload_plain_binary: true
+            asset_pattern: "[name]_[version]_[platform]_[arch]_portable[ext]"
+          - os: windows-latest
+            name: windows-arm64-installer
+            target: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc --bundles nsis,msi --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+          - os: windows-latest
+            name: windows-arm64-portable
+            target: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc --no-bundle --config src-tauri/tauri.conf.json
+            upload_plain_binary: true
+            asset_pattern: "[name]_[version]_[platform]_[arch]_portable[ext]"
           - os: macos-latest
+            name: macos-arm64-dmg
             target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles dmg --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][ext]"
+          - os: macos-latest
+            name: macos-x64-dmg
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles dmg --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][ext]"
           - os: ubuntu-22.04
+            name: linux-x64
             target: x86_64-unknown-linux-gnu
+            args: --target x86_64-unknown-linux-gnu --bundles appimage,deb --config src-tauri/tauri.conf.json
+            upload_plain_binary: false
+            asset_pattern: "[name]_[version]_[platform]_[arch][ext]"
 
     runs-on: ${{ matrix.os }}
     env:
@@ -78,7 +126,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and publish ${{ matrix.target }}
+      - name: Build and publish ${{ matrix.name }}
         uses: tauri-apps/tauri-action@v0
         with:
           tagName: ${{ github.ref_name }}
@@ -86,4 +134,6 @@ jobs:
           releaseBody: "See the assets to download and install this version."
           releaseDraft: false
           prerelease: false
-          args: --target ${{ matrix.target }} --config src-tauri/tauri.conf.json
+          args: ${{ matrix.args }}
+          uploadPlainBinary: ${{ matrix.upload_plain_binary }}
+          releaseAssetNamePattern: ${{ matrix.asset_pattern }}
