@@ -12,7 +12,6 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const SERVICE_TYPE: &str = "_syncfile._tcp.local.";
 pub const MDNS_PROTOCOL_VERSION: &str = "1";
 const BROWSER_REFRESH_SECS: u64 = 4;
-const DEVICE_STALE_SECS: u64 = 45;
 
 pub struct MdnsService {
     registry: Arc<DeviceRegistry>,
@@ -140,6 +139,7 @@ impl MdnsService {
         );
 
         thread::spawn(move || {
+            let mut resolved_devices = HashMap::<String, String>::new();
             loop {
                 if shutdown_flag_task.load(Ordering::SeqCst) {
                     break;
@@ -150,6 +150,8 @@ impl MdnsService {
                         let Some(device) = service_info_to_device(&info, &self_device_id) else {
                             continue;
                         };
+                        resolved_devices
+                            .insert(info.get_fullname().to_string(), device.device_id.clone());
                         let registry = registry.clone();
                         let app_handle = app_handle.clone();
                         let fullname = info.get_fullname().to_string();
@@ -165,23 +167,26 @@ impl MdnsService {
                             );
                         });
                     }
-                    Ok(ServiceEvent::ServiceRemoved(_, _)) => {}
-                    Ok(_) => {}
-                    Err(_) => {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64;
-                        let cutoff = now.saturating_sub(DEVICE_STALE_SECS * 1000);
+                    Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
+                        let Some(device_id) = resolved_devices.remove(&fullname) else {
+                            continue;
+                        };
                         let registry = registry.clone();
                         let app_handle = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
-                            let removed_ids = registry.prune_older_than(cutoff).await;
-                            for device_id in removed_ids {
-                                let _ = app_handle.emit("device-offline", device_id);
-                            }
+                            registry.remove(&device_id, true).await;
+                            let _ = app_handle.emit("device-offline", device_id.clone());
+                            append_runtime_log(
+                                &app_handle,
+                                "info",
+                                "discovery",
+                                "device removed",
+                                Some(fullname),
+                            );
                         });
                     }
+                    Ok(_) => {}
+                    Err(_) => {}
                 }
             }
         });

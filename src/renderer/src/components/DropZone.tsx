@@ -1,4 +1,5 @@
-import { useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 import type { Device, PeerReachabilityStatus } from '@shared/types';
 import type { Messages } from '../i18n';
@@ -43,6 +44,20 @@ function fileToEntry(file: File): PendingFile | null {
     return { path: filePath, name: file.name, label: relativePath, size: file.size };
   }
   return null;
+}
+
+function pathToPendingFile(path: string): PendingFile | null {
+  if (!path) {
+    return null;
+  }
+  const normalized = path.replace(/\\/g, '/');
+  const name = normalized.split('/').pop() || path;
+  return {
+    path,
+    name,
+    label: name,
+    size: 0
+  };
 }
 
 function extOf(name: string): string {
@@ -109,6 +124,47 @@ export function DropZone({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    void getCurrentWebviewWindow()
+      .onDragDropEvent((event) => {
+        if (disposed) {
+          return;
+        }
+
+        if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setIsDragActive(true);
+          return;
+        }
+
+        if (event.payload.type === 'leave') {
+          setIsDragActive(false);
+          return;
+        }
+
+        if (event.payload.type === 'drop') {
+          setIsDragActive(false);
+          const entries = event.payload.paths
+            .map(pathToPendingFile)
+            .filter((entry): entry is PendingFile => Boolean(entry));
+          addPendingEntries(entries);
+        }
+      })
+      .then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      })
+      .catch(() => {
+        // Window-level drag and drop is best-effort; HTML5 handlers remain as fallback.
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [pendingFiles]);
 
   const addPendingEntries = (entries: PendingFile[]): void => {
     if (entries.length === 0) {

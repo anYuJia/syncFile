@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import type { RuntimeLogEntry } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -28,7 +29,7 @@ export function LogViewer({
     }
   };
 
-  return (
+  const content = (
     <div className="log-viewer-overlay" role="presentation">
       <section
         ref={dialogRef}
@@ -88,6 +89,8 @@ export function LogViewer({
       </section>
     </div>
   );
+
+  return createPortal(content, document.body);
 }
 
 function formatLogTime(timestamp: number): string {
