@@ -1,7 +1,7 @@
 use crate::commands::{Device, RuntimeLogEntry};
 use crate::discovery::device_registry::DeviceRegistry;
-use crate::AppState;
 use crate::storage::device_identity::DeviceIdentity;
+use crate::AppState;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -121,6 +121,8 @@ impl MdnsService {
         let receiver = mdns.browse(SERVICE_TYPE)?;
         let registry = self.registry.clone();
         let self_device_id = self.self_device_id.clone();
+        let self_trust_fingerprint = self.self_trust_fingerprint.clone();
+        let self_trust_public_key = self.self_trust_public_key.clone();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         let shutdown_flag_task = shutdown_flag.clone();
         append_runtime_log(
@@ -147,7 +149,12 @@ impl MdnsService {
 
                 match receiver.recv_timeout(std::time::Duration::from_secs(BROWSER_REFRESH_SECS)) {
                     Ok(ServiceEvent::ServiceResolved(info)) => {
-                        let Some(device) = service_info_to_device(&info, &self_device_id) else {
+                        let Some(device) = service_info_to_device(
+                            &info,
+                            &self_device_id,
+                            &self_trust_fingerprint,
+                            &self_trust_public_key,
+                        ) else {
                             continue;
                         };
                         resolved_devices
@@ -200,7 +207,13 @@ impl MdnsService {
         let Some(app_handle) = self.app_handle.clone() else {
             return;
         };
-        append_runtime_log(&app_handle, "info", "discovery", "mDNS refresh requested", None);
+        append_runtime_log(
+            &app_handle,
+            "info",
+            "discovery",
+            "mDNS refresh requested",
+            None,
+        );
         let _ = self.stop();
         let _ = self.start(app_handle);
     }
@@ -265,11 +278,37 @@ fn append_runtime_log(
     });
 }
 
-fn service_info_to_device(info: &ServiceInfo, self_device_id: &str) -> Option<Device> {
+fn service_info_to_device(
+    info: &ServiceInfo,
+    self_device_id: &str,
+    self_trust_fingerprint: &str,
+    self_trust_public_key: &str,
+) -> Option<Device> {
     let properties = info.get_properties();
     let device_id = properties
         .get_property_val_str("deviceId")
-        .filter(|id| *id != self_device_id)?;
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+
+    let trust_fingerprint = properties
+        .get_property_val_str("trustFingerprint")
+        .map(str::trim)
+        .unwrap_or_default();
+    let trust_public_key = properties
+        .get_property_val_str("trustPublicKey")
+        .map(str::trim)
+        .unwrap_or_default();
+
+    if is_self_advertisement(
+        device_id,
+        trust_fingerprint,
+        trust_public_key,
+        self_device_id,
+        self_trust_fingerprint,
+        self_trust_public_key,
+    ) {
+        return None;
+    }
 
     let addresses: Vec<String> = info
         .get_addresses()
@@ -293,14 +332,8 @@ fn service_info_to_device(info: &ServiceInfo, self_device_id: &str) -> Option<De
         profile_revision: properties
             .get_property_val_str("profileRevision")
             .and_then(|value| value.parse().ok()),
-        trust_fingerprint: properties
-            .get_property_val_str("trustFingerprint")
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        trust_public_key: properties
-            .get_property_val_str("trustPublicKey")
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
+        trust_fingerprint: trust_fingerprint.to_string(),
+        trust_public_key: trust_public_key.to_string(),
         host: host.to_string(),
         address,
         port: info.get_port(),
@@ -313,6 +346,19 @@ fn service_info_to_device(info: &ServiceInfo, self_device_id: &str) -> Option<De
             .map(|value| value.to_string())
             .unwrap_or_else(|| MDNS_PROTOCOL_VERSION.to_string()),
     })
+}
+
+fn is_self_advertisement(
+    device_id: &str,
+    trust_fingerprint: &str,
+    trust_public_key: &str,
+    self_device_id: &str,
+    self_trust_fingerprint: &str,
+    self_trust_public_key: &str,
+) -> bool {
+    device_id == self_device_id
+        || (!trust_fingerprint.is_empty() && trust_fingerprint == self_trust_fingerprint)
+        || (!trust_public_key.is_empty() && trust_public_key == self_trust_public_key)
 }
 
 fn sanitize_service_instance_name(name: &str) -> String {
@@ -377,7 +423,7 @@ fn is_private_ipv4(address: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_service_instance_name, select_address};
+    use super::{is_self_advertisement, sanitize_service_instance_name, select_address};
 
     #[test]
     fn sanitize_service_instance_name_strips_local_suffix_and_dots() {
@@ -399,5 +445,41 @@ mod tests {
             select_address(&addresses, "host.local."),
             "192.168.1.88".to_string()
         );
+    }
+
+    #[test]
+    fn self_advertisement_matches_device_id_or_trust_identity() {
+        assert!(is_self_advertisement(
+            "self-device",
+            "peer-fingerprint",
+            "peer-key",
+            "self-device",
+            "self-fingerprint",
+            "self-key"
+        ));
+        assert!(is_self_advertisement(
+            "peer-device",
+            "self-fingerprint",
+            "peer-key",
+            "self-device",
+            "self-fingerprint",
+            "self-key"
+        ));
+        assert!(is_self_advertisement(
+            "peer-device",
+            "peer-fingerprint",
+            "self-key",
+            "self-device",
+            "self-fingerprint",
+            "self-key"
+        ));
+        assert!(!is_self_advertisement(
+            "peer-device",
+            "peer-fingerprint",
+            "peer-key",
+            "self-device",
+            "self-fingerprint",
+            "self-key"
+        ));
     }
 }

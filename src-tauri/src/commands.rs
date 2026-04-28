@@ -409,14 +409,14 @@ async fn push_runtime_log(
 #[command]
 pub async fn get_devices(state: State<'_, AppState>) -> Result<Vec<Device>, String> {
     let devices = state.device_registry.list().await;
-    Ok(devices)
+    Ok(filter_self_device(devices, &state).await)
 }
 
 #[command]
 pub async fn refresh_devices(state: State<'_, AppState>) -> Result<Vec<Device>, String> {
     state.mdns_service.lock().await.refresh().await;
     let devices = state.device_registry.list().await;
-    Ok(devices)
+    Ok(filter_self_device(devices, &state).await)
 }
 
 #[command]
@@ -436,6 +436,18 @@ pub async fn get_self_device(state: State<'_, AppState>) -> Result<Device, Strin
         platform: std::env::consts::OS.to_string(),
         version: "1".to_string(),
     })
+}
+
+async fn filter_self_device(devices: Vec<Device>, state: &AppState) -> Vec<Device> {
+    let identity = state.identity.read().await;
+    devices
+        .into_iter()
+        .filter(|device| {
+            device.device_id != identity.device_id
+                && device.trust_fingerprint != identity.trust_fingerprint
+                && device.trust_public_key != identity.trust_public_key
+        })
+        .collect()
 }
 
 #[command]
