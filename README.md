@@ -57,7 +57,7 @@
 - macOS `arm64`
 - Windows `ia32`
 
-发布产物会出现在：
+发布产物会上传到：
 
 - [GitHub Releases](https://github.com/anYuJia/syncFile/releases)
 
