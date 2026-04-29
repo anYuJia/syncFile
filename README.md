@@ -9,7 +9,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/anYuJia/syncFile?display_name=tag)](https://github.com/anYuJia/syncFile/releases)
 [![License](https://img.shields.io/badge/license-MIT-1f6feb.svg)](./package.json)
 
-中文 | [English](./README.en.md)
+[中文](./README.md) | [English](./README.en.md)
 
 </div>
 
