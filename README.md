@@ -2,7 +2,7 @@
 
 # syncFile
 
-一个面向局域网的跨平台文件快传工具。  
+一个面向局域网的跨平台文件快传工具。
 目标体验接近 AirDrop，但支持 macOS / Windows。
 
 [![Release](https://github.com/anYuJia/syncFile/actions/workflows/release.yml/badge.svg)](https://github.com/anYuJia/syncFile/actions/workflows/release.yml)
