@@ -15,7 +15,7 @@
 
 ---
 
-## 简介
+## 项目简介
 
 `syncFile` 是一个基于 Electron + TypeScript 构建的局域网 P2P 文件传输工具。
 
