@@ -71,7 +71,7 @@
 
 ## 快速开始
 
-### 方式一：直接下载发布版
+### 下载发布版
 
 1. 打开 [Releases](https://github.com/anYuJia/syncFile/releases)
 2. 下载与你平台对应的安装包
