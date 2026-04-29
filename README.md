@@ -99,7 +99,7 @@ xattr -cr /Applications/syncFile.app
 1. 点击「更多信息」
 2. 点击「仍要运行」
 
-### 方式二：从源码运行
+### 从源码运行
 
 ```bash
 git clone https://github.com/anYuJia/syncFile.git
