@@ -3,7 +3,7 @@
 # syncFile
 
 一个面向局域网的跨平台文件快传工具。
-目标体验接近 AirDrop，但支持 macOS / Windows。
+目标体验接近 AirDrop，但支持 macOS、Windows 和 Linux。
 
 [![Release](https://github.com/anYuJia/syncFile/actions/workflows/release.yml/badge.svg)](https://github.com/anYuJia/syncFile/actions/workflows/release.yml)
 [![Latest Release](https://img.shields.io/github/v/release/anYuJia/syncFile?display_name=tag)](https://github.com/anYuJia/syncFile/releases)
@@ -17,7 +17,7 @@
 
 ## 项目简介
 
-`syncFile` 是一个基于 Electron + TypeScript 构建的局域网 P2P 文件传输工具。
+`syncFile` 是一个基于 Tauri、Rust 和 React 构建的局域网 P2P 文件传输工具。
 
 它的设计目标很直接：
 
@@ -27,11 +27,13 @@
 - 接收端默认手动确认
 - 文件落入隔离沙箱目录，避免误覆盖
 
-当前仓库已完成 Phase 1 MVP 主链路：
+当前仓库已完成局域网传输的核心链路：
 
 - mDNS 自动发现局域网设备
 - TCP 直连传输文件
-- Electron 主进程 / Preload / Renderer 完整打通
+- Tauri 命令层与 React 渲染层打通
+- 安全握手与可信设备配对
+- 传输历史、暂停、取消与恢复缓存
 - React 桌面 UI
 - GitHub Actions 自动发布
 
@@ -41,21 +43,23 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 零配置发现 | 基于 `bonjour-service` 进行局域网设备发现 |
+| 零配置发现 | 基于 mDNS 进行局域网设备发现 |
 | 直接传输 | 基于 TCP 直连进行局域网文件传输 |
-| 安全默认 | 接收端手动确认，文件进入沙箱目录 |
-| 类型安全 | 全量 TypeScript，Main / Preload / Renderer 共享类型 |
-| 可测试 | 核心传输层使用 Vitest 做单测和集成测试 |
-| 可发布 | 已接入 GitHub Actions + `electron-builder` 自动发版 |
+| 安全默认 | 接收端手动确认，文件进入沙箱目录，传输前进行身份校验 |
+| 可信配对 | 设备可完成配对，后续传输使用指纹和公钥识别对端 |
+| 跨平台桌面 | Tauri 提供原生桌面壳，React 负责界面交互 |
+| 可测试 | TypeScript 与 Rust 核心模块都有自动化测试 |
+| 可发布 | GitHub Actions 自动构建多平台安装包 |
 
 ---
 
 ## 当前发布目标
 
-当前 CI 默认构建以下安装包：
+当前 CI 默认构建以下发布产物：
 
-- macOS `arm64`
-- Windows `ia32`
+- macOS `arm64` / `x64` DMG
+- Windows `x64` / `x86` / `arm64` 安装包与 portable 版本
+- Linux `x64` AppImage / DEB
 
 发布产物会上传到：
 
@@ -65,7 +69,7 @@
 
 - 当前 macOS 安装包未签名
 - 当前 Windows 安装包未签名
-- 如果你实际需要的是 Windows 64 位，可以把发布配置中的 `ia32` 改为 `x64`
+- Linux 版本依赖目标发行版对 WebKitGTK 的支持
 
 ---
 
@@ -105,7 +109,7 @@ xattr -cr /Applications/syncFile.app
 git clone https://github.com/anYuJia/syncFile.git
 cd syncFile
 npm install
-npm run dev
+npm run tauri:dev
 ```
 
 ---
@@ -127,7 +131,7 @@ npm run dev
 1. 两台机器都运行 `syncFile`
 2. 关闭 VPN
 3. 确保 Windows 网络是“专用网络”
-4. 允许 Windows 防火墙放行 Electron / Node
+4. 允许 Windows 防火墙放行 syncFile
 5. 先传一个小文件，再传一个 50MB 到 100MB 文件
 
 更完整的检查流程见：
@@ -140,7 +144,9 @@ npm run dev
 
 ```bash
 npm run dev
+npm run tauri:dev
 npm run build
+npm run tauri:build
 npm run typecheck
 npm test
 ```
@@ -148,8 +154,7 @@ npm test
 本地打包：
 
 ```bash
-npm run dist:mac:arm64
-npm run dist:win:ia32
+npm run tauri:build
 ```
 
 ---
@@ -162,8 +167,9 @@ npm run dist:win:ia32
 
 1. `typecheck`
 2. `test`
-3. Windows `ia32` 构建与发布
-4. macOS `arm64` 构建与发布
+3. Windows 多架构构建与发布
+4. macOS 多架构构建与发布
+5. Linux x64 构建与发布
 
 示例：
 
@@ -181,24 +187,23 @@ git push origin v0.0.1
 ## 架构概览
 
 ```text
-Renderer (React UI)
+Renderer (React)
         |
-      IPC
+  Tauri commands/events
         |
-Main Process
-  |- mDNS Discovery
-  |- Device Registry
-  |- TCP Server / Client
-  |- Protocol Codec
-  |- Sandbox Storage
+Rust backend
+  |- mDNS discovery
+  |- Device registry
+  |- TCP server / client
+  |- Secure channel
+  |- Sandbox storage
 ```
 
 核心实现目录：
 
-- `src/main`：发现、传输、存储、IPC、主进程入口
-- `src/preload`：暴露安全 API 给渲染进程
+- `src-tauri/src`：发现、传输、安全、存储与 Tauri 命令
 - `src/renderer`：React UI
-- `src/shared`：共享类型和 IPC channel 常量
+- `src/shared`：前端共享类型
 
 系统设计文档：
 
@@ -208,7 +213,7 @@ Main Process
 
 ## 项目状态
 
-当前阶段：`Phase 1 MVP`
+当前阶段：`Phase 2 可用版`
 
 已完成：
 
@@ -216,27 +221,25 @@ Main Process
 - 单文件发送
 - 手动确认接收
 - 沙箱落盘
-- 基础传输记录 UI
-- 基础自动发布
+- 可信设备配对
+- 安全握手
+- 断点恢复缓存
+- 多平台自动发布
 
 暂未实现：
 
-- 断点续传
-- 文件校验哈希
-- 可信设备配对
 - 传输限速
 - WebRTC / 跨网传输
+- 文件夹批量发送体验优化
 
 ---
 
 ## 测试覆盖
 
-当前测试重点在核心传输层：
+当前测试重点覆盖传输、存储、发现和 UI 状态计算：
 
-- `codec`
-- `sandbox`
-- `tcp-server`
-- `tcp-client`
+- TypeScript: renderer hooks、格式化、传输指标、Electron legacy 模块
+- Rust: mDNS、TCP 控制帧、安全通道相关辅助逻辑
 
 运行：
 
@@ -249,12 +252,14 @@ npm test
 ## 技术栈
 
 - Electron
+- Tauri 2
+- Rust
 - React 18
 - TypeScript
-- electron-vite
+- Vite
 - Vitest
-- bonjour-service
-- electron-builder
+- Tokio
+- mdns-sd
 
 ---
 
