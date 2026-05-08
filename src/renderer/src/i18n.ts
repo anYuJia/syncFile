@@ -13,10 +13,30 @@ export interface Messages {
   openSandbox: string;
   dismiss: string;
   languageLabel: string;
+  mainMenuAriaLabel: string;
+  workspaceSectionsAriaLabel: string;
+  expandMenu: string;
+  collapseMenu: string;
+  sidebarCommandCenter: string;
+  sidebarWorkspaceLabel: string;
+  sidebarIntakeLabel: string;
+  sidebarUtilitiesLabel: string;
+  sidebarStatusDetail: (fileRequestCount: number, pairRequestCount: number, activeTransferCount: number) => string;
   routeLabel: string;
   routeIdle: string;
   routeMetaIdle: string;
   routeReady: (fromName: string, toName: string) => string;
+  workflowKicker: string;
+  workflowNoDeviceTitle: string;
+  workflowSelectDeviceTitle: string;
+  workflowAddFilesTitle: string;
+  workflowReadyTitle: string;
+  workflowTransferringTitle: string;
+  workflowNoDeviceNote: string;
+  workflowSelectDeviceNote: string;
+  workflowAddFilesNote: string;
+  workflowReadyNote: string;
+  workflowTransferringNote: string;
   onlineDevices: string;
   refreshDevices: string;
   sendFile: string;
@@ -33,9 +53,10 @@ export interface Messages {
   deviceListEmptyStepLan: string;
   deviceListEmptyStepRefresh: string;
   onlineDevicesAriaLabel: string;
-  compactSectionsAriaLabel: string;
   dropZonePassport: string;
   dropZoneTitle: string;
+  dropZoneWaitingTitle: string;
+  dropZoneWaitingBody: string;
   dropZoneTargetReady: (targetName: string) => string;
   dropZoneTargetFallback: string;
   dropZoneHint: string;
@@ -63,13 +84,14 @@ export interface Messages {
   transferResume: string;
   transferRetry: string;
   transferDelete: string;
+  transferDetails: string;
   transferClearAll: string;
   transferRateLabel: string;
   transferEtaLabel: string;
   transferPreparing: string;
   selectedRecipientLabel: string;
-  topbarDraftSummary: (fileCount: number, recipientCount: number) => string;
-  topbarRecipientSummary: (recipientCount: number) => string;
+  sendDraftSummary: (fileCount: number, recipientCount: number) => string;
+  recipientSelectionSummary: (recipientCount: number) => string;
   deviceReachabilityChecking: string;
   deviceReachabilityReachable: string;
   deviceReachabilityUnreachable: string;
@@ -233,10 +255,31 @@ const zh: Messages = {
   openSandbox: '打开沙箱',
   dismiss: '关闭',
   languageLabel: '语言',
+  mainMenuAriaLabel: '主菜单',
+  workspaceSectionsAriaLabel: '工作区分区',
+  expandMenu: '展开菜单',
+  collapseMenu: '收起菜单',
+  sidebarCommandCenter: '控制台',
+  sidebarWorkspaceLabel: '工作区',
+  sidebarIntakeLabel: '接收入口',
+  sidebarUtilitiesLabel: '工具',
+  sidebarStatusDetail: (fileRequestCount, pairRequestCount, activeTransferCount) =>
+    `文件请求 ${fileRequestCount} · 配对 ${pairRequestCount} · 活跃 ${activeTransferCount}`,
   routeLabel: '当前路线',
   routeIdle: '先选定一台目标设备，再打开这条投递路线。',
   routeMetaIdle: '尚未选中目的地',
   routeReady: (fromName, toName) => `${fromName} → ${toName}`,
+  workflowKicker: '投递流程',
+  workflowNoDeviceTitle: '等待发现附近设备',
+  workflowSelectDeviceTitle: '选择目标设备',
+  workflowAddFilesTitle: '添加要发送的文件',
+  workflowReadyTitle: '可以开始发送',
+  workflowTransferringTitle: '正在传输',
+  workflowNoDeviceNote: '先确认另一台设备已打开 syncFile，并处于同一局域网。',
+  workflowSelectDeviceNote: '从左侧设备清单选择一个或多个目的地，发件台会同步准备好。',
+  workflowAddFilesNote: '目标设备已选定，拖入文件或文件夹即可建立发送队列。',
+  workflowReadyNote: '目标和文件都已就绪，检查路线后点击发送。',
+  workflowTransferringNote: '传输进度和异常会实时进入传输记录。',
   onlineDevices: '在线设备',
   refreshDevices: '刷新设备',
   sendFile: '发送文件',
@@ -245,7 +288,7 @@ const zh: Messages = {
   manifestNote: '在线设备会被整理成投递目的地。选中之后，右侧发件台会立刻进入可发送状态。',
   dispatchKicker: '发件台',
   dispatchNote: '支持拖拽或点击选取，可连续加入多个文件；接收端仍需手动确认。',
-  ledgerKicker: '传输账本',
+  ledgerKicker: '传输记录',
   ledgerNote: '每一笔投递都会记在这里，从等待、传输到完成或失败都可追踪。',
   noOnlinePeers: '暂无在线设备',
   keepRunningOnAnotherDevice: '请确保同一局域网内的另一台设备也在运行 syncFile。',
@@ -253,9 +296,10 @@ const zh: Messages = {
   deviceListEmptyStepLan: '确保两台设备处于同一局域网或同一 Wi-Fi。',
   deviceListEmptyStepRefresh: '返回这里点击“刷新设备”，等待发现完成。',
   onlineDevicesAriaLabel: '在线设备列表',
-  compactSectionsAriaLabel: '紧凑布局分区切换',
   dropZonePassport: '投递许可',
   dropZoneTitle: '拖入文件，立刻发出',
+  dropZoneWaitingTitle: '先准备本次投递目标',
+  dropZoneWaitingBody: '也可以先暂存文件；选中在线设备后再发送。',
   dropZoneTargetReady: (targetName) => `本次目的地：${targetName}`,
   dropZoneTargetFallback: '尚未选择目标设备',
   dropZoneHint: '文件会通过局域网直连传输，并等待对方确认接收。',
@@ -283,13 +327,14 @@ const zh: Messages = {
   transferResume: '继续',
   transferRetry: '重试',
   transferDelete: '删除记录',
+  transferDetails: '查看详情',
   transferClearAll: '全部清理',
   transferRateLabel: '速率',
   transferEtaLabel: '剩余',
   transferPreparing: '准备发送中',
   selectedRecipientLabel: '已选',
-  topbarDraftSummary: (fileCount, recipientCount) => `${fileCount} 个文件 · ${recipientCount} 个收件人`,
-  topbarRecipientSummary: (recipientCount) => `${recipientCount} 个收件人已选`,
+  sendDraftSummary: (fileCount, recipientCount) => `${fileCount} 个文件 · ${recipientCount} 个收件人`,
+  recipientSelectionSummary: (recipientCount) => `${recipientCount} 个收件人已选`,
   deviceReachabilityChecking: '端口探测中',
   deviceReachabilityReachable: '可发送',
   deviceReachabilityUnreachable: '端口不可达',
@@ -306,7 +351,7 @@ const zh: Messages = {
   taskNoMatches: '没有匹配当前筛选条件的任务。',
   taskRetryVisible: '重试可见异常任务',
   taskCancelVisible: '取消可见进行中任务',
-  requestsInbox: '请求收件箱',
+  requestsInbox: '收件箱',
   requestFilesTab: '文件请求',
   requestPairsTab: '配对请求',
   requestsEmptyTitle: '暂时没有待处理请求。',
@@ -452,10 +497,31 @@ const en: Messages = {
   openSandbox: 'Open sandbox',
   dismiss: 'Dismiss',
   languageLabel: 'Language',
+  mainMenuAriaLabel: 'Main menu',
+  workspaceSectionsAriaLabel: 'Workspace sections',
+  expandMenu: 'Expand menu',
+  collapseMenu: 'Collapse menu',
+  sidebarCommandCenter: 'Command center',
+  sidebarWorkspaceLabel: 'Workspace',
+  sidebarIntakeLabel: 'Intake',
+  sidebarUtilitiesLabel: 'Utilities',
+  sidebarStatusDetail: (fileRequestCount, pairRequestCount, activeTransferCount) =>
+    `${fileRequestCount} files · ${pairRequestCount} pairs · ${activeTransferCount} active`,
   routeLabel: 'Current route',
   routeIdle: 'Choose a destination device before opening this dispatch lane.',
   routeMetaIdle: 'No destination selected',
   routeReady: (fromName, toName) => `${fromName} → ${toName}`,
+  workflowKicker: 'Dispatch flow',
+  workflowNoDeviceTitle: 'Waiting for nearby devices',
+  workflowSelectDeviceTitle: 'Choose a target device',
+  workflowAddFilesTitle: 'Add files to send',
+  workflowReadyTitle: 'Ready to send',
+  workflowTransferringTitle: 'Transfer in progress',
+  workflowNoDeviceNote: 'Make sure another device is running syncFile on this LAN.',
+  workflowSelectDeviceNote: 'Pick one or more destinations from the device manifest and the dispatch desk will arm itself.',
+  workflowAddFilesNote: 'A destination is selected. Drop files or folders to build the outgoing queue.',
+  workflowReadyNote: 'Destination and files are ready. Check the route, then send.',
+  workflowTransferringNote: 'Progress and issues are mirrored into the transfer activity list.',
   onlineDevices: 'Online devices',
   refreshDevices: 'Refresh devices',
   sendFile: 'Send file',
@@ -464,7 +530,7 @@ const en: Messages = {
   manifestNote: 'Discovered peers are listed here as ready destinations. Pick one to arm the dispatch desk.',
   dispatchKicker: 'Dispatch desk',
   dispatchNote: 'Drag files in or click to browse. You can queue multiple files, and the receiver still confirms manually.',
-  ledgerKicker: 'Ledger',
+  ledgerKicker: 'History',
   ledgerNote: 'Every handoff is logged here, from queueing to delivery, rejection, or failure.',
   noOnlinePeers: 'No online peers',
   keepRunningOnAnotherDevice: 'Keep syncFile running on another device in this LAN.',
@@ -472,9 +538,10 @@ const en: Messages = {
   deviceListEmptyStepLan: 'Make sure both devices are on the same LAN or Wi-Fi.',
   deviceListEmptyStepRefresh: 'Come back here and click refresh to discover it.',
   onlineDevicesAriaLabel: 'Online devices',
-  compactSectionsAriaLabel: 'Compact layout section switcher',
   dropZonePassport: 'Dispatch permit',
   dropZoneTitle: 'Drop a file to send immediately',
+  dropZoneWaitingTitle: 'Prepare a destination first',
+  dropZoneWaitingBody: 'You can stage files now, then choose an online device before sending.',
   dropZoneTargetReady: (targetName) => `Destination locked: ${targetName}`,
   dropZoneTargetFallback: 'No destination selected yet',
   dropZoneHint: 'Transfers run over direct LAN links and wait for receiver confirmation.',
@@ -502,13 +569,14 @@ const en: Messages = {
   transferResume: 'Resume',
   transferRetry: 'Retry',
   transferDelete: 'Delete record',
+  transferDetails: 'View details',
   transferClearAll: 'Clear all',
   transferRateLabel: 'Rate',
   transferEtaLabel: 'ETA',
   transferPreparing: 'Preparing transfer',
   selectedRecipientLabel: 'Selected',
-  topbarDraftSummary: (fileCount, recipientCount) => `${fileCount} files · ${recipientCount} recipients`,
-  topbarRecipientSummary: (recipientCount) => `${recipientCount} recipients selected`,
+  sendDraftSummary: (fileCount, recipientCount) => `${fileCount} files · ${recipientCount} recipients`,
+  recipientSelectionSummary: (recipientCount) => `${recipientCount} recipients selected`,
   deviceReachabilityChecking: 'Checking port',
   deviceReachabilityReachable: 'Ready',
   deviceReachabilityUnreachable: 'Port unreachable',
@@ -525,7 +593,7 @@ const en: Messages = {
   taskNoMatches: 'No tasks match the current filters.',
   taskRetryVisible: 'Retry visible issues',
   taskCancelVisible: 'Cancel visible active',
-  requestsInbox: 'Requests inbox',
+  requestsInbox: 'Inbox',
   requestFilesTab: 'File requests',
   requestPairsTab: 'Pair requests',
   requestsEmptyTitle: 'No pending requests right now.',

@@ -50,10 +50,7 @@ pub enum ProtocolMessage {
         signature: Option<String>,
     },
     #[serde(rename = "pair-response")]
-    PairResponse {
-        request_id: String,
-        accepted: bool,
-    },
+    PairResponse { request_id: String, accepted: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

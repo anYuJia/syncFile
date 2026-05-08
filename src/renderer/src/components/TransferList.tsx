@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { Inbox } from 'lucide-react';
 import type { TransferProgress } from '@shared/types';
 import type { Messages } from '../i18n';
 import type { RendererTransferProgress } from '../hooks/useSyncFile';
@@ -64,9 +65,6 @@ function receiveModeLabel(item: TransferProgress, messages: Messages): string | 
 
 function compactMeta(item: RendererTransferProgress, messages: Messages): string {
   const peerName = item.peerDeviceName || messages.unknownDevice;
-  if (item.error) {
-    return `${peerName} · ${item.error}`;
-  }
   if (item.direction === 'send' && item.status === 'pending' && item.bytesTransferred === 0) {
     return `${peerName} · ${messages.transferPreparing}`;
   }
@@ -199,7 +197,13 @@ export function TransferList({
   if (transfers.length === 0) {
     return (
       <div className="transfer-panel">
-        <div className="transfer-list-empty">{messages.transferEmpty}</div>
+        <div className="transfer-list-empty">
+          <span className="transfer-list-empty-mark" aria-hidden="true">
+            <Inbox />
+          </span>
+          <span className="transfer-list-empty-title">{messages.transferEmpty}</span>
+          <span className="transfer-list-empty-copy">{messages.ledgerNote}</span>
+        </div>
       </div>
     );
   }
@@ -348,9 +352,15 @@ export function TransferList({
 
       {visibleTransfers.length === 0 ? (
         <div className="transfer-list-empty">
-          {filter === 'all' && normalizedQuery.length === 0
-            ? messages.transferEmpty
-            : messages.taskNoMatches}
+          <span className="transfer-list-empty-mark" aria-hidden="true">
+            <Inbox />
+          </span>
+          <span className="transfer-list-empty-title">
+            {filter === 'all' && normalizedQuery.length === 0
+              ? messages.transferEmpty
+              : messages.taskNoMatches}
+          </span>
+          <span className="transfer-list-empty-copy">{messages.ledgerNote}</span>
         </div>
       ) : (
       <ul className="transfer-list">
@@ -380,7 +390,9 @@ export function TransferList({
         const isBusy = busyTransferIds?.has(item.transferId) ?? false;
         const isActiveTransfer = item.status === 'in-progress';
         const activeMetricSummary = liveMetricSummary(item, messages);
+        const isSelected = selectedTransferId === item.transferId;
         const showExpandedBody =
+          isSelected ||
           item.status === 'pending' ||
           isActiveTransfer ||
           item.status === 'paused' ||
@@ -390,16 +402,10 @@ export function TransferList({
         return (
           <li
             key={item.transferId}
-            className={`transfer-item is-${item.status}${showExpandedBody ? ' is-detailed' : ' is-compact'}`}
+            className={`transfer-item is-${item.status}${showExpandedBody ? ' is-detailed' : ' is-compact'}${isSelected ? ' is-selected' : ''}`}
           >
             <div className="transfer-item-summary-row">
-              <button
-                type="button"
-                className="transfer-item-summary"
-                onClick={() => onSelectedTransferIdChange(item.transferId)}
-                aria-haspopup="dialog"
-                aria-label={`${statusText} ${item.fileName}`}
-              >
+              <div className="transfer-item-summary">
                 <div className="transfer-item-summary-main">
                   <div className="transfer-item-summary-head">
                     <div className="transfer-item-stamp">{statusText}</div>
@@ -420,13 +426,20 @@ export function TransferList({
                       <div className="transfer-item-summary-metrics">{activeMetricSummary}</div>
                     )}
                   </div>
-                  <span className="transfer-item-chevron" aria-hidden="true">
+                  <button
+                    type="button"
+                    className="transfer-item-chevron transfer-item-detail-trigger"
+                    onClick={() => onSelectedTransferIdChange(isSelected ? null : item.transferId)}
+                    aria-expanded={isSelected}
+                    aria-label={`${isSelected ? messages.dismiss : messages.transferDetails} ${item.fileName}`}
+                    title={isSelected ? messages.dismiss : messages.transferDetails}
+                  >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 6 15 12 9 18" />
                     </svg>
-                  </span>
+                  </button>
                 </div>
-              </button>
+              </div>
               {canDelete && (
                 <button
                   type="button"
@@ -461,6 +474,11 @@ export function TransferList({
                   </span>
                   <span>{item.peerDeviceName || messages.unknownDevice}</span>
                 </div>
+                {item.error && (
+                  <div className="transfer-item-error" title={item.error}>
+                    {item.error}
+                  </div>
+                )}
                 {hasLiveMetrics(item) && (
                   <div className="transfer-item-metrics">
                     {item.transferRateBytesPerSecond && (
@@ -472,6 +490,22 @@ export function TransferList({
                       <span>
                         {messages.transferEtaLabel} {formatEta(item.estimatedSecondsRemaining)}
                       </span>
+                    )}
+                  </div>
+                )}
+                {isSelected && (item.localPath || item.peerDeviceId) && (
+                  <div className="transfer-item-details">
+                    {item.localPath && (
+                      <div className="transfer-item-detail-row">
+                        <span className="transfer-item-detail-label">{messages.transferLocalPath}</span>
+                        <span className="transfer-item-detail-value">{item.localPath}</span>
+                      </div>
+                    )}
+                    {item.peerDeviceId && (
+                      <div className="transfer-item-detail-row">
+                        <span className="transfer-item-detail-label">{messages.transferPeerId}</span>
+                        <span className="transfer-item-detail-value">{item.peerDeviceId}</span>
+                      </div>
                     )}
                   </div>
                 )}
@@ -529,7 +563,6 @@ export function TransferList({
                 )}
               </>
             )}
-            {showExpandedBody && item.error && <div className="transfer-item-error">{item.error}</div>}
           </li>
         );
       })}
@@ -538,195 +571,6 @@ export function TransferList({
       ))}
       </ul>
       )}
-      {selectedTransfer && (
-        <TransferDetailDialog
-          transfer={selectedTransfer}
-          messages={messages}
-          onClose={() => onSelectedTransferIdChange(null)}
-          onClearTransfers={onClearTransfers}
-          onPause={onPause}
-          onCancel={onCancel}
-          onRetry={onRetry}
-          onOpenPath={handleOpenPath}
-          onRevealPath={handleRevealPath}
-          busyTransferIds={busyTransferIds}
-        />
-      )}
-    </div>
-  );
-}
-
-interface TransferDetailDialogProps {
-  transfer: RendererTransferProgress;
-  messages: Messages;
-  onClose: () => void;
-  onClearTransfers: (transferIds: string[]) => void | Promise<void>;
-  onPause: (transferId: string) => void | Promise<void>;
-  onCancel: (transferId: string) => void | Promise<void>;
-  onRetry: (transferId: string) => void | Promise<void>;
-  onOpenPath: (path: string) => void | Promise<void>;
-  onRevealPath: (path: string) => void | Promise<void>;
-  busyTransferIds?: Set<string>;
-}
-
-function TransferDetailDialog({
-  transfer,
-  messages,
-  onClose,
-  onClearTransfers,
-  onPause,
-  onCancel,
-  onRetry,
-  onOpenPath,
-  onRevealPath,
-  busyTransferIds
-}: TransferDetailDialogProps): JSX.Element {
-  const percent = progressPercent(transfer);
-  const directionLabel = transfer.direction === 'send' ? messages.sendTo : messages.receiveFrom;
-  const statusText = statusLabel(transfer.status, messages);
-  const receiveModeText = receiveModeLabel(transfer, messages);
-  const canPause =
-    transfer.direction === 'send' && (transfer.status === 'pending' || transfer.status === 'in-progress');
-  const canCancel = transfer.status === 'pending' || transfer.status === 'in-progress';
-  const canDelete = canDeleteTransfer(transfer);
-  const canRetry =
-    transfer.direction === 'send' &&
-    ['failed', 'rejected', 'cancelled', 'paused'].includes(transfer.status) &&
-    Boolean(transfer.localPath) &&
-    Boolean(transfer.peerDeviceId);
-  const canOpenPath = canOpenCompletedReceive(transfer);
-  const isBusy = busyTransferIds?.has(transfer.transferId) ?? false;
-
-  return (
-    <div className="transfer-detail-overlay" role="presentation" onClick={onClose}>
-      <div
-        className="transfer-detail-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${messages.transferActivity}: ${transfer.fileName}`}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="transfer-detail-header">
-          <div className={`transfer-detail-stamp is-${transfer.status}`}>{statusText}</div>
-          <button type="button" className="button button-ghost" onClick={onClose}>
-            {messages.dismiss}
-          </button>
-        </div>
-
-        <h3 className="transfer-detail-title">{transfer.fileName}</h3>
-        <p className="transfer-detail-subtitle">
-          {directionLabel} {transfer.peerDeviceName || messages.unknownDevice}
-        </p>
-        {receiveModeText && <p className="transfer-detail-note">{receiveModeText}</p>}
-
-        <div className="transfer-detail-progress">
-          <div className="transfer-progress-track" aria-hidden="true">
-            <div className="transfer-progress-fill" style={{ width: `${percent}%` }} />
-          </div>
-          <div className="transfer-detail-progress-meta">
-            <span>
-              {formatBytes(transfer.bytesTransferred)} / {formatBytes(transfer.fileSize)}
-            </span>
-            <span>{percent}%</span>
-          </div>
-        </div>
-        {hasLiveMetrics(transfer) && (
-          <div className="transfer-detail-metrics">
-            {transfer.transferRateBytesPerSecond && (
-              <span>
-                {messages.transferRateLabel} {formatTransferRate(transfer.transferRateBytesPerSecond)}
-              </span>
-            )}
-            {transfer.estimatedSecondsRemaining && (
-              <span>
-                {messages.transferEtaLabel} {formatEta(transfer.estimatedSecondsRemaining)}
-              </span>
-            )}
-          </div>
-        )}
-
-        {(canPause || canCancel || canRetry || canOpenPath || canDelete) && (
-          <div className="transfer-detail-actions">
-            {canPause && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => void onPause(transfer.transferId)}
-                disabled={isBusy}
-              >
-                {messages.transferPause}
-              </button>
-            )}
-            {canCancel && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => void onCancel(transfer.transferId)}
-                disabled={isBusy}
-              >
-                {messages.transferCancel}
-              </button>
-            )}
-            {canRetry && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => void onRetry(transfer.transferId)}
-                disabled={isBusy}
-              >
-                {messages.transferRetry}
-              </button>
-            )}
-            {canOpenPath && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => void onOpenPath(transfer.localPath!)}
-              >
-                {messages.transferOpenFile}
-              </button>
-            )}
-            {canOpenPath && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => void onRevealPath(transfer.localPath!)}
-              >
-                {messages.transferRevealFile}
-              </button>
-            )}
-            {canDelete && (
-              <button
-                type="button"
-                className="button button-ghost transfer-item-action"
-                onClick={() => {
-                  void onClearTransfers([transfer.transferId]);
-                  onClose();
-                }}
-              >
-                {messages.transferDelete}
-              </button>
-            )}
-          </div>
-        )}
-
-        {transfer.error && <div className="transfer-detail-error">{transfer.error}</div>}
-
-        <div className="transfer-item-details transfer-detail-details">
-          {transfer.localPath && (
-            <div className="transfer-item-detail-row">
-              <span className="transfer-item-detail-label">{messages.transferLocalPath}</span>
-              <span className="transfer-item-detail-value">{transfer.localPath}</span>
-            </div>
-          )}
-          {transfer.peerDeviceId && (
-            <div className="transfer-item-detail-row">
-              <span className="transfer-item-detail-label">{messages.transferPeerId}</span>
-              <span className="transfer-item-detail-value">{transfer.peerDeviceId}</span>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

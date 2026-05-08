@@ -231,6 +231,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     }
   };
 
+  const handleScrollToSettingsSection = (sectionId: string): void => {
+    document.getElementById(sectionId)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+
   const content = (
     <div className="settings-overlay" onClick={handleClose}>
       <div
@@ -242,19 +246,60 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         aria-labelledby="settings-title"
         tabIndex={-1}
       >
-        <div className="settings-header">
-          <button type="button" className="settings-back" onClick={handleClose} aria-label={messages.dismiss}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-          <h2 id="settings-title" className="settings-title">{messages.settings}</h2>
-        </div>
+        <div className="settings-shell">
+          <aside className="settings-rail" aria-label={messages.settings}>
+            <button type="button" className="settings-back" onClick={handleClose} aria-label={messages.dismiss}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+            <div className="settings-rail-brand">
+              <span className="settings-rail-kicker">syncFile</span>
+              <h2 id="settings-title" className="settings-title">{messages.settings}</h2>
+              <p>{messages.settingsReceiveSectionDesc}</p>
+            </div>
+            <nav className="settings-rail-nav" aria-label={messages.settings}>
+              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-profile')}>
+                <span>01</span>
+                {messages.settingsProfileSection}
+              </button>
+              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-receive')}>
+                <span>02</span>
+                {messages.settingsReceiveSection}
+              </button>
+              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-storage')}>
+                <span>03</span>
+                {messages.settingsStorageSection}
+              </button>
+              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-maintenance')}>
+                <span>04</span>
+                {messages.settingsMaintenanceSection}
+              </button>
+            </nav>
+            <div className="settings-rail-meter">
+              <span>{messages.settingsSpaceUsed}</span>
+              <strong>{usageRatio}%</strong>
+              <div className="settings-rail-meter-track" aria-hidden="true">
+                <span style={{ width: `${usageRatio}%` }} />
+              </div>
+            </div>
+          </aside>
 
-        <div className="settings-body">
+          <main className="settings-workbench">
+            <div className="settings-header">
+              <div>
+                <p className="settings-kicker">{messages.sidebarUtilitiesLabel}</p>
+                <h2 className="settings-title">{messages.settings}</h2>
+              </div>
+              <button type="button" className="button button-ghost settings-close-button" onClick={handleClose} disabled={busy}>
+                {messages.dismiss}
+              </button>
+            </div>
+
+            <div className="settings-body">
           {inlineError && <div className="settings-error-banner">{inlineError}</div>}
 
-          <section className="settings-section">
+          <section id="settings-profile" className="settings-section">
             <div className="settings-section-head">
               <h3 className="settings-section-title">{messages.settingsProfileSection}</h3>
               <p className="settings-section-copy">{messages.settingsProfileSectionDesc}</p>
@@ -323,7 +368,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             </div>
           </section>
 
-          <section className="settings-section">
+          <section id="settings-receive" className="settings-section">
             <div className="settings-section-head">
               <h3 className="settings-section-title">{messages.settingsReceiveSection}</h3>
               <p className="settings-section-copy">{messages.settingsReceiveSectionDesc}</p>
@@ -461,7 +506,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             </div>
           </section>
 
-          <section className="settings-section">
+          <section id="settings-storage" className="settings-section">
             <div className="settings-section-head">
               <h3 className="settings-section-title">{messages.settingsStorageSection}</h3>
               <p className="settings-section-copy">{messages.settingsStorageSectionDesc}</p>
@@ -541,7 +586,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             </div>
           </section>
 
-          <section className="settings-section">
+          <section id="settings-maintenance" className="settings-section">
             <div className="settings-section-head">
               <h3 className="settings-section-title">{messages.settingsMaintenanceSection}</h3>
               <p className="settings-section-copy">{messages.settingsMaintenanceSectionDesc}</p>
@@ -585,20 +630,22 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
               </div>
             </div>
           </section>
-        </div>
+            </div>
 
-        <div className="settings-actions">
-          <button type="button" className="button button-muted" onClick={handleClose} disabled={busy}>
-            {messages.settingsCancel}
-          </button>
-          <button
-            type="button"
-            className="button"
-            disabled={busy}
-            onClick={() => void handleSave()}
-          >
-            {messages.settingsSave}
-          </button>
+            <div className="settings-actions">
+              <button type="button" className="button button-muted" onClick={handleClose} disabled={busy}>
+                {messages.settingsCancel}
+              </button>
+              <button
+                type="button"
+                className="button"
+                disabled={busy}
+                onClick={() => void handleSave()}
+              >
+                {messages.settingsSave}
+              </button>
+            </div>
+          </main>
         </div>
       </div>
     </div>

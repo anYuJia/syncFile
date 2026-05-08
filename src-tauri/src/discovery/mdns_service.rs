@@ -13,6 +13,18 @@ pub const SERVICE_TYPE: &str = "_syncfile._tcp.local.";
 pub const MDNS_PROTOCOL_VERSION: &str = "1";
 const BROWSER_REFRESH_SECS: u64 = 4;
 
+#[derive(Debug, Clone)]
+pub struct MdnsSelfInfo {
+    pub device_id: String,
+    pub name: String,
+    pub port: u16,
+    pub platform: String,
+    pub trust_fingerprint: String,
+    pub trust_public_key: String,
+    pub has_avatar: bool,
+    pub profile_revision: u32,
+}
+
 pub struct MdnsService {
     registry: Arc<DeviceRegistry>,
     self_device_id: String,
@@ -29,27 +41,17 @@ pub struct MdnsService {
 }
 
 impl MdnsService {
-    pub fn new(
-        registry: Arc<DeviceRegistry>,
-        self_device_id: String,
-        self_name: String,
-        self_port: u16,
-        self_platform: String,
-        self_trust_fingerprint: String,
-        self_trust_public_key: String,
-        self_has_avatar: bool,
-        self_profile_revision: u32,
-    ) -> Self {
+    pub fn new(registry: Arc<DeviceRegistry>, self_info: MdnsSelfInfo) -> Self {
         Self {
             registry,
-            self_device_id,
-            self_name,
-            self_port,
-            self_platform,
-            self_trust_fingerprint,
-            self_trust_public_key,
-            self_has_avatar,
-            self_profile_revision,
+            self_device_id: self_info.device_id,
+            self_name: self_info.name,
+            self_port: self_info.port,
+            self_platform: self_info.platform,
+            self_trust_fingerprint: self_info.trust_fingerprint,
+            self_trust_public_key: self_info.trust_public_key,
+            self_has_avatar: self_info.has_avatar,
+            self_profile_revision: self_info.profile_revision,
             mdns: None,
             shutdown_flag: None,
             app_handle: None,

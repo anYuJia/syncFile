@@ -5,7 +5,9 @@ use serde_json;
 const HEADER_BYTES: usize = 4;
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 
-pub fn encode_message(msg: &ProtocolMessage) -> Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+pub fn encode_message(
+    msg: &ProtocolMessage,
+) -> Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
     let payload = serde_json::to_vec(msg)?;
     if payload.len() > MAX_CONTROL_MESSAGE_BYTES {
         return Err(format!("Message exceeds {} bytes", MAX_CONTROL_MESSAGE_BYTES).into());
@@ -17,7 +19,9 @@ pub fn encode_message(msg: &ProtocolMessage) -> Result<Bytes, Box<dyn std::error
     Ok(buf.freeze())
 }
 
-pub fn encode_message_any<T: serde::Serialize>(msg: &T) -> Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
+pub fn encode_message_any<T: serde::Serialize>(
+    msg: &T,
+) -> Result<Bytes, Box<dyn std::error::Error + Send + Sync>> {
     let payload = serde_json::to_vec(msg)?;
     if payload.len() > MAX_CONTROL_MESSAGE_BYTES {
         return Err(format!("Message exceeds {} bytes", MAX_CONTROL_MESSAGE_BYTES).into());
@@ -40,20 +44,29 @@ impl MessageDecoder {
         }
     }
 
-    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<ProtocolMessage>, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn push(
+        &mut self,
+        chunk: &[u8],
+    ) -> Result<Vec<ProtocolMessage>, Box<dyn std::error::Error + Send + Sync>> {
         self.buffer.extend_from_slice(chunk);
         let (messages, remainder) = self.drain_messages(false)?;
         self.buffer = remainder;
         Ok(messages)
     }
 
-    pub fn push_with_remainder(&mut self, chunk: &[u8]) -> Result<(Vec<ProtocolMessage>, Bytes), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn push_with_remainder(
+        &mut self,
+        chunk: &[u8],
+    ) -> Result<(Vec<ProtocolMessage>, Bytes), Box<dyn std::error::Error + Send + Sync>> {
         self.buffer.extend_from_slice(chunk);
         let (messages, remainder) = self.drain_messages(true)?;
         Ok((messages, remainder.freeze()))
     }
 
-    fn drain_messages(&mut self, allow_trailing_data: bool) -> Result<(Vec<ProtocolMessage>, BytesMut), Box<dyn std::error::Error + Send + Sync>> {
+    fn drain_messages(
+        &mut self,
+        allow_trailing_data: bool,
+    ) -> Result<(Vec<ProtocolMessage>, BytesMut), Box<dyn std::error::Error + Send + Sync>> {
         let mut offset = 0;
         let mut messages = Vec::new();
 
@@ -90,7 +103,7 @@ impl MessageDecoder {
         }
 
         let remainder = self.buffer.split_off(offset);
-        Ok((messages, remainder.into()))
+        Ok((messages, remainder))
     }
 }
 

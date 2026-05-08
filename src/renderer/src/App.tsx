@@ -1,50 +1,33 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { DeviceList } from './components/DeviceList';
-import { DropZone, type PendingFile } from './components/DropZone';
+import { type PendingFile } from './components/DropZone';
+import { DispatchPanel } from './components/DispatchPanel';
+import { LedgerPanel } from './components/LedgerPanel';
+import { ManifestPanel } from './components/ManifestPanel';
 import { PairDevicePrompt } from './components/PairDevicePrompt';
 import { LogViewer } from './components/LogViewer';
-import { RequestsInboxDrawer } from './components/RequestsInboxDrawer';
+import { RequestsInboxPanel } from './components/RequestsInboxPanel';
 import { SettingsModal } from './components/Settings';
-import { TransferList } from './components/TransferList';
-import { Avatar } from './components/Avatar';
+import { AppSidebar } from './components/AppSidebar';
+import { WorkspaceHeader } from './components/WorkspaceHeader';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
-import { formatBytes, formatEta, formatTransferRate } from './utils/format';
+import type { SelectedRecipientSnapshot, WorkspaceSection } from './types/workspace';
 import type {
   Device,
   DeviceReachability,
   IncomingOffer,
   PairRequest,
-  PeerReachabilityStatus,
   RuntimeLogEntry,
   TrustedDevice
 } from '@shared/types';
 
-const LEFT_PANE_SPLIT_KEY = 'syncfile.left-pane-manual-split-v1';
-const RIGHT_PANE_SPLIT_KEY = 'syncfile.right-pane-manual-split-v4';
+const SIDEBAR_COLLAPSED_KEY = 'syncfile.sidebar-collapsed-v1';
 const SEND_DRAFT_KEY = 'syncfile.send-draft-v1';
-const DEFAULT_LEFT_PANE_SPLIT = 0.28;
-const DEFAULT_RIGHT_PANE_SPLIT = 0.5;
-const MIN_LEFT_PANE_SPLIT = 0.2;
-const MAX_LEFT_PANE_SPLIT = 0.5;
-const MIN_RIGHT_PANE_SPLIT = 0.2;
-const MAX_RIGHT_PANE_SPLIT = 0.8;
-const MIN_LEFT_PANE_WIDTH = 220;
-const MIN_RIGHT_PANE_WIDTH = 420;
-const MIN_RIGHT_PANE_SECTION_HEIGHT = 150;
-const COLUMN_RESIZER_WIDTH = 12;
-const RIGHT_PANE_RESIZER_HEIGHT = 12;
+const THEME_KEY = 'syncfile.theme-v2';
 const COMPACT_LAYOUT_QUERY = '(max-width: 1040px)';
 
-type CompactSection = 'manifest' | 'dispatch' | 'ledger';
 type RequestsInboxTab = 'files' | 'pairs';
-
-interface SelectedRecipientSnapshot extends Device {
-  isOnline: boolean;
-  reachability: PeerReachabilityStatus;
-  reachabilityError?: string;
-}
 
 interface StoredRecipientDraft {
   deviceId: string;
@@ -60,10 +43,6 @@ interface StoredRecipientDraft {
 interface NoticeState {
   kind: 'info' | 'warn';
   message: string;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function progressPercent(fileSize: number, bytesTransferred: number, status?: string): number {
@@ -172,7 +151,6 @@ export function App(): JSX.Element {
   const [selectedTransferId, setSelectedTransferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
-  const [isRequestsInboxOpen, setIsRequestsInboxOpen] = useState(false);
   const [requestsInboxTab, setRequestsInboxTab] = useState<RequestsInboxTab>('files');
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
   const [notice, setNotice] = useState<NoticeState | null>(null);
@@ -181,37 +159,24 @@ export function App(): JSX.Element {
   const [reachabilityByDeviceId, setReachabilityByDeviceId] = useState<Record<string, DeviceReachability>>({});
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useState(true);
   const [pendingSendFiles, setPendingSendFiles] = useState<PendingFile[]>(initialSendDraft.pendingSendFiles);
-  const [leftPaneSplit, setLeftPaneSplit] = useState<number>(() => {
-    const saved = localStorage.getItem(LEFT_PANE_SPLIT_KEY);
-    const parsed = saved ? Number(saved) : Number.NaN;
-    return Number.isFinite(parsed)
-      ? clamp(parsed, MIN_LEFT_PANE_SPLIT, MAX_LEFT_PANE_SPLIT)
-      : DEFAULT_LEFT_PANE_SPLIT;
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
   });
-  const [rightPaneSplit, setRightPaneSplit] = useState<number>(() => {
-    const saved = localStorage.getItem(RIGHT_PANE_SPLIT_KEY);
-    const parsed = saved ? Number(saved) : Number.NaN;
-    return Number.isFinite(parsed)
-      ? clamp(parsed, MIN_RIGHT_PANE_SPLIT, MAX_RIGHT_PANE_SPLIT)
-      : DEFAULT_RIGHT_PANE_SPLIT;
-  });
-  const [isResizingRows, setIsResizingRows] = useState(false);
-  const [isResizingColumns, setIsResizingColumns] = useState(false);
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem('theme');
-    return saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved ? saved === 'dark' : true;
   });
   const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => {
     return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
   });
-  const [compactSection, setCompactSection] = useState<CompactSection>('manifest');
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>(() =>
+    initialSendDraft.selectedDeviceIds.length > 0 || initialSendDraft.pendingSendFiles.length > 0
+      ? 'dispatch'
+      : 'manifest'
+  );
   const [busyTransferIds, setBusyTransferIds] = useState<Set<string>>(new Set());
   const [unreadOfferIds, setUnreadOfferIds] = useState<Set<string>>(new Set());
   const [unreadPairRequestIds, setUnreadPairRequestIds] = useState<Set<string>>(new Set());
-  const contentGridRef = useRef<HTMLElement>(null);
-  const rightPaneRef = useRef<HTMLDivElement>(null);
-  const toolsMenuRef = useRef<HTMLDivElement>(null);
   const seenOfferIdsRef = useRef<Set<string>>(new Set());
   const seenPairRequestIdsRef = useRef<Set<string>>(new Set());
   const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
@@ -275,7 +240,7 @@ export function App(): JSX.Element {
     if (devices.length === 0) {
       setFocusedDeviceId(null);
       if (isCompactLayout) {
-        setCompactSection('manifest');
+        setActiveSection('manifest');
       }
       return;
     }
@@ -393,35 +358,7 @@ export function App(): JSX.Element {
     if (!isSettingsOpen) {
       return;
     }
-    setIsResizingRows(false);
-    setIsResizingColumns(false);
-    setIsToolsMenuOpen(false);
   }, [isSettingsOpen]);
-
-  useEffect(() => {
-    if (!isToolsMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent): void => {
-      if (!toolsMenuRef.current?.contains(event.target as Node | null)) {
-        setIsToolsMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setIsToolsMenuOpen(false);
-      }
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isToolsMenuOpen]);
 
   useEffect(() => {
     for (const offer of pendingOffers) {
@@ -437,10 +374,7 @@ export function App(): JSX.Element {
         () => {
           setSelectedIncomingOfferId(offer.offerId);
           setRequestsInboxTab('files');
-          setIsRequestsInboxOpen(true);
-          if (isCompactLayout) {
-            setCompactSection('manifest');
-          }
+          setActiveSection('inbox');
         }
       );
     }
@@ -475,10 +409,7 @@ export function App(): JSX.Element {
         () => {
           setSelectedPairRequestId(request.requestId);
           setRequestsInboxTab('pairs');
-          setIsRequestsInboxOpen(true);
-          if (isCompactLayout) {
-            setCompactSection('manifest');
-          }
+          setActiveSection('inbox');
         }
       );
     }
@@ -501,7 +432,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const clearVisibleUnread = (): void => {
-      if (!isRequestsInboxOpen || document.visibilityState !== 'visible' || !document.hasFocus()) {
+      if (activeSection !== 'inbox' || document.visibilityState !== 'visible' || !document.hasFocus()) {
         return;
       }
       if (selectedIncomingOfferId) {
@@ -533,7 +464,7 @@ export function App(): JSX.Element {
       window.removeEventListener('focus', clearVisibleUnread);
       document.removeEventListener('visibilitychange', clearVisibleUnread);
     };
-  }, [isRequestsInboxOpen, selectedIncomingOfferId, selectedPairRequestId]);
+  }, [activeSection, selectedIncomingOfferId, selectedPairRequestId]);
 
   useEffect(() => {
     const trackedStatuses = new Set(['completed', 'failed', 'rejected', 'cancelled']);
@@ -552,7 +483,7 @@ export function App(): JSX.Element {
       }
 
       if (isCompactLayout) {
-        setCompactSection('ledger');
+        setActiveSection('ledger');
       }
 
       if (transfer.status === 'completed') {
@@ -563,7 +494,7 @@ export function App(): JSX.Element {
           () => {
             setSelectedTransferId(transfer.transferId);
             if (isCompactLayout) {
-              setCompactSection('ledger');
+              setActiveSection('ledger');
             }
           }
         );
@@ -575,7 +506,7 @@ export function App(): JSX.Element {
           () => {
             setSelectedTransferId(transfer.transferId);
             if (isCompactLayout) {
-              setCompactSection('ledger');
+              setActiveSection('ledger');
             }
           }
         );
@@ -587,20 +518,16 @@ export function App(): JSX.Element {
     const root = document.documentElement;
     if (isDarkMode) {
       root.setAttribute('data-theme', 'dark');
-      localStorage.setItem('theme', 'dark');
+      localStorage.setItem(THEME_KEY, 'dark');
     } else {
       root.setAttribute('data-theme', 'light');
-      localStorage.setItem('theme', 'light');
+      localStorage.setItem(THEME_KEY, 'light');
     }
   }, [isDarkMode]);
 
   useEffect(() => {
-    localStorage.setItem(LEFT_PANE_SPLIT_KEY, String(leftPaneSplit));
-  }, [leftPaneSplit]);
-
-  useEffect(() => {
-    localStorage.setItem(RIGHT_PANE_SPLIT_KEY, String(rightPaneSplit));
-  }, [rightPaneSplit]);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
+  }, [isSidebarCollapsed]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -630,98 +557,6 @@ export function App(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  useEffect(() => {
-    if (!isResizingRows) {
-      return;
-    }
-
-    const updateSplitFromPointer = (clientY: number): void => {
-      const pane = rightPaneRef.current;
-      if (!pane) {
-        return;
-      }
-
-      const rect = pane.getBoundingClientRect();
-      const availableHeight = rect.height - RIGHT_PANE_RESIZER_HEIGHT;
-      if (availableHeight <= MIN_RIGHT_PANE_SECTION_HEIGHT * 2) {
-        return;
-      }
-
-      const minRatio = MIN_RIGHT_PANE_SECTION_HEIGHT / availableHeight;
-      const maxRatio = 1 - minRatio;
-      const nextRatio = (clientY - rect.top - RIGHT_PANE_RESIZER_HEIGHT / 2) / availableHeight;
-      setRightPaneSplit(clamp(nextRatio, minRatio, maxRatio));
-    };
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      updateSplitFromPointer(event.clientY);
-    };
-
-    const stopResizing = (): void => {
-      setIsResizingRows(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopResizing);
-    window.addEventListener('pointercancel', stopResizing);
-    document.body.style.cursor = 'row-resize';
-    document.body.style.userSelect = 'none';
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', stopResizing);
-      window.removeEventListener('pointercancel', stopResizing);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizingRows]);
-
-  useEffect(() => {
-    if (!isResizingColumns) {
-      return;
-    }
-
-    const updateSplitFromPointer = (clientX: number): void => {
-      const pane = contentGridRef.current;
-      if (!pane) {
-        return;
-      }
-
-      const rect = pane.getBoundingClientRect();
-      const availableWidth = rect.width - COLUMN_RESIZER_WIDTH;
-      if (availableWidth <= MIN_LEFT_PANE_WIDTH + MIN_RIGHT_PANE_WIDTH) {
-        return;
-      }
-
-      const minRatio = MIN_LEFT_PANE_WIDTH / availableWidth;
-      const maxRatio = 1 - MIN_RIGHT_PANE_WIDTH / availableWidth;
-      const nextRatio = (clientX - rect.left - COLUMN_RESIZER_WIDTH / 2) / availableWidth;
-      setLeftPaneSplit(clamp(nextRatio, minRatio, maxRatio));
-    };
-
-    const handlePointerMove = (event: PointerEvent): void => {
-      updateSplitFromPointer(event.clientX);
-    };
-
-    const stopResizing = (): void => {
-      setIsResizingColumns(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', stopResizing);
-    window.addEventListener('pointercancel', stopResizing);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', stopResizing);
-      window.removeEventListener('pointercancel', stopResizing);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizingColumns]);
-
   async function handleSendFiles(filePaths: string[]): Promise<void> {
     setNotice(null);
     const targetDeviceIds = selectedDevices
@@ -739,7 +574,7 @@ export function App(): JSX.Element {
       targetDeviceIds.length * filePaths.length > 1
         ? {
             batchId: crypto.randomUUID(),
-            batchLabel: messages.topbarDraftSummary(filePaths.length, targetDeviceIds.length)
+            batchLabel: messages.sendDraftSummary(filePaths.length, targetDeviceIds.length)
           }
         : undefined;
     const successfulDeviceIds = new Set<string>();
@@ -799,7 +634,7 @@ export function App(): JSX.Element {
     }
 
     if (isCompactLayout) {
-      setCompactSection('ledger');
+      setActiveSection('ledger');
     }
   }
 
@@ -996,12 +831,6 @@ export function App(): JSX.Element {
     }
   }
 
-  const contentGridStyle = {
-    '--left-pane-split': leftPaneSplit
-  } as CSSProperties;
-  const rightPaneStyle = {
-    '--right-pane-split': rightPaneSplit
-  } as CSSProperties;
   const unreadRequestCount = unreadOfferIds.size + unreadPairRequestIds.size;
   const reachableDeviceCount = useMemo(
     () =>
@@ -1021,26 +850,6 @@ export function App(): JSX.Element {
     [transfers]
   );
   const pendingRequestCount = pendingOffers.length + pendingPairRequests.length;
-
-  const handlePaneResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    event.preventDefault();
-    setIsResizingColumns(false);
-    setIsResizingRows(true);
-  };
-
-  const handlePaneResizerDoubleClick = (): void => {
-    setRightPaneSplit(DEFAULT_RIGHT_PANE_SPLIT);
-  };
-
-  const handleColumnResizerPointerDown = (event: ReactPointerEvent<HTMLButtonElement>): void => {
-    event.preventDefault();
-    setIsResizingRows(false);
-    setIsResizingColumns(true);
-  };
-
-  const handleColumnResizerDoubleClick = (): void => {
-    setLeftPaneSplit(DEFAULT_LEFT_PANE_SPLIT);
-  };
 
   const markTransferBusy = (transferId: string, isBusy: boolean): void => {
     setBusyTransferIds((current) => {
@@ -1066,9 +875,7 @@ export function App(): JSX.Element {
     setSelectedDeviceIds((current) =>
       current.includes(deviceId) ? current.filter((id) => id !== deviceId) : [...current, deviceId]
     );
-    if (isCompactLayout) {
-      setCompactSection('dispatch');
-    }
+    setActiveSection('dispatch');
   };
 
   const handleRemoveRecipient = (deviceId: string): void => {
@@ -1085,10 +892,7 @@ export function App(): JSX.Element {
     if (unreadOfferId) {
       setSelectedIncomingOfferId(unreadOfferId);
       setRequestsInboxTab('files');
-      setIsRequestsInboxOpen(true);
-      if (isCompactLayout) {
-        setCompactSection('manifest');
-      }
+      setActiveSection('inbox');
       return;
     }
 
@@ -1096,62 +900,39 @@ export function App(): JSX.Element {
     if (unreadPairRequestId) {
       setSelectedPairRequestId(unreadPairRequestId);
       setRequestsInboxTab('pairs');
-      setIsRequestsInboxOpen(true);
-      if (isCompactLayout) {
-        setCompactSection('manifest');
-      }
+      setActiveSection('inbox');
       return;
     }
 
     if (pendingOffers[0]) {
       setSelectedIncomingOfferId(pendingOffers[0].offerId);
       setRequestsInboxTab('files');
-      setIsRequestsInboxOpen(true);
-      if (isCompactLayout) {
-        setCompactSection('manifest');
-      }
+      setActiveSection('inbox');
       return;
     }
 
     if (pendingPairRequests[0]) {
       setSelectedPairRequestId(pendingPairRequests[0].requestId);
       setRequestsInboxTab('pairs');
-      setIsRequestsInboxOpen(true);
-      if (isCompactLayout) {
-        setCompactSection('manifest');
-      }
+      setActiveSection('inbox');
       return;
     }
 
     setRequestsInboxTab('files');
-    setIsRequestsInboxOpen(true);
+    setActiveSection('inbox');
   };
 
-  const focusDispatchDeck = (): void => {
-    if (isCompactLayout) {
-      setCompactSection('dispatch');
-    }
-  };
-
-  const focusLedger = (): void => {
-    if (isCompactLayout) {
-      setCompactSection('ledger');
-    }
-    if (transfers[0]) {
+  const handleWorkspaceSectionChange = (section: WorkspaceSection): void => {
+    setActiveSection(section);
+    if (section === 'ledger' && transfers[0]) {
       setSelectedTransferId(transfers[0].transferId);
     }
   };
 
-  const focusManifest = (): void => {
-    if (isCompactLayout) {
-      setCompactSection('manifest');
-    }
-  };
-
-  const showManifest = !isCompactLayout || compactSection === 'manifest';
-  const showDispatch = !isCompactLayout || compactSection === 'dispatch';
-  const showLedger = !isCompactLayout || compactSection === 'ledger';
-  const singleSelectedDevice = selectedDevices.length === 1 ? selectedDevices[0] : null;
+  const showManifest = activeSection === 'manifest';
+  const showDispatch = activeSection === 'dispatch';
+  const showLedger = activeSection === 'ledger';
+  const showInbox = activeSection === 'inbox';
   const activeSendTransfers = useMemo(
     () =>
       transfers.filter(
@@ -1169,9 +950,9 @@ export function App(): JSX.Element {
     : 0;
   const sendDraftSummary =
     pendingSendFiles.length > 0
-      ? messages.topbarDraftSummary(pendingSendFiles.length, selectedDevices.length)
+      ? messages.sendDraftSummary(pendingSendFiles.length, selectedDevices.length)
       : selectedDevices.length > 0
-        ? messages.topbarRecipientSummary(selectedDevices.length)
+        ? messages.recipientSelectionSummary(selectedDevices.length)
         : messages.routeMetaIdle;
   const statusHeadline = primaryActiveSendTransfer
     ? primaryActiveSendTransfer.fileName
@@ -1182,431 +963,166 @@ export function App(): JSX.Element {
         : messages.routeMetaIdle;
   const statusDetail = primaryActiveSendTransfer
     ? `${primaryActiveSendPercent}% · ${primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}`
-    : `${pendingOffers.length} · ${pendingPairRequests.length} · ${activeTransferCount}`;
+    : messages.sidebarStatusDetail(pendingOffers.length, pendingPairRequests.length, activeTransferCount);
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="topbar-heading">
-          <h1 className="topbar-title">syncFile</h1>
-        </div>
-        {selfDevice && (
-          <div className="topbar-status">
-            <Avatar name={selfDevice.name} avatarDataUrl={selfDevice.avatarDataUrl} size="sm" />
-            <span className="topbar-status-copy">
-              <strong>{selfDevice.name}</strong>
-              <span>{statusHeadline} · {statusDetail}</span>
-            </span>
+      <AppSidebar
+        messages={messages}
+        locale={locale}
+        setLocale={setLocale}
+        selfDevice={selfDevice}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapsed={() => setIsSidebarCollapsed((value) => !value)}
+        activeSection={activeSection}
+        onSectionChange={handleWorkspaceSectionChange}
+        statusHeadline={statusHeadline}
+        statusDetail={statusDetail}
+        liveProgressPercent={primaryActiveSendPercent}
+        reachableDeviceCount={reachableDeviceCount}
+        deviceCount={devices.length}
+        pendingFileCount={pendingSendFiles.length}
+        selectedRecipientCount={selectedDevices.length}
+        activeSendTransferCount={activeSendTransfers.length}
+        completedTransferCount={completedTransferCount}
+        issueTransferCount={issueTransferCount}
+        activeTransferCount={activeTransferCount}
+        pendingRequestCount={pendingRequestCount}
+        unreadRequestCount={unreadRequestCount}
+        isDarkMode={isDarkMode}
+        onOpenRequestsInbox={handleOpenRequestsInbox}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenLogs={() => {
+          setIsLogViewerOpen(true);
+          void refreshRuntimeLogs();
+        }}
+        onOpenSandbox={() => void handleOpenSandbox()}
+        onToggleTheme={() => setIsDarkMode((prev) => !prev)}
+      />
+
+      <div className="workspace-main">
+        <WorkspaceHeader
+          messages={messages}
+          activeSection={activeSection}
+          deviceCount={devices.length}
+          pendingFileCount={pendingSendFiles.length}
+          selectedRecipientCount={selectedDevices.length}
+          activeTransferCount={activeTransferCount}
+          pendingRequestCount={pendingRequestCount}
+        />
+        {errorMessage && (
+          <div className="error-banner" role="alert">
+            <span>{errorMessage}</span>
+            <button type="button" className="button button-ghost" onClick={clearError}>
+              {messages.dismiss}
+            </button>
+          </div>
+        )}
+        {notice && (
+          <div className={`notice-banner is-${notice.kind}`} role="status">
+            <span>{notice.message}</span>
+            <button type="button" className="button button-ghost" onClick={() => setNotice(null)}>
+              {messages.dismiss}
+            </button>
           </div>
         )}
 
-        <div className="topbar-toolbar">
-          <div className="overview-strip" aria-label="workspace overview">
-            <button
-              type="button"
-              className="overview-chip overview-chip-devices"
-              onClick={() => {
-                focusManifest();
-                void handleRefreshDevices();
-              }}
-            >
-              <span className="overview-chip-label">{messages.onlineDevices}</span>
-              <strong className="overview-chip-value">{devices.length}</strong>
-              <span className="overview-chip-meta">{reachableDeviceCount}/{devices.length || 0}</span>
-            </button>
-
-            <button
-              type="button"
-              className={`overview-chip overview-chip-requests${unreadRequestCount > 0 ? ' is-unread' : ''}`}
-              onClick={handleOpenRequestsInbox}
-              title={messages.requestsInbox}
-              aria-label={messages.requestsInbox}
-            >
-              <span className="topbar-button-icon overview-chip-icon" aria-hidden="true">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 7h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
-                  <path d="M22 7l-10 7L2 7" />
-                </svg>
-                {unreadRequestCount > 0 && <span className="topbar-badge">{unreadRequestCount}</span>}
-              </span>
-              <span className="overview-chip-label">{messages.requestsInbox}</span>
-              <strong className="overview-chip-value">{pendingRequestCount}</strong>
-              <span className="overview-chip-meta">{unreadRequestCount}/{pendingRequestCount || 0}</span>
-            </button>
-
-            <button type="button" className="overview-chip overview-chip-dispatch" onClick={focusDispatchDeck}>
-              <span className="overview-chip-label">{messages.sendFile}</span>
-              <strong className="overview-chip-value">{pendingSendFiles.length}</strong>
-              <span className="overview-chip-meta">{selectedDevices.length}/{activeSendTransfers.length}</span>
-            </button>
-
-            <button type="button" className="overview-chip overview-chip-ledger" onClick={focusLedger}>
-              <span className="overview-chip-label">{messages.transferActivity}</span>
-              <strong className="overview-chip-value">{activeTransferCount}</strong>
-              <span className="overview-chip-meta">{completedTransferCount}/{issueTransferCount}</span>
-            </button>
-          </div>
-          <div className="topbar-actions">
-            <div ref={toolsMenuRef} className="topbar-tools">
-              <button
-                type="button"
-                className={`button button-muted topbar-icon-button${isToolsMenuOpen ? ' is-active' : ''}`}
-                onClick={() => setIsToolsMenuOpen((prev) => !prev)}
-                title={messages.toolsMenuLabel}
-                aria-label={messages.toolsMenuLabel}
-                aria-haspopup="menu"
-                aria-expanded={isToolsMenuOpen}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <circle cx="12" cy="5" r="1.5" />
-                  <circle cx="12" cy="12" r="1.5" />
-                  <circle cx="12" cy="19" r="1.5" />
-                </svg>
-              </button>
-              {isToolsMenuOpen && (
-                <div className="topbar-tools-menu" role="menu" aria-label={messages.toolsMenuLabel}>
-                  <button
-                    type="button"
-                    className="topbar-tools-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsSettingsOpen(true);
-                      setIsToolsMenuOpen(false);
-                    }}
-                  >
-                    {messages.settings}
-                  </button>
-                  <button
-                    type="button"
-                    className="topbar-tools-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsLogViewerOpen(true);
-                      void refreshRuntimeLogs();
-                      setIsToolsMenuOpen(false);
-                    }}
-                  >
-                    {messages.logs}
-                  </button>
-                  <button
-                    type="button"
-                    className="topbar-tools-item"
-                    role="menuitem"
-                    onClick={() => {
-                      void handleOpenSandbox();
-                      setIsToolsMenuOpen(false);
-                    }}
-                  >
-                    {messages.openSandbox}
-                  </button>
-                  <button
-                    type="button"
-                    className="topbar-tools-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsDarkMode((prev) => !prev);
-                    }}
-                  >
-                    {isDarkMode ? messages.appearanceLight : messages.appearanceDark}
-                  </button>
-                  <div className="topbar-tools-section">
-                    <span className="topbar-tools-label">{messages.languageLabel}</span>
-                    <div className="locale-switch locale-switch-compact" aria-label={messages.languageLabel}>
-                      <button
-                        type="button"
-                        className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
-                        onClick={() => setLocale('zh')}
-                      >
-                        中文
-                      </button>
-                      <button
-                        type="button"
-                        className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
-                        onClick={() => setLocale('en')}
-                      >
-                        EN
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {errorMessage && (
-        <div className="error-banner" role="alert">
-          <span>{errorMessage}</span>
-          <button type="button" className="button button-ghost" onClick={clearError}>
-            {messages.dismiss}
-          </button>
-        </div>
-      )}
-      {notice && (
-        <div className={`notice-banner is-${notice.kind}`} role="status">
-          <span>{notice.message}</span>
-          <button type="button" className="button button-ghost" onClick={() => setNotice(null)}>
-            {messages.dismiss}
-          </button>
-        </div>
-      )}
-
-      <main
-        ref={contentGridRef}
-        className={`content-grid${isResizingRows ? ' is-resizing-rows' : ''}${isResizingColumns ? ' is-resizing-columns' : ''}${isCompactLayout ? ' is-compact-layout' : ''}`}
-        style={contentGridStyle}
-      >
-        {isCompactLayout && (
-          <div className="compact-section-switcher" role="tablist" aria-label={messages.compactSectionsAriaLabel}>
-            {[
-              ['manifest', messages.onlineDevices],
-              ['dispatch', messages.sendFile],
-              ['ledger', messages.transferActivity]
-            ].map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={compactSection === value}
-                className={`compact-section-tab${compactSection === value ? ' is-active' : ''}`}
-                onClick={() => setCompactSection(value as CompactSection)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {showManifest && (
-        <section className="card card-manifest">
-          <div className="card-head">
-            <div className="card-head-copy">
-              <h2>{messages.onlineDevices}</h2>
-              <span className="card-head-caption">{reachableDeviceCount}/{devices.length || 0}</span>
-            </div>
-            <div className="card-head-actions">
-              <button
-                type="button"
-                className={`button button-ghost manifest-refresh-button${isRefreshingDevices ? ' is-spinning' : ''}`}
-                onClick={() => void handleRefreshDevices()}
-                title={messages.refreshDevices}
-                aria-label={messages.refreshDevices}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="23 4 23 10 17 10" />
-                  <polyline points="1 20 1 14 7 14" />
-                  <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10" />
-                  <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14" />
-                </svg>
-              </button>
-              <span className="card-counter">{devices.length}</span>
-            </div>
-          </div>
-          <DeviceList
-            devices={devices}
-            selectedDeviceIds={selectedDeviceIds}
-            focusedDeviceId={focusedDeviceId}
-            reachabilityByDeviceId={reachabilityByDeviceId}
-            trustedDeviceKeys={trustedDeviceKeys}
-            onToggleSelect={handleToggleDeviceSelection}
-            onFocusDevice={setFocusedDeviceId}
-            onRefresh={handleRefreshDevices}
-            messages={messages}
-          />
-        </section>
-        )}
-
-        {!isCompactLayout && (
-        <button
-          type="button"
-          className={`column-resizer${isResizingColumns ? ' is-active' : ''}`}
-          onPointerDown={handleColumnResizerPointerDown}
-          onDoubleClick={handleColumnResizerDoubleClick}
-          aria-label="Resize online devices and main panels"
+        <main
+          className={`content-grid is-menu-layout is-active-${activeSection}`}
         >
-          <span className="column-resizer-handle" aria-hidden="true" />
-        </button>
-        )}
+          {showManifest && (
+            <ManifestPanel
+              messages={messages}
+              devices={devices}
+              selectedDeviceIds={selectedDeviceIds}
+              focusedDeviceId={focusedDeviceId}
+              reachabilityByDeviceId={reachabilityByDeviceId}
+              trustedDeviceKeys={trustedDeviceKeys}
+              reachableDeviceCount={reachableDeviceCount}
+              isRefreshingDevices={isRefreshingDevices}
+              onToggleDeviceSelection={handleToggleDeviceSelection}
+              onFocusDevice={setFocusedDeviceId}
+              onRefreshDevices={handleRefreshDevices}
+            />
+          )}
 
-        {(!isCompactLayout || showDispatch || showLedger) && (
-        <div
-          ref={rightPaneRef}
-          className="right-pane"
-          style={rightPaneStyle}
-        >
           {showDispatch && (
-          <section className="card card-dispatch">
-            <div className="card-head">
-              <div className="card-head-copy">
-                <h2>{messages.sendFile}</h2>
-                <span className="card-head-caption">{pendingSendFiles.length}/{selectedDevices.length}</span>
-              </div>
-              <div className="card-head-actions card-head-actions-dispatch">
-                <span className={`dispatch-target-badge${selectedDevices.length > 0 ? ' is-active' : ''}`}>
-                  {selectedDevices.length > 0
-                    ? messages.dispatchTargetReady(selectedDevices.map((device) => device.name).join(' · '))
-                    : messages.dispatchTargetIdle}
-                </span>
-                {singleSelectedDevice && singleSelectedDevice.isOnline !== false && (
-                  trustedDeviceKeys.has(`${singleSelectedDevice.deviceId}:${singleSelectedDevice.trustFingerprint}`) ? (
-                    <span className="device-item-trusted">{messages.pairedDevice}</span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="button button-ghost"
-                      onClick={() => setPairingDeviceId(singleSelectedDevice.deviceId)}
-                    >
-                      {messages.pairDevice}
-                    </button>
-                  )
-                )}
-              </div>
-            </div>
-            {primaryActiveSendTransfer && (
-              <div className="dispatch-live-transfer">
-                <div className="dispatch-live-transfer-head">
-                  <div className="dispatch-live-transfer-copy">
-                    <span className="dispatch-live-transfer-kicker">
-                      {primaryActiveSendTransfer.status === 'pending'
-                        ? messages.transferPreparing
-                        : messages.transferStatusInProgress}
-                    </span>
-                    <strong className="dispatch-live-transfer-title">
-                      {primaryActiveSendTransfer.fileName}
-                    </strong>
-                    <span className="dispatch-live-transfer-peer">
-                      {primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}
-                    </span>
-                  </div>
-                  <div className="dispatch-live-transfer-side">
-                    <span className="dispatch-live-transfer-percent">{primaryActiveSendPercent}%</span>
-                    {activeSendTransfers.length > 1 && (
-                      <span className="dispatch-live-transfer-count">+{activeSendTransfers.length - 1}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="dispatch-live-transfer-track" aria-hidden="true">
-                  <div
-                    className="dispatch-live-transfer-fill"
-                    style={{ width: `${primaryActiveSendPercent}%` }}
-                  />
-                </div>
-                <div className="dispatch-live-transfer-meta">
-                  <span>
-                    {formatBytes(primaryActiveSendTransfer.bytesTransferred)} /{' '}
-                    {formatBytes(primaryActiveSendTransfer.fileSize)}
-                  </span>
-                  {(primaryActiveSendTransfer.transferRateBytesPerSecond ||
-                    primaryActiveSendTransfer.estimatedSecondsRemaining) && (
-                    <span className="dispatch-live-transfer-metrics">
-                      {primaryActiveSendTransfer.transferRateBytesPerSecond && (
-                        <span>
-                          {messages.transferRateLabel}{' '}
-                          {formatTransferRate(primaryActiveSendTransfer.transferRateBytesPerSecond)}
-                        </span>
-                      )}
-                      {primaryActiveSendTransfer.estimatedSecondsRemaining && (
-                        <span>
-                          {messages.transferEtaLabel}{' '}
-                          {formatEta(primaryActiveSendTransfer.estimatedSecondsRemaining)}
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-            <DropZone
-              onSend={(filePaths) => void handleSendFiles(filePaths)}
+            <DispatchPanel
               messages={messages}
               selectedDevices={selectedDevices}
-              selfDevice={selfDevice}
+              trustedDeviceKeys={trustedDeviceKeys}
               pendingFiles={pendingSendFiles}
+              activeSendTransfers={activeSendTransfers}
+              primaryActiveSendTransfer={primaryActiveSendTransfer}
+              primaryActiveSendPercent={primaryActiveSendPercent}
+              selfDevice={selfDevice}
+              onPairDevice={setPairingDeviceId}
+              onSendFiles={(filePaths) => void handleSendFiles(filePaths)}
               onPendingFilesChange={setPendingSendFiles}
               onRemoveRecipient={handleRemoveRecipient}
             />
-          </section>
-          )}
-
-          {!isCompactLayout && (
-          <button
-            type="button"
-            className={`pane-resizer${isResizingRows ? ' is-active' : ''}`}
-            onPointerDown={handlePaneResizerPointerDown}
-            onDoubleClick={handlePaneResizerDoubleClick}
-            aria-label="Resize send and transfer panels"
-          >
-            <span className="pane-resizer-handle" aria-hidden="true" />
-          </button>
           )}
 
           {showLedger && (
-          <section className="card card-ledger">
-            <div className="card-head">
-              <div className="card-head-copy">
-                <h2>{messages.transferActivity}</h2>
-                <span className="card-head-caption">{activeTransferCount}/{issueTransferCount}</span>
-              </div>
-            </div>
-            <TransferList
-              transfers={transfers}
+            <LedgerPanel
               messages={messages}
+              transfers={transfers}
+              activeTransferCount={activeTransferCount}
+              issueTransferCount={issueTransferCount}
+              busyTransferIds={busyTransferIds}
+              selectedTransferId={selectedTransferId}
+              onSelectedTransferIdChange={setSelectedTransferId}
               onPause={handlePauseTransfer}
               onCancel={handleCancelTransfer}
               onRetry={handleRetryTransfer}
               onClearTransfers={handleClearTransfers}
-              busyTransferIds={busyTransferIds}
-              selectedTransferId={selectedTransferId}
-              onSelectedTransferIdChange={setSelectedTransferId}
             />
-          </section>
           )}
-        </div>
-        )}
-      </main>
 
-      <RequestsInboxDrawer
-        isOpen={isRequestsInboxOpen}
-        activeTab={requestsInboxTab}
-        onTabChange={setRequestsInboxTab}
-        onClose={() => setIsRequestsInboxOpen(false)}
-        offers={pendingOffers}
-        selectedOfferId={selectedIncomingOfferId}
-        trustedDeviceKeys={trustedDeviceKeys}
-        busyOfferId={busyOfferId}
-        onSelectOffer={(offerId) => {
-          setSelectedIncomingOfferId(offerId);
-          setUnreadOfferIds((current) => {
-            if (!current.has(offerId)) {
-              return current;
-            }
-            const next = new Set(current);
-            next.delete(offerId);
-            return next;
-          });
-        }}
-        onAccept={handleAccept}
-        onTrustAndAccept={handleTrustAndAccept}
-        onReject={handleReject}
-        pairRequests={pendingPairRequests}
-        selectedPairRequestId={selectedPairRequestId}
-        selfFingerprint={selfDevice?.trustFingerprint}
-        onSelectPairRequest={(requestId) => {
-          setSelectedPairRequestId(requestId);
-          setUnreadPairRequestIds((current) => {
-            if (!current.has(requestId)) {
-              return current;
-            }
-            const next = new Set(current);
-            next.delete(requestId);
-            return next;
-          });
-        }}
-        onAcceptPairRequest={handleAcceptPairRequest}
-        onRejectPairRequest={handleRejectPairRequest}
-        messages={messages}
-      />
+          {showInbox && (
+            <RequestsInboxPanel
+              activeTab={requestsInboxTab}
+              onTabChange={setRequestsInboxTab}
+              offers={pendingOffers}
+              selectedOfferId={selectedIncomingOfferId}
+              trustedDeviceKeys={trustedDeviceKeys}
+              busyOfferId={busyOfferId}
+              onSelectOffer={(offerId) => {
+                setSelectedIncomingOfferId(offerId);
+                setUnreadOfferIds((current) => {
+                  if (!current.has(offerId)) {
+                    return current;
+                  }
+                  const next = new Set(current);
+                  next.delete(offerId);
+                  return next;
+                });
+              }}
+              onAccept={handleAccept}
+              onTrustAndAccept={handleTrustAndAccept}
+              onReject={handleReject}
+              pairRequests={pendingPairRequests}
+              selectedPairRequestId={selectedPairRequestId}
+              selfFingerprint={selfDevice?.trustFingerprint}
+              onSelectPairRequest={(requestId) => {
+                setSelectedPairRequestId(requestId);
+                setUnreadPairRequestIds((current) => {
+                  if (!current.has(requestId)) {
+                    return current;
+                  }
+                  const next = new Set(current);
+                  next.delete(requestId);
+                  return next;
+                });
+              }}
+              onAcceptPairRequest={handleAcceptPairRequest}
+              onRejectPairRequest={handleRejectPairRequest}
+              messages={messages}
+            />
+          )}
+        </main>
+      </div>
+
       {pairingDevice && selfDevice && (
         <PairDevicePrompt
           device={pairingDevice}

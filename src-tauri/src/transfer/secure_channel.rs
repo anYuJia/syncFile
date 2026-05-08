@@ -1,14 +1,13 @@
-use aes_gcm::{
-    aead::Aead,
-    Aes256Gcm, KeyInit,
-};
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit};
 use base64::Engine as _;
-use ring::agreement::{agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey as X25519PublicKey, X25519};
+use ring::agreement::{
+    agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey as X25519PublicKey, X25519,
+};
 use ring::hkdf::{Salt, HKDF_SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, UnparsedPublicKey as EdPublicKey, ED25519};
-use sha2::Digest;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::io::{self, ErrorKind};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -122,8 +121,8 @@ pub struct SecureSocket {
 
 impl SecureSocket {
     fn new(stream: TcpStream, keys: SessionKeys) -> Self {
-        let send_cipher = Aes256Gcm::new_from_slice(&keys.send_key)
-            .expect("AES-256-GCM key should be 32 bytes");
+        let send_cipher =
+            Aes256Gcm::new_from_slice(&keys.send_key).expect("AES-256-GCM key should be 32 bytes");
         let receive_cipher = Aes256Gcm::new_from_slice(&keys.receive_key)
             .expect("AES-256-GCM key should be 32 bytes");
 
@@ -224,15 +223,23 @@ pub async fn secure_connect(
     let timeout_ms = timeout_ms.unwrap_or(HANDSHAKE_TIMEOUT_MS);
     tokio_timeout(std::time::Duration::from_millis(timeout_ms), async move {
         let rng = SystemRandom::new();
-        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
-        let ephemeral_public = ephemeral_private
-            .compute_public_key()
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
+        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng).map_err(|e| {
+            io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e))
+        })?;
+        let ephemeral_public = ephemeral_private.compute_public_key().map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Failed to compute pubkey: {:?}", e),
+            )
+        })?;
 
         let mut client_nonce = [0u8; 16];
-        rng.fill(&mut client_nonce)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
+        rng.fill(&mut client_nonce).map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Failed to generate nonce: {:?}", e),
+            )
+        })?;
 
         let unsigned_hello = UnsignedClientHello {
             msg_type: "secure-client-hello".to_string(),
@@ -279,8 +286,12 @@ pub async fn secure_connect(
         let mut server_hello_buf = vec![0u8; payload_len];
         stream.read_exact(&mut server_hello_buf).await?;
 
-        let server_hello: ServerHello = serde_json::from_slice(&server_hello_buf)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse server hello failed: {}", e)))?;
+        let server_hello: ServerHello = serde_json::from_slice(&server_hello_buf).map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Parse server hello failed: {}", e),
+            )
+        })?;
 
         verify_server_hello(&server_hello, &unsigned_hello, &expected_peer)?;
 
@@ -341,8 +352,12 @@ pub async fn secure_accept(
         let mut client_hello_buf = vec![0u8; payload_len];
         stream.read_exact(&mut client_hello_buf).await?;
 
-        let client_hello: ClientHello = serde_json::from_slice(&client_hello_buf)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Parse client hello failed: {}", e)))?;
+        let client_hello: ClientHello = serde_json::from_slice(&client_hello_buf).map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Parse client hello failed: {}", e),
+            )
+        })?;
 
         verify_client_hello(&client_hello)?;
 
@@ -355,15 +370,23 @@ pub async fn secure_accept(
         };
 
         let rng = SystemRandom::new();
-        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e)))?;
-        let ephemeral_public = ephemeral_private
-            .compute_public_key()
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to compute pubkey: {:?}", e)))?;
+        let ephemeral_private = EphemeralPrivateKey::generate(&X25519, &rng).map_err(|e| {
+            io::Error::new(ErrorKind::Other, format!("Failed to generate key: {:?}", e))
+        })?;
+        let ephemeral_public = ephemeral_private.compute_public_key().map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Failed to compute pubkey: {:?}", e),
+            )
+        })?;
 
         let mut server_nonce = [0u8; 16];
-        rng.fill(&mut server_nonce)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Failed to generate nonce: {:?}", e)))?;
+        rng.fill(&mut server_nonce).map_err(|e| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!("Failed to generate nonce: {:?}", e),
+            )
+        })?;
 
         let unsigned_hello = UnsignedServerHello {
             msg_type: "secure-server-hello".to_string(),
@@ -412,7 +435,12 @@ pub async fn secure_accept(
         .map_err(|e| io::Error::new(ErrorKind::Other, format!("Key agreement failed: {:?}", e)))?
         .map_err(|_| io::Error::new(ErrorKind::Other, "Failed to derive shared secret"))?;
 
-        let keys = derive_session_keys(Role::Server, &shared_secret, &unsigned_client_hello, &unsigned_hello)?;
+        let keys = derive_session_keys(
+            Role::Server,
+            &shared_secret,
+            &unsigned_client_hello,
+            &unsigned_hello,
+        )?;
 
         let peer_identity = ExpectedPeerIdentity {
             device_id: Some(client_hello.from_device.device_id),
@@ -440,7 +468,12 @@ fn base64_encode(bytes: &[u8]) -> String {
 fn base64_decode(s: &str) -> io::Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(s)
-        .map_err(|e| io::Error::new(ErrorKind::InvalidData, format!("Base64 decode failed: {}", e)))
+        .map_err(|e| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Base64 decode failed: {}", e),
+            )
+        })
 }
 
 fn sign_payload(payload: &str, private_key: &str) -> io::Result<String> {
@@ -462,7 +495,9 @@ fn verify_payload(payload: &str, signature: &str, public_key: &str) -> bool {
     };
 
     let public_key = EdPublicKey::new(&ED25519, &public_key_bytes);
-    public_key.verify(payload.as_bytes(), &signature_bytes).is_ok()
+    public_key
+        .verify(payload.as_bytes(), &signature_bytes)
+        .is_ok()
 }
 
 fn client_hello_payload(hello: &UnsignedClientHello) -> String {
@@ -514,7 +549,11 @@ fn verify_client_hello(hello: &ClientHello) -> io::Result<()> {
     };
 
     let payload = client_hello_payload(&unsigned);
-    if !verify_payload(&payload, &hello.signature, &hello.from_device.trust_public_key) {
+    if !verify_payload(
+        &payload,
+        &hello.signature,
+        &hello.from_device.trust_public_key,
+    ) {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
             "Client hello signature verification failed",
@@ -562,7 +601,9 @@ fn verify_server_hello(
     }
 
     if let Some(expected_public_key) = &expected_peer.trust_public_key {
-        if !expected_public_key.is_empty() && &hello.from_device.trust_public_key != expected_public_key {
+        if !expected_public_key.is_empty()
+            && &hello.from_device.trust_public_key != expected_public_key
+        {
             return Err(io::Error::new(
                 ErrorKind::PermissionDenied,
                 "Server public key mismatch",
@@ -581,7 +622,11 @@ fn verify_server_hello(
     };
 
     let payload = server_hello_payload(&unsigned);
-    if !verify_payload(&payload, &hello.signature, &hello.from_device.trust_public_key) {
+    if !verify_payload(
+        &payload,
+        &hello.signature,
+        &hello.from_device.trust_public_key,
+    ) {
         return Err(io::Error::new(
             ErrorKind::PermissionDenied,
             "Server hello signature verification failed",

@@ -1,7 +1,7 @@
 {
   "name": "syncfile",
   "productName": "syncFile",
-  "version": "0.0.24",
+  "version": "0.0.25",
   "description": "LAN P2P file transfer tool",
   "main": "./out/main/index.js",
   "author": "",
@@ -29,9 +29,16 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.7.0",
-    "bonjour-service": "^1.2.1"
+    "bonjour-service": "^1.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.38.0",
+    "lucide-react": "^1.14.0",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -41,11 +48,14 @@
     "@types/react": "^18.2.73",
     "@types/react-dom": "^18.2.23",
     "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.5.0",
     "electron": "^39.8.5",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "postcss": "^8.5.14",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.4.3",
     "vite": "^7.3.2",
     "vitest": "^4.1.4"

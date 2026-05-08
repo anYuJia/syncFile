@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::transfer::protocol::{FileOfferMessage, PairRequestMessage, FromDevice};
+use crate::transfer::protocol::{FileOfferMessage, FromDevice, PairRequestMessage};
 
 use base64::Engine;
 
@@ -47,11 +47,14 @@ pub fn fingerprint_for_public_key(public_key: &str) -> String {
     )
 }
 
-pub fn sign_payload(payload: &str, private_key: &str) -> String {
-    let private_key_der = base64::engine::general_purpose::STANDARD.decode(private_key).unwrap();
-    let key_pair = Ed25519KeyPair::from_pkcs8(&private_key_der).unwrap();
+pub fn sign_payload(payload: &str, private_key: &str) -> Result<String, String> {
+    let private_key_der = base64::engine::general_purpose::STANDARD
+        .decode(private_key)
+        .map_err(|e| format!("invalid private key encoding: {}", e))?;
+    let key_pair = Ed25519KeyPair::from_pkcs8(&private_key_der)
+        .map_err(|e| format!("invalid private key: {:?}", e))?;
     let signature = key_pair.sign(payload.as_bytes());
-    base64::engine::general_purpose::STANDARD.encode(signature.as_ref())
+    Ok(base64::engine::general_purpose::STANDARD.encode(signature.as_ref()))
 }
 
 pub fn verify_payload(payload: &str, signature: &str, public_key: &str) -> bool {
@@ -65,13 +68,15 @@ pub fn verify_payload(payload: &str, signature: &str, public_key: &str) -> bool 
     };
 
     let public_key = EdUnparsedPublicKey::new(&ED25519, &public_key_der);
-    public_key.verify(payload.as_bytes(), &signature_bytes).is_ok()
+    public_key
+        .verify(payload.as_bytes(), &signature_bytes)
+        .is_ok()
 }
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis() as u64
 }
 
@@ -116,7 +121,7 @@ fn file_offer_payload(
     json_val.to_string()
 }
 
-pub fn sign_file_offer(offer: &FileOfferMessage, private_key: &str) -> String {
+pub fn sign_file_offer(offer: &FileOfferMessage, private_key: &str) -> Result<String, String> {
     let payload = file_offer_payload(
         offer.version,
         &offer.file_id,
@@ -168,7 +173,10 @@ fn pair_request_payload(
     json_val.to_string()
 }
 
-pub fn sign_pair_request(request: &PairRequestMessage, private_key: &str) -> String {
+pub fn sign_pair_request(
+    request: &PairRequestMessage,
+    private_key: &str,
+) -> Result<String, String> {
     let payload = pair_request_payload(
         request.version,
         &request.request_id,

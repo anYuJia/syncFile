@@ -35,18 +35,27 @@ export function DeviceList({
   if (devices.length === 0) {
     return (
       <div className="device-list-empty">
-        <p className="device-list-empty-title">{messages.noOnlinePeers}</p>
-        <p className="device-list-empty-body">{messages.keepRunningOnAnotherDevice}</p>
-        <ol className="device-list-empty-steps">
-          <li>{messages.deviceListEmptyStepOpen}</li>
-          <li>{messages.deviceListEmptyStepLan}</li>
-          <li>{messages.deviceListEmptyStepRefresh}</li>
-        </ol>
-        {onRefresh && (
-          <button type="button" className="button button-ghost device-list-empty-refresh" onClick={() => void onRefresh()}>
-            {messages.refreshDevices}
-          </button>
-        )}
+        <div className="device-list-empty-icon" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+        </div>
+        <div className="device-list-empty-copy">
+          <p className="device-list-empty-title">{messages.noOnlinePeers}</p>
+          <p className="device-list-empty-body">{messages.keepRunningOnAnotherDevice}</p>
+          <ol className="device-list-empty-steps">
+            <li>{messages.deviceListEmptyStepOpen}</li>
+            <li>{messages.deviceListEmptyStepLan}</li>
+            <li>{messages.deviceListEmptyStepRefresh}</li>
+          </ol>
+          {onRefresh && (
+            <button type="button" className="button device-list-empty-refresh" onClick={() => void onRefresh()}>
+              {messages.refreshDevices}
+            </button>
+          )}
+        </div>
       </div>
     );
   }

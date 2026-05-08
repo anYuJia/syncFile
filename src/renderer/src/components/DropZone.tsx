@@ -1,5 +1,19 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import {
+  Archive,
+  File,
+  FileCode,
+  FileText,
+  FolderPlus,
+  Image as ImageIcon,
+  Monitor,
+  Music,
+  Plus,
+  UploadCloud,
+  Video,
+  X
+} from 'lucide-react';
 
 import type { Device, PeerReachabilityStatus } from '@shared/types';
 import type { Messages } from '../i18n';
@@ -90,27 +104,32 @@ function FileIcon({ name }: { name: string }): JSX.Element {
   const ext = extOf(name);
   const cat = EXT_MAP[ext] ?? 'default';
   const color = CATEGORY_COLORS[cat];
-
-  const iconPath = {
-    image: <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>,
-    video: <><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" /><line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" /><line x1="2" y1="12" x2="22" y2="12" /><line x1="2" y1="7" x2="7" y2="7" /><line x1="2" y1="17" x2="7" y2="17" /><line x1="17" y1="17" x2="22" y2="17" /><line x1="17" y1="7" x2="22" y2="7" /></>,
-    audio: <><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>,
-    document: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></>,
-    code: <><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>,
-    archive: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></>,
-    default: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>
+  const Icon = {
+    image: ImageIcon,
+    video: Video,
+    audio: Music,
+    document: FileText,
+    code: FileCode,
+    archive: Archive,
+    default: File
   }[cat];
 
   return (
     <span className="dz-file-icon" style={{ background: `${color}18`, color }}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        {iconPath}
-      </svg>
+      <Icon aria-hidden="true" />
     </span>
   );
 }
 
 const INPUT_ID = 'dropzone-file-input';
+
+function hasTauriRuntime(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const internals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
+  return typeof internals?.invoke === 'function';
+}
 
 export function DropZone({
   onSend,
@@ -126,11 +145,15 @@ export function DropZone({
   const [isDragActive, setIsDragActive] = useState(false);
 
   useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return undefined;
+    }
+
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
-    void getCurrentWebviewWindow()
-      .onDragDropEvent((event) => {
+    try {
+      void getCurrentWebviewWindow().onDragDropEvent((event) => {
         if (disposed) {
           return;
         }
@@ -153,12 +176,15 @@ export function DropZone({
           addPendingEntries(entries);
         }
       })
-      .then((nextUnlisten) => {
-        unlisten = nextUnlisten;
-      })
-      .catch(() => {
-        // Window-level drag and drop is best-effort; HTML5 handlers remain as fallback.
-      });
+        .then((nextUnlisten) => {
+          unlisten = nextUnlisten;
+        })
+        .catch(() => {
+          // Window-level drag and drop is best-effort; HTML5 handlers remain as fallback.
+        });
+    } catch {
+      // Standalone browser previews do not have Tauri internals.
+    }
 
     return () => {
       disposed = true;
@@ -254,6 +280,10 @@ export function DropZone({
     hasFiles &&
     selectedDevices.some((device) => device.isOnline !== false && device.reachability !== 'unreachable');
   const selectedDeviceNames = selectedDevices.map((device) => device.name).join(' · ');
+  const hasSelectedDevices = selectedDevices.length > 0;
+  const EmptyStateIcon = hasSelectedDevices ? UploadCloud : Monitor;
+  const emptyTitle = hasSelectedDevices ? messages.dropZoneTitle : messages.dropZoneWaitingTitle;
+  const emptySubtitle = hasSelectedDevices ? messages.dropZoneAction : messages.dropZoneWaitingBody;
   const sendStatusLabel =
     selectedRecipientCount === 0
       ? messages.sendQueueStatusNoRecipients
@@ -266,7 +296,7 @@ export function DropZone({
 
   return (
     <div
-      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}${hasFiles ? ' has-files' : ''}`}
+      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}${hasFiles ? ' has-files' : ''}${hasSelectedDevices ? '' : ' is-awaiting-target'}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -331,14 +361,10 @@ export function DropZone({
         <>
           <button type="button" className="drop-zone-label" onClick={openFilePicker}>
             <span className="drop-zone-icon" aria-hidden="true">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
+              <EmptyStateIcon aria-hidden="true" />
             </span>
-            <span className="drop-zone-title">{messages.dropZoneTitle}</span>
-            <span className="drop-zone-subtitle">{messages.dropZoneAction}</span>
+            <span className="drop-zone-title">{emptyTitle}</span>
+            <span className="drop-zone-subtitle">{emptySubtitle}</span>
           </button>
           <div className="drop-zone-quick-actions">
             <button type="button" className="button button-ghost drop-zone-quick-action" onClick={openFilePicker}>
@@ -365,10 +391,7 @@ export function DropZone({
                     title={messages.dropZoneRemoveFile}
                     aria-label={`${messages.dropZoneRemoveFile} ${file.name}`}
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+                    <X aria-hidden="true" />
                   </button>
                 </div>
               ))}
@@ -381,10 +404,7 @@ export function DropZone({
                 aria-label={messages.dropZonePickFromDisk}
               >
                 <span className="dz-file-tile-add-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
+                  <Plus aria-hidden="true" />
                 </span>
                 <span className="dz-file-tile-add-label">{messages.dropZoneAddMore}</span>
               </button>
@@ -396,10 +416,7 @@ export function DropZone({
                 aria-label={messages.dropZoneAddFolder}
               >
                 <span className="dz-file-tile-add-icon" aria-hidden="true">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v1H3z" />
-                    <path d="M3 10h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                  </svg>
+                  <FolderPlus aria-hidden="true" />
                 </span>
                 <span className="dz-file-tile-add-label">{messages.dropZoneAddFolder}</span>
               </button>
@@ -408,11 +425,7 @@ export function DropZone({
             {isDragActive && (
               <div className="dz-drop-overlay" aria-hidden="true">
                 <div className="dz-drop-overlay-card">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
+                  <UploadCloud aria-hidden="true" />
                   <span>{messages.dropZoneDropToAdd}</span>
                 </div>
               </div>

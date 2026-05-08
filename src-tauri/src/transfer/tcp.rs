@@ -16,7 +16,7 @@ use crate::security::trust::{
     sign_file_offer, sign_pair_request, verify_file_offer, verify_pair_request,
     PAIR_REQUEST_MAX_AGE_MS,
 };
-use crate::storage::sandbox::Sandbox;
+use crate::storage::sandbox::{IncomingResumeRequest, Sandbox};
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -153,6 +153,16 @@ pub struct TcpServer {
     recent_pair_requests: Arc<RwLock<HashMap<String, u64>>>,
 }
 
+#[derive(Clone)]
+struct ServerConnectionContext {
+    state: AppState,
+    app_handle: AppHandle,
+    sandbox: Sandbox,
+    self_device: SecureIdentity,
+    active_receives: Arc<RwLock<HashMap<String, ActiveReceive>>>,
+    recent_pair_requests: Arc<RwLock<HashMap<String, u64>>>,
+}
+
 impl TcpServer {
     pub fn new(
         app_handle: AppHandle,
@@ -176,38 +186,24 @@ impl TcpServer {
         let listener = Arc::new(listener);
         *self.listener.write().await = Some(listener.clone());
 
-        let state = self.state.clone();
-        let app_handle = self.app_handle.clone();
-        let sandbox = self.sandbox.clone();
-        let self_device = self.self_device.clone();
-        let active_receives = self.active_receives.clone();
-        let recent_pair_requests = self.recent_pair_requests.clone();
+        let context = ServerConnectionContext {
+            state: self.state.clone(),
+            app_handle: self.app_handle.clone(),
+            sandbox: self.sandbox.clone(),
+            self_device: self.self_device.clone(),
+            active_receives: self.active_receives.clone(),
+            recent_pair_requests: self.recent_pair_requests.clone(),
+        };
 
         tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((socket, addr)) => {
-                        let state = state.clone();
-                        let app_handle = app_handle.clone();
-                        let sandbox = sandbox.clone();
-                        let self_device = self_device.clone();
-                        let active_receives = active_receives.clone();
-                        let recent_pair_requests = recent_pair_requests.clone();
+                        let context = context.clone();
                         let peer_addr = addr.ip().to_string();
 
                         tokio::spawn(async move {
-                            if let Err(e) = handle_connection(
-                                socket,
-                                peer_addr,
-                                state,
-                                app_handle,
-                                sandbox,
-                                self_device,
-                                active_receives,
-                                recent_pair_requests,
-                            )
-                            .await
-                            {
+                            if let Err(e) = handle_connection(socket, peer_addr, context).await {
                                 eprintln!("Connection error: {}", e);
                             }
                         });
@@ -234,17 +230,13 @@ impl TcpServer {
 async fn handle_connection(
     socket: TcpStream,
     peer_addr: String,
-    state: AppState,
-    app_handle: AppHandle,
-    sandbox: Sandbox,
-    self_device: SecureIdentity,
-    active_receives: Arc<RwLock<HashMap<String, ActiveReceive>>>,
-    recent_pair_requests: Arc<RwLock<HashMap<String, u64>>>,
+    context: ServerConnectionContext,
 ) -> std::io::Result<()> {
     let peer_addr = normalize_remote_address(&peer_addr);
 
     // 安全握手
-    let (mut secure_socket, _peer) = secure_accept(socket, self_device.clone(), None).await?;
+    let (mut secure_socket, _peer) =
+        secure_accept(socket, context.self_device.clone(), None).await?;
 
     // 读取第一个消息
     let first_frame = secure_socket.read_frame().await?;
@@ -258,15 +250,15 @@ async fn handle_connection(
                     msg,
                     secure_socket,
                     peer_addr,
-                    app_handle,
-                    state,
-                    recent_pair_requests,
+                    context.app_handle.clone(),
+                    context.state.clone(),
+                    context.recent_pair_requests.clone(),
                 )
                 .await?;
                 return Ok(());
             }
             ProtocolMessage::ProfileRequest => {
-                handle_profile_request(secure_socket, state).await?;
+                handle_profile_request(secure_socket, context.state.clone()).await?;
                 return Ok(());
             }
             ProtocolMessage::FileOffer { .. } => {
@@ -274,10 +266,10 @@ async fn handle_connection(
                     msg,
                     secure_socket,
                     peer_addr,
-                    app_handle,
-                    state,
-                    sandbox,
-                    active_receives,
+                    context.app_handle.clone(),
+                    context.state.clone(),
+                    context.sandbox.clone(),
+                    context.active_receives.clone(),
                 )
                 .await?;
                 return Ok(());
@@ -585,25 +577,33 @@ async fn handle_file_offer(
     };
 
     match decision {
-        Ok(Ok(OfferDecision::Accept { start_offset })) => {
+        Ok(Ok(OfferDecision::Accept {
+            start_offset: _requested_start_offset,
+        })) => {
             let accepted_receive_mode =
                 receive_mode.clone().unwrap_or_else(|| "manual".to_string());
             // 准备接收
-            let resume_info = sandbox.prepare_incoming_resume(
-                &file_id,
-                &device.device_id,
-                &device.name,
-                &device.trust_fingerprint,
-                &device.trust_public_key,
-                &file_name,
+            let resume_request = IncomingResumeRequest {
+                file_id: &file_id,
+                device_id: &device.device_id,
+                device_name: &device.name,
+                trust_fingerprint: &device.trust_fingerprint,
+                trust_public_key: &device.trust_public_key,
+                file_name: &file_name,
                 file_size,
-                sha256.as_deref().unwrap_or(""),
-            );
+                sha256: sha256.as_deref().unwrap_or(""),
+            };
+            let mut resume_info = sandbox.prepare_incoming_resume(resume_request);
+            if resume_info.bytes_received > file_size {
+                sandbox.discard_incoming_resume(&file_id, true);
+                resume_info = sandbox.prepare_incoming_resume(resume_request);
+            }
+            let resume_offset = resume_info.bytes_received;
 
             // 发送 accept 消息
             let accept = ProtocolMessage::FileAccept {
                 file_id: file_id.clone(),
-                start_offset: Some(start_offset),
+                start_offset: Some(resume_offset),
             };
             let encoded = encode_message(&accept).map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::Other, format!("encode failed: {}", e))
@@ -618,8 +618,8 @@ async fn handle_file_offer(
                 .await?;
 
             // 初始化 hash
-            let mut hasher = seed_hash_for_resume(&resume_info.partial_path, start_offset).await?;
-            let mut bytes_received = start_offset;
+            let mut hasher = seed_hash_for_resume(&resume_info.partial_path, resume_offset).await?;
+            let mut bytes_received = resume_offset;
 
             // 添加到 active_receives
             {
@@ -724,7 +724,10 @@ async fn handle_file_offer(
                         None
                     };
                     let error = if status == "paused" {
-                        Some("Sender paused the transfer. Retry from the sender to continue.".to_string())
+                        Some(
+                            "Sender paused the transfer. Retry from the sender to continue."
+                                .to_string(),
+                        )
                     } else {
                         Some("Sender cancelled the transfer.".to_string())
                     };
@@ -1000,6 +1003,19 @@ pub struct TcpClient {
     self_device: SecureIdentity,
 }
 
+pub type SendProgressCallback = Arc<dyn Fn(u64) + Send + Sync + 'static>;
+
+pub struct SendFileRequest {
+    pub host: String,
+    pub port: u16,
+    pub device: Device,
+    pub file_path: PathBuf,
+    pub file_id: Option<String>,
+    pub sha256: String,
+    pub control: Option<Arc<TransferControl>>,
+    pub progress: Option<SendProgressCallback>,
+}
+
 impl TcpClient {
     pub fn new(self_device: SecureIdentity) -> Self {
         Self { self_device }
@@ -1036,9 +1052,12 @@ impl TcpClient {
         })?;
         secure_socket.write_frame(&encoded).await?;
 
-        let response_frame = tokio::time::timeout(DEFAULT_HANDSHAKE_TIMEOUT, secure_socket.read_frame())
-            .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "profile request timed out"))??;
+        let response_frame =
+            tokio::time::timeout(DEFAULT_HANDSHAKE_TIMEOUT, secure_socket.read_frame())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "profile request timed out")
+                })??;
         let mut decoder = MessageDecoder::new();
         for msg in decoder.push(&response_frame).unwrap_or_default() {
             if let ProtocolMessage::ProfileResponse {
@@ -1063,20 +1082,21 @@ impl TcpClient {
         Ok(None)
     }
 
-    pub async fn send_file(
-        &self,
-        host: &str,
-        port: u16,
-        device: Device,
-        file_path: PathBuf,
-        file_id: Option<String>,
-        sha256: String,
-        control: Option<Arc<TransferControl>>,
-    ) -> std::io::Result<String> {
+    pub async fn send_file(&self, request: SendFileRequest) -> std::io::Result<String> {
+        let SendFileRequest {
+            host,
+            port,
+            device,
+            file_path,
+            file_id,
+            sha256,
+            control,
+            progress,
+        } = request;
         let file_id = file_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
         // 连接 socket
-        let socket = TcpStream::connect((host, port)).await?;
+        let socket = TcpStream::connect((host.as_str(), port)).await?;
 
         // 安全握手
         let expected_peer = ExpectedPeerIdentity {
@@ -1121,7 +1141,13 @@ impl TcpClient {
             signature: None,
         };
 
-        let signature = sign_file_offer(&unsigned_offer, &self.self_device.trust_private_key);
+        let signature = sign_file_offer(&unsigned_offer, &self.self_device.trust_private_key)
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("file offer signing failed: {}", e),
+                )
+            })?;
 
         let offer = ProtocolMessage::FileOffer {
             version: 1,
@@ -1195,6 +1221,12 @@ impl TcpClient {
 
         let mut bytes_sent = start_offset;
         let mut buf = vec![0u8; 65536];
+        let mut last_progress_emit = Instant::now();
+        if start_offset > 0 {
+            if let Some(progress) = &progress {
+                progress(bytes_sent);
+            }
+        }
 
         loop {
             if let Some(action) = control.as_ref().and_then(|inner| inner.take_action()) {
@@ -1223,6 +1255,14 @@ impl TcpClient {
 
             secure_socket.write_frame(&buf[..n]).await?;
             bytes_sent += n as u64;
+            if let Some(progress) = &progress {
+                if last_progress_emit.elapsed() >= Duration::from_millis(200)
+                    || bytes_sent >= file_size
+                {
+                    progress(bytes_sent);
+                    last_progress_emit = Instant::now();
+                }
+            }
         }
 
         // 发送 file-complete
@@ -1277,7 +1317,13 @@ impl TcpClient {
             from_device: from_device.clone(),
             signature: None,
         };
-        let signature = sign_pair_request(&pair_msg, &self.self_device.trust_private_key);
+        let signature =
+            sign_pair_request(&pair_msg, &self.self_device.trust_private_key).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("pair request signing failed: {}", e),
+                )
+            })?;
 
         let request = ProtocolMessage::PairRequest {
             version: 1,
@@ -1342,7 +1388,10 @@ mod tests {
         .expect("encode control frame");
 
         match decode_control_frame(&encoded) {
-            Some(ProtocolMessage::FileComplete { file_id, bytes_sent }) => {
+            Some(ProtocolMessage::FileComplete {
+                file_id,
+                bytes_sent,
+            }) => {
                 assert_eq!(file_id, "file-1");
                 assert_eq!(bytes_sent, 42);
             }

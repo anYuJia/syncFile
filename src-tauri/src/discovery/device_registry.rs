@@ -33,9 +33,9 @@ impl DeviceRegistry {
 
     pub async fn remove(&self, device_id: &str, preserve_persistent: bool) {
         let mut devices = self.devices.write().await;
-        if let Some(entry) = devices.get(device_id) {
+        if let Some(entry) = devices.get_mut(device_id) {
             if entry.persistent && preserve_persistent {
-                self.mark_offline(device_id).await;
+                entry.online = false;
                 return;
             }
             devices.remove(device_id);
@@ -53,10 +53,7 @@ impl DeviceRegistry {
 
     pub async fn list_all(&self) -> Vec<Device> {
         let devices = self.devices.read().await;
-        devices
-            .values()
-            .map(|entry| entry.device.clone())
-            .collect()
+        devices.values().map(|entry| entry.device.clone()).collect()
     }
 
     pub async fn clear(&self, preserve_persistent: bool) {
@@ -108,8 +105,16 @@ impl DeviceRegistry {
         let mut devices = self.devices.write().await;
         let previous_entry = devices.get(&device.device_id).cloned();
         let was_online = previous_entry.as_ref().map(|e| e.online).unwrap_or(false);
-        let is_persistent = persistent || previous_entry.as_ref().map(|e| e.persistent).unwrap_or(false);
-        let online = if is_persistent && !persistent { was_online } else { true };
+        let is_persistent = persistent
+            || previous_entry
+                .as_ref()
+                .map(|e| e.persistent)
+                .unwrap_or(false);
+        let online = if is_persistent && !persistent {
+            was_online
+        } else {
+            true
+        };
 
         devices.insert(
             device.device_id.clone(),
@@ -120,13 +125,6 @@ impl DeviceRegistry {
                 online,
             },
         );
-    }
-
-    async fn mark_offline(&self, device_id: &str) {
-        let mut devices = self.devices.write().await;
-        if let Some(entry) = devices.get_mut(device_id) {
-            entry.online = false;
-        }
     }
 
     pub async fn probe_device(&self, device_id: &str) -> String {
@@ -157,5 +155,45 @@ impl DeviceRegistry {
 impl Default for DeviceRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeviceRegistry;
+    use crate::commands::Device;
+    use tokio::time::{timeout, Duration};
+
+    fn test_device(device_id: &str) -> Device {
+        Device {
+            device_id: device_id.to_string(),
+            name: "Peer".to_string(),
+            avatar_data_url: None,
+            has_avatar: None,
+            profile_revision: None,
+            trust_fingerprint: "ABCD-EFGH-IJKL-MNOP".to_string(),
+            trust_public_key: "public-key".to_string(),
+            host: "peer.local".to_string(),
+            address: "192.168.1.2".to_string(),
+            port: 43434,
+            platform: "test".to_string(),
+            version: "1".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn removing_persistent_device_with_preserve_marks_offline_without_deadlock() {
+        let registry = DeviceRegistry::new();
+        registry.upsert_persistent(test_device("device-1")).await;
+
+        timeout(
+            Duration::from_millis(100),
+            registry.remove("device-1", true),
+        )
+        .await
+        .expect("remove should not deadlock");
+
+        assert!(registry.list().await.is_empty());
+        assert_eq!(registry.list_all().await.len(), 1);
     }
 }

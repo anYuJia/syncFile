@@ -24,6 +24,14 @@ import type {
   SandboxLocationInfo
 } from '@shared/types';
 
+const isTauriRuntime = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const internals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
+  return typeof internals?.invoke === 'function';
+};
+
 // ============== 事件订阅 ==============
 function subscribe<T>(eventName: string, callback: (payload: T) => void): () => void {
   const unlistenPromise = listen<T>(eventName, (event) => {
@@ -167,9 +175,87 @@ export const tauriSyncFileApi = {
 // 导出类型，保持与 Electron 兼容
 export type SyncFileAPI = typeof tauriSyncFileApi;
 
+const previewDevice: Device = {
+  deviceId: 'preview-local',
+  name: 'This Mac',
+  trustFingerprint: 'preview-fingerprint',
+  trustPublicKey: '',
+  host: 'localhost',
+  address: '127.0.0.1',
+  port: 43434,
+  platform: 'darwin',
+  version: '0.0.25'
+};
+
+const previewSettings: SettingsPayload = {
+  maxSandboxSizeMB: 1024,
+  autoAccept: false,
+  autoAcceptMaxSizeMB: 128,
+  openReceivedFolder: false,
+  desktopNotifications: true,
+  trustedDevices: [],
+  sandboxLocation: {
+    path: '~/Library/Application Support/syncFile/sandbox',
+    isCustom: false,
+    usageBytes: 0
+  },
+  maintenance: {
+    transferHistoryCount: 0,
+    resumableTransferCount: 0,
+    resumableTransferBytes: 0
+  }
+};
+
+const previewSyncFileApi: SyncFileAPI = {
+  getDevices: async () => [],
+  refreshDevices: async () => [],
+  getSelfDevice: async () => previewDevice,
+  probeDevice: async (deviceId) => ({ deviceId, status: 'unknown', checkedAt: Date.now() }),
+  fetchPeerProfile: async () => null,
+  pairDevice: async () => undefined,
+  acceptPairRequest: async () => undefined,
+  rejectPairRequest: async () => undefined,
+  getTransferHistory: async () => [],
+  getPendingOffers: async () => [],
+  sendFile: async () => ({ value: crypto.randomUUID?.() ?? `preview-${Date.now()}` }),
+  pauseTransfer: async () => undefined,
+  cancelTransfer: async () => undefined,
+  acceptIncoming: async () => undefined,
+  rejectIncoming: async () => undefined,
+  clearTransferHistory: async () => undefined,
+  removeTransferHistoryItems: async () => undefined,
+  openSandbox: async () => undefined,
+  openTransferPath: async () => undefined,
+  revealTransferPath: async () => undefined,
+  getSandboxLocation: async () => previewSettings.sandboxLocation,
+  chooseSandboxLocation: async () => null,
+  selectFile: async () => null,
+  clearResumeCache: async () => undefined,
+  getPathForFile: (file) => file.webkitRelativePath || file.name,
+  getSettings: async () => previewSettings,
+  saveSettings: async (settings) => ({ ...previewSettings, ...settings }),
+  saveProfile: async (profile) => ({ ...previewDevice, ...profile }),
+  getRuntimeLogs: async () => [],
+  clearRuntimeLogs: async () => undefined,
+  onDeviceOnline: () => () => undefined,
+  onDeviceOffline: () => () => undefined,
+  onTransferProgress: () => () => undefined,
+  onTransferComplete: () => () => undefined,
+  onTransferHistoryReset: () => () => undefined,
+  onIncomingOffer: () => () => undefined,
+  onIncomingPairRequest: () => () => undefined,
+  onPairRequestRemoved: () => () => undefined,
+  onRuntimeLog: () => () => undefined,
+  onSelfDeviceUpdated: () => () => undefined
+};
+
 // 全局暴露，替代 window.syncFile
 if (typeof window !== 'undefined') {
-  (window as any).syncFile = tauriSyncFileApi;
+  if (isTauriRuntime()) {
+    window.syncFile = tauriSyncFileApi;
+  } else if (!window.syncFile) {
+    window.syncFile = previewSyncFileApi;
+  }
 }
 
 // 确保 TypeScript 能正确识别全局类型

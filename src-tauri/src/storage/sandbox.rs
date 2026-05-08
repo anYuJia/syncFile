@@ -31,6 +31,18 @@ pub struct IncomingResumeInfo {
     pub bytes_received: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct IncomingResumeRequest<'a> {
+    pub file_id: &'a str,
+    pub device_id: &'a str,
+    pub device_name: &'a str,
+    pub trust_fingerprint: &'a str,
+    pub trust_public_key: &'a str,
+    pub file_name: &'a str,
+    pub file_size: u64,
+    pub sha256: &'a str,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeCacheEntry {
@@ -106,26 +118,10 @@ impl Sandbox {
 
     pub fn prepare_incoming_resume(
         &self,
-        file_id: &str,
-        device_id: &str,
-        device_name: &str,
-        trust_fingerprint: &str,
-        trust_public_key: &str,
-        file_name: &str,
-        file_size: u64,
-        sha256: &str,
+        request: IncomingResumeRequest<'_>,
     ) -> IncomingResumeInfo {
-        if let Some(existing) = self.read_incoming_resume_meta(file_id) {
-            if is_matching_incoming_resume(
-                &existing,
-                device_id,
-                device_name,
-                trust_fingerprint,
-                trust_public_key,
-                file_name,
-                file_size,
-                sha256,
-            ) {
+        if let Some(existing) = self.read_incoming_resume_meta(request.file_id) {
+            if is_matching_incoming_resume(&existing, &request) {
                 if let Ok(meta) = std::fs::metadata(&existing.partial_path) {
                     return IncomingResumeInfo {
                         partial_path: PathBuf::from(&existing.partial_path),
@@ -136,17 +132,17 @@ impl Sandbox {
             }
         }
 
-        let final_path = self.path_for_incoming(device_id, file_name);
+        let final_path = self.path_for_incoming(request.device_id, request.file_name);
         let partial_path = final_path.with_extension("part");
         let meta = IncomingResumeMeta {
-            file_id: file_id.to_string(),
-            device_id: device_id.to_string(),
-            device_name: device_name.to_string(),
-            trust_fingerprint: trust_fingerprint.to_string(),
-            trust_public_key: trust_public_key.to_string(),
-            file_name: file_name.to_string(),
-            file_size,
-            sha256: sha256.to_string(),
+            file_id: request.file_id.to_string(),
+            device_id: request.device_id.to_string(),
+            device_name: request.device_name.to_string(),
+            trust_fingerprint: request.trust_fingerprint.to_string(),
+            trust_public_key: request.trust_public_key.to_string(),
+            file_name: request.file_name.to_string(),
+            file_size: request.file_size,
+            sha256: request.sha256.to_string(),
             final_path: final_path.to_string_lossy().to_string(),
             partial_path: partial_path.to_string_lossy().to_string(),
         };
@@ -294,21 +290,15 @@ fn sanitize_segment(input: &str) -> String {
 
 fn is_matching_incoming_resume(
     existing: &IncomingResumeMeta,
-    device_id: &str,
-    device_name: &str,
-    trust_fingerprint: &str,
-    trust_public_key: &str,
-    file_name: &str,
-    file_size: u64,
-    sha256: &str,
+    request: &IncomingResumeRequest<'_>,
 ) -> bool {
-    existing.device_id == device_id
-        && existing.device_name == device_name
-        && existing.trust_fingerprint == trust_fingerprint
-        && existing.trust_public_key == trust_public_key
-        && existing.file_name == file_name
-        && existing.file_size == file_size
-        && existing.sha256 == sha256
+    existing.device_id == request.device_id
+        && existing.device_name == request.device_name
+        && existing.trust_fingerprint == request.trust_fingerprint
+        && existing.trust_public_key == request.trust_public_key
+        && existing.file_name == request.file_name
+        && existing.file_size == request.file_size
+        && existing.sha256 == request.sha256
 }
 
 fn format_timestamp(time: SystemTime) -> String {
@@ -342,4 +332,42 @@ fn dir_size(path: &PathBuf) -> u64 {
         }
     }
     total
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IncomingResumeRequest, Sandbox};
+    use uuid::Uuid;
+
+    fn temp_sandbox() -> (Sandbox, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("syncfile-test-{}", Uuid::new_v4()));
+        (Sandbox::new(root.clone()), root)
+    }
+
+    #[test]
+    fn prepare_incoming_resume_returns_existing_partial_offset() {
+        let (sandbox, root) = temp_sandbox();
+        let file_id = "file-1";
+
+        let request = IncomingResumeRequest {
+            file_id,
+            device_id: "device-1",
+            device_name: "Peer",
+            trust_fingerprint: "fingerprint",
+            trust_public_key: "public-key",
+            file_name: "photo.jpg",
+            file_size: 10,
+            sha256: "sha",
+        };
+
+        let first = sandbox.prepare_incoming_resume(request);
+        std::fs::write(&first.partial_path, b"abc").expect("write partial file");
+
+        let resumed = sandbox.prepare_incoming_resume(request);
+
+        assert_eq!(resumed.bytes_received, 3);
+        assert_eq!(resumed.partial_path, first.partial_path);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

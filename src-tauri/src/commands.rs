@@ -11,6 +11,7 @@ use crate::storage::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{command, AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex, RwLock};
@@ -802,17 +803,56 @@ pub async fn send_file(
             };
 
         let client = crate::transfer::tcp::TcpClient::new(self_device);
+        let sent_bytes = Arc::new(AtomicU64::new(0));
+        let progress_sent_bytes = sent_bytes.clone();
+        let progress_app_handle = app_handle_clone.clone();
+        let progress_transfer_id = transfer_id_clone.clone();
+        let progress_batch_id = batch_id.clone();
+        let progress_batch_label = batch_label.clone();
+        let progress_file_name = file_name_clone.clone();
+        let progress_device_name = device_clone.name.clone();
+        let progress_device_id = device_clone.device_id.clone();
+        let progress_file_path = file_path_clone.clone();
+        let progress_sha256 = sha256.clone();
+        let progress_callback: crate::transfer::tcp::SendProgressCallback =
+            Arc::new(move |bytes_sent| {
+                progress_sent_bytes.store(bytes_sent, Ordering::SeqCst);
+                let _ = progress_app_handle.emit(
+                    "transfer-progress",
+                    TransferProgress {
+                        transfer_id: progress_transfer_id.clone(),
+                        batch_id: progress_batch_id.clone(),
+                        batch_label: progress_batch_label.clone(),
+                        direction: "send".to_string(),
+                        file_name: progress_file_name.clone(),
+                        file_size,
+                        bytes_transferred: bytes_sent,
+                        peer_device_name: Some(progress_device_name.clone()),
+                        peer_device_id: Some(progress_device_id.clone()),
+                        status: "in-progress".to_string(),
+                        receive_mode: None,
+                        local_path: Some(progress_file_path.clone()),
+                        source_file_modified_at: None,
+                        source_file_sha256: Some(progress_sha256.clone()),
+                        error: None,
+                        transfer_rate_bytes_per_second: None,
+                        estimated_seconds_remaining: None,
+                        updated_at: Some(now_ms()),
+                    },
+                );
+            });
 
         let result = client
-            .send_file(
-                &device_clone.address,
-                device_clone.port,
-                device_clone.clone(),
-                file_path_clone.clone().into(),
-                Some(transfer_id_clone.clone()),
-                sha256.clone(),
-                Some(control.clone()),
-            )
+            .send_file(crate::transfer::tcp::SendFileRequest {
+                host: device_clone.address.clone(),
+                port: device_clone.port,
+                device: device_clone.clone(),
+                file_path: file_path_clone.clone().into(),
+                file_id: Some(transfer_id_clone.clone()),
+                sha256: sha256.clone(),
+                control: Some(control.clone()),
+                progress: Some(progress_callback),
+            })
             .await;
 
         match result {
@@ -875,6 +915,7 @@ pub async fn send_file(
                     _ => ("failed".to_string(), format!("Transfer failed: {}", e)),
                 };
                 let now = now_ms();
+                let bytes_transferred = sent_bytes.load(Ordering::SeqCst);
                 let _ = app_handle_clone.emit(
                     "transfer-progress",
                     TransferProgress {
@@ -884,7 +925,7 @@ pub async fn send_file(
                         direction: "send".to_string(),
                         file_name: file_name_clone.clone(),
                         file_size,
-                        bytes_transferred: 0,
+                        bytes_transferred,
                         peer_device_name: Some(device_clone.name.clone()),
                         peer_device_id: Some(device_clone.device_id.clone()),
                         status: status.clone(),
@@ -907,7 +948,7 @@ pub async fn send_file(
                         direction: "send".to_string(),
                         file_name: file_name_clone,
                         file_size,
-                        bytes_transferred: 0,
+                        bytes_transferred,
                         peer_device_name: Some(device_clone.name),
                         peer_device_id: Some(device_clone.device_id),
                         status,
@@ -1281,6 +1322,27 @@ pub async fn save_settings(
     settings: serde_json::Value,
     state: State<'_, AppState>,
 ) -> Result<Settings, String> {
+    let sandbox_location_update = if let Some(sandbox_location) = settings.get("sandboxLocation") {
+        match sandbox_location {
+            serde_json::Value::Null => {
+                let data_dir = state.data_dir.read().await.clone();
+                let root_path = validate_sandbox_root(data_dir.join("sandbox"))?;
+                Some((None, root_path))
+            }
+            serde_json::Value::String(path) => {
+                let trimmed = path.trim();
+                if trimmed.is_empty() {
+                    return Err("sandboxLocation cannot be empty".to_string());
+                }
+                let root_path = validate_sandbox_root(PathBuf::from(trimmed))?;
+                Some((Some(root_path.to_string_lossy().to_string()), root_path))
+            }
+            _ => return Err("sandboxLocation must be a string or null".to_string()),
+        }
+    } else {
+        None
+    };
+
     let updated = {
         let mut current = state.settings.write().await;
 
@@ -1319,12 +1381,16 @@ pub async fn save_settings(
             }
         }
 
-        if let Some(sandbox_location) = settings.get("sandboxLocation") {
-            current.sandbox_location = sandbox_location.as_str().map(|s| s.to_string());
+        if let Some((stored_location, _)) = &sandbox_location_update {
+            current.sandbox_location = stored_location.clone();
         }
 
         current.clone()
     };
+
+    if let Some((_, root_path)) = sandbox_location_update {
+        state.sandbox.set_root(root_path);
+    }
 
     *state.trusted_devices.write().await = updated.trusted_devices.clone();
 

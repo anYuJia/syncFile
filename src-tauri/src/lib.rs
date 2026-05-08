@@ -6,7 +6,7 @@ pub mod transfer;
 
 use commands::AppStateInner;
 use discovery::device_registry::DeviceRegistry;
-use discovery::mdns_service::MdnsService;
+use discovery::mdns_service::{MdnsSelfInfo, MdnsService};
 use std::sync::Arc;
 use storage::device_identity::load_or_create_identity;
 use storage::persistent::{load_settings, load_transfer_history};
@@ -124,14 +124,16 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
     // Start mDNS service
     let mdns_service = MdnsService::new(
         device_registry.clone(),
-        identity.device_id.clone(),
-        identity.name.clone(),
-        43434,
-        std::env::consts::OS.to_string(),
-        identity.trust_fingerprint.clone(),
-        identity.trust_public_key.clone(),
-        identity.avatar_data_url.is_some(),
-        identity.profile_revision,
+        MdnsSelfInfo {
+            device_id: identity.device_id.clone(),
+            name: identity.name.clone(),
+            port: 43434,
+            platform: std::env::consts::OS.to_string(),
+            trust_fingerprint: identity.trust_fingerprint.clone(),
+            trust_public_key: identity.trust_public_key.clone(),
+            has_avatar: identity.avatar_data_url.is_some(),
+            profile_revision: identity.profile_revision,
+        },
     );
     let mdns_service = Arc::new(Mutex::new(mdns_service));
 
