@@ -1124,7 +1124,7 @@ impl TcpClient {
             trust_public_key: self.self_device.trust_public_key.clone(),
             port: Some(port),
             platform: None,
-            version: Some("1".to_string()),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
             has_avatar: Some(false),
             profile_revision: Some(1),
         };
@@ -1302,7 +1302,7 @@ impl TcpClient {
             trust_public_key: self.self_device.trust_public_key.clone(),
             port: Some(port),
             platform: None,
-            version: Some("1".to_string()),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
             has_avatar: Some(false),
             profile_revision: Some(1),
         };

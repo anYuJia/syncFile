@@ -90,6 +90,10 @@ impl MdnsService {
         txt_properties.insert("platform".to_string(), self.self_platform.clone());
         txt_properties.insert("version".to_string(), MDNS_PROTOCOL_VERSION.to_string());
         txt_properties.insert(
+            "appVersion".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
+        txt_properties.insert(
             "hasAvatar".to_string(),
             if self.self_has_avatar { "1" } else { "0" }.to_string(),
         );
@@ -115,8 +119,11 @@ impl MdnsService {
             "discovery",
             "mDNS service published",
             Some(format!(
-                "instance={} host={} port={}",
-                instance_name, host_name, self.self_port
+                "instance={} host={} port={} appVersion={}",
+                instance_name,
+                host_name,
+                self.self_port,
+                env!("CARGO_PKG_VERSION")
             )),
         );
 
@@ -344,9 +351,10 @@ fn service_info_to_device(
             .map(|value| value.to_string())
             .unwrap_or_else(|| "unknown".to_string()),
         version: properties
-            .get_property_val_str("version")
+            .get_property_val_str("appVersion")
+            .or_else(|| properties.get_property_val_str("version"))
             .map(|value| value.to_string())
-            .unwrap_or_else(|| MDNS_PROTOCOL_VERSION.to_string()),
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
     })
 }
 

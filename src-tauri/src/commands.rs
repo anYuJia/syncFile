@@ -435,7 +435,7 @@ pub async fn get_self_device(state: State<'_, AppState>) -> Result<Device, Strin
         address: "127.0.0.1".to_string(),
         port: 43434,
         platform: std::env::consts::OS.to_string(),
-        version: "1".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
 
@@ -1461,7 +1461,7 @@ pub async fn save_profile(
         address: "127.0.0.1".to_string(),
         port: 43434,
         platform: std::env::consts::OS.to_string(),
-        version: "1".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
     };
     let _ = app_handle.emit("self-device-updated", device.clone());
     Ok(device)

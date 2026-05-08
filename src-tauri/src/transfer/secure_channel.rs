@@ -3,7 +3,7 @@ use base64::Engine as _;
 use ring::agreement::{
     agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey as X25519PublicKey, X25519,
 };
-use ring::hkdf::{KeyType, Salt, HKDF_SHA256};
+use ring::hkdf::{KeyType, Prk, Salt, HKDF_SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, UnparsedPublicKey as EdPublicKey, ED25519};
 use serde::{Deserialize, Serialize};
@@ -669,32 +669,26 @@ fn derive_session_keys(
     let prk = salt.extract(shared_secret);
 
     let mut client_key = [0u8; 32];
-    let info: &[&[u8]] = &[b"syncfile-client-key"];
-    prk.expand(info, HkdfOutputLen(client_key.len()))
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
-        .fill(&mut client_key)
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
+    hkdf_fill(&prk, b"syncfile-client-key", "client_key", &mut client_key)?;
 
     let mut server_key = [0u8; 32];
-    let info: &[&[u8]] = &[b"syncfile-server-key"];
-    prk.expand(info, HkdfOutputLen(server_key.len()))
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
-        .fill(&mut server_key)
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
+    hkdf_fill(&prk, b"syncfile-server-key", "server_key", &mut server_key)?;
 
     let mut client_nonce = [0u8; 4];
-    let info: &[&[u8]] = &[b"syncfile-client-nonce"];
-    prk.expand(info, HkdfOutputLen(client_nonce.len()))
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
-        .fill(&mut client_nonce)
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
+    hkdf_fill(
+        &prk,
+        b"syncfile-client-nonce",
+        "client_nonce_prefix",
+        &mut client_nonce,
+    )?;
 
     let mut server_nonce = [0u8; 4];
-    let info: &[&[u8]] = &[b"syncfile-server-nonce"];
-    prk.expand(info, HkdfOutputLen(server_nonce.len()))
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
-        .fill(&mut server_nonce)
-        .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
+    hkdf_fill(
+        &prk,
+        b"syncfile-server-nonce",
+        "server_nonce_prefix",
+        &mut server_nonce,
+    )?;
 
     if role == Role::Client {
         Ok(SessionKeys {
@@ -713,9 +707,44 @@ fn derive_session_keys(
     }
 }
 
+fn hkdf_fill(
+    prk: &Prk,
+    info_label: &'static [u8],
+    output_name: &str,
+    out: &mut [u8],
+) -> io::Result<()> {
+    let info: &[&[u8]] = &[info_label];
+    prk.expand(info, HkdfOutputLen(out.len()))
+        .map_err(|_| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "HKDF expand failed for {} len={} app_version={}",
+                    output_name,
+                    out.len(),
+                    env!("CARGO_PKG_VERSION")
+                ),
+            )
+        })?
+        .fill(out)
+        .map_err(|_| {
+            io::Error::new(
+                ErrorKind::Other,
+                format!(
+                    "HKDF fill failed for {} len={} app_version={}",
+                    output_name,
+                    out.len(),
+                    env!("CARGO_PKG_VERSION")
+                ),
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::security::trust::create_trust_keypair;
+    use tokio::net::TcpListener;
 
     fn test_device(device_id: &str, name: &str) -> FromDeviceIdentity {
         FromDeviceIdentity {
@@ -723,6 +752,17 @@ mod tests {
             name: name.to_string(),
             trust_fingerprint: format!("fingerprint-{}", device_id),
             trust_public_key: format!("public-key-{}", device_id),
+        }
+    }
+
+    fn test_identity(device_id: &str, name: &str) -> SecureIdentity {
+        let keypair = create_trust_keypair();
+        SecureIdentity {
+            device_id: device_id.to_string(),
+            name: name.to_string(),
+            trust_fingerprint: keypair.fingerprint,
+            trust_public_key: keypair.public_key,
+            trust_private_key: keypair.private_key,
         }
     }
 
@@ -763,5 +803,51 @@ mod tests {
             client_keys.receive_nonce_prefix,
             server_keys.send_nonce_prefix
         );
+    }
+
+    #[tokio::test]
+    async fn secure_handshake_roundtrips_encrypted_frames() {
+        let client_identity = test_identity("client-device", "Client Device");
+        let server_identity = test_identity("server-device", "Server Device");
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("listener should have addr");
+
+        let server_identity_for_task = server_identity.clone();
+        let server_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("server should accept");
+            let (mut socket, peer) = secure_accept(stream, server_identity_for_task, None)
+                .await
+                .expect("server handshake should complete");
+
+            assert_eq!(peer.device_id.as_deref(), Some("client-device"));
+            let frame = socket.read_frame().await.expect("server should read frame");
+            assert_eq!(frame, b"ping");
+            socket
+                .write_frame(b"pong")
+                .await
+                .expect("server should write frame");
+        });
+
+        let stream = TcpStream::connect(addr)
+            .await
+            .expect("client should connect");
+        let expected_peer = ExpectedPeerIdentity {
+            device_id: Some(server_identity.device_id.clone()),
+            trust_fingerprint: server_identity.trust_fingerprint.clone(),
+            trust_public_key: Some(server_identity.trust_public_key.clone()),
+        };
+        let mut socket = secure_connect(stream, client_identity, expected_peer, None)
+            .await
+            .expect("client handshake should complete");
+
+        socket
+            .write_frame(b"ping")
+            .await
+            .expect("client should write frame");
+        let frame = socket.read_frame().await.expect("client should read frame");
+        assert_eq!(frame, b"pong");
+        server_task.await.expect("server task should finish");
     }
 }
