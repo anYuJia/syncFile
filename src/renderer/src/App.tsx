@@ -118,6 +118,11 @@ function compactRecipientSnapshot(device: Device): StoredRecipientDraft {
   };
 }
 
+function appendFailureReason(message: string, failureReasons: string[]): string {
+  const reason = failureReasons.find((item) => item.trim().length > 0);
+  return reason ? `${message} 原因：${reason}` : message;
+}
+
 export function App(): JSX.Element {
   const { locale, messages, setLocale } = useLocale();
   const {
@@ -578,15 +583,17 @@ export function App(): JSX.Element {
           }
         : undefined;
     const successfulDeviceIds = new Set<string>();
+    const failureReasons: string[] = [];
 
     for (const deviceId of targetDeviceIds) {
       let deviceSucceeded = true;
       for (const filePath of filePaths) {
         try {
           await sendFile(deviceId, filePath, undefined, batchMeta);
-        } catch {
+        } catch (error) {
           // Hook already stores and exposes the error message.
           deviceSucceeded = false;
+          failureReasons.push(error instanceof Error ? error.message : String(error));
         }
       }
 
@@ -620,16 +627,22 @@ export function App(): JSX.Element {
       });
       setNotice({
         kind: 'warn',
-        message: messages.sendQueuePartial(
-          successfulDeviceIds.size,
-          targetDeviceIds.length - successfulDeviceIds.size,
-          skippedCount
+        message: appendFailureReason(
+          messages.sendQueuePartial(
+            successfulDeviceIds.size,
+            targetDeviceIds.length - successfulDeviceIds.size,
+            skippedCount
+          ),
+          failureReasons
         )
       });
     } else {
       setNotice({
         kind: 'warn',
-        message: messages.sendQueuePartial(0, targetDeviceIds.length, skippedCount)
+        message: appendFailureReason(
+          messages.sendQueuePartial(0, targetDeviceIds.length, skippedCount),
+          failureReasons
+        )
       });
     }
 

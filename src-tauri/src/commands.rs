@@ -682,14 +682,37 @@ pub async fn send_file(
     let transfer_id = existing_transfer_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // 获取目标设备信息
-    let device = {
-        let devices = state.device_registry.list().await;
-        devices.into_iter().find(|d| d.device_id == device_id)
-    };
+    let devices = state.device_registry.list().await;
+    let device = devices
+        .iter()
+        .find(|candidate| candidate.device_id == device_id)
+        .cloned();
 
     let device = match device {
         Some(d) => d,
-        None => return Err("Device not found".to_string()),
+        None => {
+            push_runtime_log(
+                state.inner().as_ref(),
+                "error",
+                "transfer",
+                "send preflight failed",
+                Some(format!(
+                    "transferId={} reason=device-not-found deviceId={} availableDevices={}",
+                    transfer_id,
+                    device_id,
+                    devices
+                        .iter()
+                        .map(|device| format!(
+                            "{}:{}:{}",
+                            device.device_id, device.name, device.version
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )),
+            )
+            .await;
+            return Err(format!("Device not found: {}", device_id));
+        }
     };
 
     let file_name = PathBuf::from(&file_path)
@@ -701,7 +724,29 @@ pub async fn send_file(
     // 获取文件大小
     let file_size = match tokio::fs::metadata(&file_path).await {
         Ok(meta) => meta.len(),
-        Err(e) => return Err(format!("Failed to read file metadata: {}", e)),
+        Err(e) => {
+            push_runtime_log(
+                state.inner().as_ref(),
+                "error",
+                "transfer",
+                "send preflight failed",
+                Some(format!(
+                    "transferId={} reason=file-metadata file={} path={} peerDeviceId={} peerName={} peerVersion={} error={}",
+                    transfer_id,
+                    file_name,
+                    file_path,
+                    device.device_id,
+                    device.name,
+                    device.version,
+                    e
+                )),
+            )
+            .await;
+            return Err(format!(
+                "Failed to read file metadata for {}: {}",
+                file_path, e
+            ));
+        }
     };
 
     // 创建 SecureIdentity

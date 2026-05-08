@@ -374,15 +374,22 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
 }
 
 function localizeError(error: unknown, messages: Messages): string | null {
-  if (!(error instanceof Error)) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : null;
+
+  if (!message) {
     return null;
   }
 
-  const message = error.message;
-  if (message.includes('device') && message.includes('not found')) {
+  const normalizedMessage = message.toLowerCase();
+  if (normalizedMessage.includes('device') && normalizedMessage.includes('not found')) {
     return messages.errorDeviceNotFound;
   }
-  if (message.includes('offer') && message.includes('not found')) {
+  if (normalizedMessage.includes('offer') && normalizedMessage.includes('not found')) {
     return messages.errorOfferNotFound;
   }
   if (message.includes('peer declined transfer: too-large')) {

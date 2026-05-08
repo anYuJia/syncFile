@@ -184,7 +184,7 @@ const previewDevice: Device = {
   address: '127.0.0.1',
   port: 43434,
   platform: 'darwin',
-  version: '0.0.28'
+  version: '0.0.29'
 };
 
 const previewSettings: SettingsPayload = {
