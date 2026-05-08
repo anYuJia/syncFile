@@ -3,7 +3,7 @@ use base64::Engine as _;
 use ring::agreement::{
     agree_ephemeral, EphemeralPrivateKey, UnparsedPublicKey as X25519PublicKey, X25519,
 };
-use ring::hkdf::{Salt, HKDF_SHA256};
+use ring::hkdf::{KeyType, Salt, HKDF_SHA256};
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{Ed25519KeyPair, UnparsedPublicKey as EdPublicKey, ED25519};
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,15 @@ const AUTH_TAG_BYTES: usize = 16;
 const MAX_SECURE_FRAME_BYTES: usize = 1024 * 1024;
 const HANDSHAKE_VERSION: u32 = 1;
 const HANDSHAKE_TIMEOUT_MS: u64 = 8000;
+
+#[derive(Debug, Clone, Copy)]
+struct HkdfOutputLen(usize);
+
+impl KeyType for HkdfOutputLen {
+    fn len(&self) -> usize {
+        self.0
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecureIdentity {
@@ -661,28 +670,28 @@ fn derive_session_keys(
 
     let mut client_key = [0u8; 32];
     let info: &[&[u8]] = &[b"syncfile-client-key"];
-    prk.expand(info, HKDF_SHA256)
+    prk.expand(info, HkdfOutputLen(client_key.len()))
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
         .fill(&mut client_key)
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
 
     let mut server_key = [0u8; 32];
     let info: &[&[u8]] = &[b"syncfile-server-key"];
-    prk.expand(info, HKDF_SHA256)
+    prk.expand(info, HkdfOutputLen(server_key.len()))
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
         .fill(&mut server_key)
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
 
     let mut client_nonce = [0u8; 4];
     let info: &[&[u8]] = &[b"syncfile-client-nonce"];
-    prk.expand(info, HKDF_SHA256)
+    prk.expand(info, HkdfOutputLen(client_nonce.len()))
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
         .fill(&mut client_nonce)
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
 
     let mut server_nonce = [0u8; 4];
     let info: &[&[u8]] = &[b"syncfile-server-nonce"];
-    prk.expand(info, HKDF_SHA256)
+    prk.expand(info, HkdfOutputLen(server_nonce.len()))
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF expand failed"))?
         .fill(&mut server_nonce)
         .map_err(|_| io::Error::new(ErrorKind::Other, "HKDF fill failed"))?;
@@ -701,5 +710,58 @@ fn derive_session_keys(
             send_nonce_prefix: server_nonce,
             receive_nonce_prefix: client_nonce,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_device(device_id: &str, name: &str) -> FromDeviceIdentity {
+        FromDeviceIdentity {
+            device_id: device_id.to_string(),
+            name: name.to_string(),
+            trust_fingerprint: format!("fingerprint-{}", device_id),
+            trust_public_key: format!("public-key-{}", device_id),
+        }
+    }
+
+    #[test]
+    fn derive_session_keys_supports_short_nonce_prefixes() {
+        let shared_secret = [7u8; 32];
+        let client_hello = UnsignedClientHello {
+            msg_type: "secure-client-hello".to_string(),
+            version: HANDSHAKE_VERSION,
+            client_ephemeral_public_key: "client-ephemeral".to_string(),
+            client_nonce: "client-nonce".to_string(),
+            from_device: test_device("client", "Client"),
+        };
+        let server_hello = UnsignedServerHello {
+            msg_type: "secure-server-hello".to_string(),
+            version: HANDSHAKE_VERSION,
+            client_ephemeral_public_key: client_hello.client_ephemeral_public_key.clone(),
+            client_nonce: client_hello.client_nonce.clone(),
+            server_ephemeral_public_key: "server-ephemeral".to_string(),
+            server_nonce: "server-nonce".to_string(),
+            from_device: test_device("server", "Server"),
+        };
+
+        let client_keys =
+            derive_session_keys(Role::Client, &shared_secret, &client_hello, &server_hello)
+                .expect("client keys should derive");
+        let server_keys =
+            derive_session_keys(Role::Server, &shared_secret, &client_hello, &server_hello)
+                .expect("server keys should derive");
+
+        assert_eq!(client_keys.send_key, server_keys.receive_key);
+        assert_eq!(client_keys.receive_key, server_keys.send_key);
+        assert_eq!(
+            client_keys.send_nonce_prefix,
+            server_keys.receive_nonce_prefix
+        );
+        assert_eq!(
+            client_keys.receive_nonce_prefix,
+            server_keys.send_nonce_prefix
+        );
     }
 }
