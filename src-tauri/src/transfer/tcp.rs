@@ -9,8 +9,8 @@ use super::secure_channel::{
 };
 
 use crate::commands::{
-    AppState, Device, IncomingOffer, OfferDecision, PairRequest, PendingOffer, TransferProgress,
-    TransferRecord,
+    AppState, Device, IncomingOffer, OfferDecision, PairRequest, PendingOffer, RuntimeLogEntry,
+    TransferProgress, TransferRecord,
 };
 use crate::security::trust::{
     sign_file_offer, sign_pair_request, verify_file_offer, verify_pair_request,
@@ -129,6 +129,32 @@ async fn persist_transfer_record(state: &AppState, record: TransferRecord) -> st
     crate::storage::persistent::save_transfer_history(&data_dir, &history)
 }
 
+async fn append_runtime_log(
+    state: &AppState,
+    app_handle: &AppHandle,
+    level: &str,
+    scope: &str,
+    message: &str,
+    details: Option<String>,
+) {
+    let entry = {
+        let mut logs = state.runtime_logs.write().await;
+        let sequence = logs.first().map(|entry| entry.sequence + 1).unwrap_or(1);
+        let entry = RuntimeLogEntry {
+            sequence,
+            timestamp: now_ms(),
+            level: level.to_string(),
+            scope: scope.to_string(),
+            message: message.to_string(),
+            details,
+        };
+        logs.insert(0, entry.clone());
+        logs.truncate(500);
+        entry
+    };
+    let _ = app_handle.emit("runtime-log", entry);
+}
+
 // ========== TCP Server ==========
 
 #[derive(Debug, Clone)]
@@ -235,8 +261,57 @@ async fn handle_connection(
     let peer_addr = normalize_remote_address(&peer_addr);
 
     // 安全握手
+    append_runtime_log(
+        &context.state,
+        &context.app_handle,
+        "info",
+        "transfer",
+        "secure accept started",
+        Some(format!(
+            "peerAddr={} appVersion={}",
+            peer_addr,
+            env!("CARGO_PKG_VERSION")
+        )),
+    )
+    .await;
     let (mut secure_socket, _peer) =
-        secure_accept(socket, context.self_device.clone(), None).await?;
+        match secure_accept(socket, context.self_device.clone(), None).await {
+            Ok(result) => {
+                append_runtime_log(
+                    &context.state,
+                    &context.app_handle,
+                    "info",
+                    "transfer",
+                    "secure accept completed",
+                    Some(format!(
+                        "peerDeviceId={} peerFingerprint={} appVersion={}",
+                        result.1.device_id.as_deref().unwrap_or("unknown"),
+                        result.1.trust_fingerprint,
+                        env!("CARGO_PKG_VERSION")
+                    )),
+                )
+                .await;
+                result
+            }
+            Err(error) => {
+                append_runtime_log(
+                    &context.state,
+                    &context.app_handle,
+                    "error",
+                    "transfer",
+                    "secure accept failed",
+                    Some(format!(
+                        "peerAddr={} kind={:?} error={} appVersion={}",
+                        peer_addr,
+                        error.kind(),
+                        error,
+                        env!("CARGO_PKG_VERSION")
+                    )),
+                )
+                .await;
+                return Err(error);
+            }
+        };
 
     // 读取第一个消息
     let first_frame = secure_socket.read_frame().await?;
@@ -1028,7 +1103,23 @@ impl TcpClient {
             trust_fingerprint: device.trust_fingerprint.clone(),
             trust_public_key: Some(device.trust_public_key.clone()),
         };
-        let _socket = secure_connect(socket, self.self_device.clone(), expected_peer, None).await?;
+        let _socket = secure_connect(socket, self.self_device.clone(), expected_peer, None)
+            .await
+            .map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "secure connect failed host={} port={} peerDeviceId={} peerName={} peerVersion={} appVersion={}: {}",
+                        host,
+                        port,
+                        device.device_id,
+                        device.name,
+                        device.version,
+                        env!("CARGO_PKG_VERSION"),
+                        error
+                    ),
+                )
+            })?;
         Ok(())
     }
 
@@ -1044,8 +1135,23 @@ impl TcpClient {
             trust_fingerprint: device.trust_fingerprint.clone(),
             trust_public_key: Some(device.trust_public_key.clone()),
         };
-        let mut secure_socket =
-            secure_connect(socket, self.self_device.clone(), expected_peer, None).await?;
+        let mut secure_socket = secure_connect(socket, self.self_device.clone(), expected_peer, None)
+            .await
+            .map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "secure connect failed host={} port={} peerDeviceId={} peerName={} peerVersion={} appVersion={}: {}",
+                        host,
+                        port,
+                        device.device_id,
+                        device.name,
+                        device.version,
+                        env!("CARGO_PKG_VERSION"),
+                        error
+                    ),
+                )
+            })?;
 
         let encoded = encode_message(&ProtocolMessage::ProfileRequest).map_err(|e| {
             std::io::Error::new(std::io::ErrorKind::Other, format!("encode failed: {}", e))
@@ -1104,8 +1210,23 @@ impl TcpClient {
             trust_fingerprint: device.trust_fingerprint.clone(),
             trust_public_key: Some(device.trust_public_key.clone()),
         };
-        let mut secure_socket =
-            secure_connect(socket, self.self_device.clone(), expected_peer, None).await?;
+        let mut secure_socket = secure_connect(socket, self.self_device.clone(), expected_peer, None)
+            .await
+            .map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "secure connect failed host={} port={} peerDeviceId={} peerName={} peerVersion={} appVersion={}: {}",
+                        host,
+                        port,
+                        device.device_id,
+                        device.name,
+                        device.version,
+                        env!("CARGO_PKG_VERSION"),
+                        error
+                    ),
+                )
+            })?;
 
         // 获取文件大小
         let metadata = std::fs::metadata(&file_path)?;
@@ -1291,8 +1412,23 @@ impl TcpClient {
             trust_fingerprint: device.trust_fingerprint.clone(),
             trust_public_key: Some(device.trust_public_key.clone()),
         };
-        let mut secure_socket =
-            secure_connect(socket, self.self_device.clone(), expected_peer, None).await?;
+        let mut secure_socket = secure_connect(socket, self.self_device.clone(), expected_peer, None)
+            .await
+            .map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "secure connect failed host={} port={} peerDeviceId={} peerName={} peerVersion={} appVersion={}: {}",
+                        host,
+                        port,
+                        device.device_id,
+                        device.name,
+                        device.version,
+                        env!("CARGO_PKG_VERSION"),
+                        error
+                    ),
+                )
+            })?;
 
         let request_id = Uuid::new_v4().to_string();
         let from_device = FromDevice {

@@ -914,6 +914,22 @@ pub async fn send_file(
                     }
                     _ => ("failed".to_string(), format!("Transfer failed: {}", e)),
                 };
+                push_runtime_log(
+                    state_clone.as_ref(),
+                    "error",
+                    "transfer",
+                    "send transfer failed",
+                    Some(format!(
+                        "transferId={} file={} peerDeviceId={} peerName={} peerVersion={} error={}",
+                        transfer_id_clone,
+                        file_name_clone,
+                        device_clone.device_id,
+                        device_clone.name,
+                        device_clone.version,
+                        error
+                    )),
+                )
+                .await;
                 let now = now_ms();
                 let bytes_transferred = sent_bytes.load(Ordering::SeqCst);
                 let _ = app_handle_clone.emit(

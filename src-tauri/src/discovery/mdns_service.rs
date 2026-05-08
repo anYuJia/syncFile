@@ -172,6 +172,15 @@ impl MdnsService {
                         let app_handle = app_handle.clone();
                         let fullname = info.get_fullname().to_string();
                         tauri::async_runtime::spawn(async move {
+                            let details = format!(
+                                "{} deviceId={} name={} address={} port={} appVersion={}",
+                                fullname,
+                                device.device_id,
+                                device.name,
+                                device.address,
+                                device.port,
+                                device.version
+                            );
                             registry.upsert(device.clone()).await;
                             let _ = app_handle.emit("device-online", device);
                             append_runtime_log(
@@ -179,7 +188,7 @@ impl MdnsService {
                                 "info",
                                 "discovery",
                                 "device resolved",
-                                Some(fullname),
+                                Some(details),
                             );
                         });
                     }
