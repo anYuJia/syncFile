@@ -39,6 +39,7 @@ export interface Messages {
   workflowTransferringNote: string;
   onlineDevices: string;
   refreshDevices: string;
+  refreshingDevices: string;
   sendFile: string;
   transferActivity: string;
   manifestKicker: string;
@@ -84,11 +85,13 @@ export interface Messages {
   transferResume: string;
   transferRetry: string;
   transferDelete: string;
+  transferDeleteConfirm: string;
   transferDetails: string;
-  transferClearAll: string;
+  transferBatchFallback: string;
   transferRateLabel: string;
   transferEtaLabel: string;
   transferPreparing: string;
+  transferWaitingForReceiver: string;
   selectedRecipientLabel: string;
   sendDraftSummary: (fileCount: number, recipientCount: number) => string;
   recipientSelectionSummary: (recipientCount: number) => string;
@@ -106,13 +109,25 @@ export interface Messages {
   taskPeerAll: string;
   taskSearchPlaceholder: string;
   taskNoMatches: string;
+  taskNoMatchesHint: string;
+  taskResumeVisible: string;
   taskRetryVisible: string;
   taskCancelVisible: string;
+  taskCancelVisibleConfirm: string;
+  taskClearVisible: string;
+  taskClearVisibleConfirm: string;
+  taskResetFilters: string;
   requestsInbox: string;
   requestFilesTab: string;
   requestPairsTab: string;
+  requestShowFiles: string;
+  requestShowPairs: string;
   requestsEmptyTitle: string;
   requestsEmptyBody: string;
+  requestFilesEmptyTitle: string;
+  requestFilesEmptyBody: string;
+  requestPairsEmptyTitle: string;
+  requestPairsEmptyBody: string;
   logs: string;
   toolsMenuLabel: string;
   appearanceLight: string;
@@ -121,15 +136,22 @@ export interface Messages {
   logViewerEmpty: string;
   logViewerRefresh: string;
   logViewerClear: string;
+  logViewerClearConfirm: string;
   logViewerCopy: string;
+  logViewerCopied: string;
+  logViewerCopyFailed: string;
+  logViewerRefreshed: string;
+  logViewerCleared: string;
   transferLocalPath: string;
   transferPeerId: string;
   pairDevice: string;
+  pairDeviceBusy: string;
   pairedDevice: string;
   pairPromptTitle: string;
   pairPromptDesc: (deviceName: string) => string;
   pairPromptConfirm: string;
   pairPromptCancel: string;
+  pairPromptCancelConfirm: string;
   pairPromptLocalFingerprint: string;
   pairPromptRemoteFingerprint: string;
   pairRequestQueueTitle: string;
@@ -141,14 +163,22 @@ export interface Messages {
   receivePromptQueuedAt: string;
   receivePromptSaveTo: string;
   reject: string;
+  rejectConfirm: string;
   accept: string;
   trustAndAccept: string;
+  trustAndAcceptConfirm: string;
   failedToLoadDeviceInformation: string;
+  failureReason: (reason: string) => string;
   sendFailed: string;
   sendQueueStarted: (fileCount: number, recipientCount: number) => string;
   sendQueuePartial: (queuedCount: number, failedCount: number, skippedCount: number) => string;
   sendQueueUnavailable: (recipientCount: number) => string;
   sendQueueStatusReady: (readyCount: number, totalCount: number) => string;
+  sendQueueStatusReadyWithChecking: (
+    readyCount: number,
+    checkingCount: number,
+    totalCount: number
+  ) => string;
   sendQueueStatusChecking: (checkingCount: number) => string;
   sendQueueStatusNoRecipients: string;
   sendQueueStatusNoReadyRecipients: string;
@@ -172,6 +202,7 @@ export interface Messages {
   settingsProfileSectionDesc: string;
   settingsProfileName: string;
   settingsProfileNameDesc: string;
+  settingsProfileNameRequired: string;
   settingsProfileAvatar: string;
   settingsProfileAvatarDesc: string;
   settingsProfileChangeAvatar: string;
@@ -197,17 +228,21 @@ export interface Messages {
   settingsNotificationsPermissionDefault: string;
   settingsNotificationsPermissionDenied: string;
   settingsNotificationsRequestPermission: string;
+  settingsNotificationsRequestingPermission: string;
   settingsTrustedDevices: string;
   settingsTrustedDevicesDesc: string;
   settingsTrustedDevicesEmpty: string;
   settingsTrustedDevicesRemove: string;
+  settingsTrustedDevicesRemoveConfirm: string;
   settingsMaintenanceSection: string;
   settingsMaintenanceSectionDesc: string;
   settingsTransferHistoryCount: string;
   settingsResumeCacheCount: string;
   settingsResumeCacheBytes: string;
   settingsClearTransferHistory: string;
+  settingsClearTransferHistoryConfirm: string;
   settingsClearResumeCache: string;
+  settingsClearResumeCacheConfirm: string;
   settingsAcceptNote: string;
   settingsSandboxFolder: string;
   settingsSandboxFolderDesc: string;
@@ -218,16 +253,21 @@ export interface Messages {
   settingsSpaceRemaining: string;
   settingsUsageOfLimit: (used: string, total: string) => string;
   settingsSave: string;
+  settingsSaving: string;
   settingsCancel: string;
   dropZoneFileSelected: (fileName: string) => string;
   dropZoneClearFile: string;
   dropZoneSend: string;
+  dropZoneTrySend: string;
+  dropZoneSending: string;
   dropZoneSelectDevice: string;
   dispatchTargetReady: (deviceName: string) => string;
   dispatchTargetIdle: string;
   dropZoneClearAll: string;
+  dropZoneClearAllConfirm: string;
   dropZoneFileCount: (n: number) => string;
   dropZoneRemoveFile: string;
+  dropZoneRemoveRecipient: (deviceName: string) => string;
   dropZoneAddMore: string;
   dropZoneDropToAdd: string;
   notificationIncomingTitle: string;
@@ -282,6 +322,7 @@ const zh: Messages = {
   workflowTransferringNote: '传输进度和异常会实时进入传输记录。',
   onlineDevices: '在线设备',
   refreshDevices: '刷新设备',
+  refreshingDevices: '刷新中...',
   sendFile: '发送文件',
   transferActivity: '传输记录',
   manifestKicker: '设备清单',
@@ -327,11 +368,13 @@ const zh: Messages = {
   transferResume: '继续',
   transferRetry: '重试',
   transferDelete: '删除记录',
+  transferDeleteConfirm: '确认删除',
   transferDetails: '查看详情',
-  transferClearAll: '全部清理',
+  transferBatchFallback: '发送批次',
   transferRateLabel: '速率',
   transferEtaLabel: '剩余',
   transferPreparing: '准备发送中',
+  transferWaitingForReceiver: '等待对方确认保存',
   selectedRecipientLabel: '已选',
   sendDraftSummary: (fileCount, recipientCount) => `${fileCount} 个文件 · ${recipientCount} 个收件人`,
   recipientSelectionSummary: (recipientCount) => `${recipientCount} 个收件人已选`,
@@ -349,13 +392,25 @@ const zh: Messages = {
   taskPeerAll: '全部设备',
   taskSearchPlaceholder: '搜索文件名或设备',
   taskNoMatches: '没有匹配当前筛选条件的任务。',
+  taskNoMatchesHint: '调整关键词，或重置筛选后再查看传输记录。',
+  taskResumeVisible: '继续可见暂停任务',
   taskRetryVisible: '重试可见异常任务',
-  taskCancelVisible: '取消可见进行中任务',
+  taskCancelVisible: '取消可见活动任务',
+  taskCancelVisibleConfirm: '确认取消可见活动任务',
+  taskClearVisible: '清理可见记录',
+  taskClearVisibleConfirm: '确认清理可见记录',
+  taskResetFilters: '重置筛选',
   requestsInbox: '收件箱',
   requestFilesTab: '文件请求',
   requestPairsTab: '配对请求',
+  requestShowFiles: '查看文件请求',
+  requestShowPairs: '查看配对请求',
   requestsEmptyTitle: '暂时没有待处理请求。',
   requestsEmptyBody: '新的文件请求和配对请求会集中出现在这里。',
+  requestFilesEmptyTitle: '暂无文件请求。',
+  requestFilesEmptyBody: '其他设备发来的文件会显示在这里，你可以接受、拒绝，或先信任设备再接受。',
+  requestPairsEmptyTitle: '暂无配对请求。',
+  requestPairsEmptyBody: '当另一台设备请求建立信任关系时，会在这里显示双方设备指纹。',
   logs: '日志',
   toolsMenuLabel: '工具',
   appearanceLight: '切换到浅色模式',
@@ -364,15 +419,22 @@ const zh: Messages = {
   logViewerEmpty: '暂无日志。执行发现、配对或传输后会在这里显示。',
   logViewerRefresh: '刷新',
   logViewerClear: '清空日志',
+  logViewerClearConfirm: '确认清空日志',
   logViewerCopy: '复制日志',
+  logViewerCopied: '日志已复制。',
+  logViewerCopyFailed: '复制日志失败。',
+  logViewerRefreshed: '日志已刷新。',
+  logViewerCleared: '日志已清空。',
   transferLocalPath: '本地路径',
   transferPeerId: '设备 ID',
   pairDevice: '配对',
+  pairDeviceBusy: '配对中...',
   pairedDevice: '已配对',
   pairPromptTitle: '确认设备指纹',
   pairPromptDesc: (deviceName) => `请和 ${deviceName} 设备上的指纹进行核对，确认一致后再建立配对。`,
   pairPromptConfirm: '确认配对',
   pairPromptCancel: '暂不配对',
+  pairPromptCancelConfirm: '确认拒绝配对',
   pairPromptLocalFingerprint: '本机指纹',
   pairPromptRemoteFingerprint: '对方指纹',
   pairRequestQueueTitle: '等待中的配对请求',
@@ -384,16 +446,21 @@ const zh: Messages = {
   receivePromptQueuedAt: '收到时间',
   receivePromptSaveTo: '将保存到',
   reject: '拒绝',
+  rejectConfirm: '确认拒绝',
   accept: '接受',
   trustAndAccept: '信任并接受',
+  trustAndAcceptConfirm: '确认信任并接受',
   failedToLoadDeviceInformation: '加载设备信息失败。',
+  failureReason: (reason) => `原因：${reason}`,
   sendFailed: '发送失败。',
   sendQueueStarted: (fileCount, recipientCount) => `已将 ${fileCount} 个文件加入发送队列，目标 ${recipientCount} 个收件人。`,
   sendQueuePartial: (queuedCount, failedCount, skippedCount) =>
     `已加入队列 ${queuedCount} 个收件人，失败 ${failedCount} 个，未尝试 ${skippedCount} 个。草稿已为未完成目标保留。`,
   sendQueueUnavailable: (recipientCount) => `已选 ${recipientCount} 个收件人，但当前没有可发送的在线目标。`,
   sendQueueStatusReady: (readyCount, totalCount) => `${readyCount} / ${totalCount} 个收件人可立即发送`,
-  sendQueueStatusChecking: (checkingCount) => `${checkingCount} 个收件人正在探测连通性`,
+  sendQueueStatusReadyWithChecking: (readyCount, checkingCount, totalCount) =>
+    `${readyCount} / ${totalCount} 个已确认可发送，${checkingCount} 个探测中也会尝试`,
+  sendQueueStatusChecking: (checkingCount) => `${checkingCount} 个收件人正在探测，可先加入队列尝试发送`,
   sendQueueStatusNoRecipients: '先选择至少一个收件设备',
   sendQueueStatusNoReadyRecipients: '当前没有可立即发送的收件人',
   failedToAcceptIncomingFile: '接受文件失败。',
@@ -416,6 +483,7 @@ const zh: Messages = {
   settingsProfileSectionDesc: '设置你的设备显示名称和头像，局域网内其他设备会看到这份资料。',
   settingsProfileName: '设备名字',
   settingsProfileNameDesc: '这个名字会显示在设备列表、发送目标和传输记录里。',
+  settingsProfileNameRequired: '请输入设备名字。',
   settingsProfileAvatar: '设备头像',
   settingsProfileAvatarDesc: '头像会保存在本机，并作为压缩缩略图广播给其他设备。',
   settingsProfileChangeAvatar: '更换头像',
@@ -441,17 +509,21 @@ const zh: Messages = {
   settingsNotificationsPermissionDefault: '尚未请求系统通知权限。',
   settingsNotificationsPermissionDenied: '系统通知权限已被拒绝，需要在系统或 Electron 权限设置里手动开启。',
   settingsNotificationsRequestPermission: '请求通知权限',
+  settingsNotificationsRequestingPermission: '正在请求权限...',
   settingsTrustedDevices: '已信任设备',
   settingsTrustedDevicesDesc: '这些设备发送的小文件会在大小限制内自动接受。',
   settingsTrustedDevicesEmpty: '还没有已信任设备。',
   settingsTrustedDevicesRemove: '移除',
+  settingsTrustedDevicesRemoveConfirm: '确认移除',
   settingsMaintenanceSection: '维护',
   settingsMaintenanceSectionDesc: '管理本地历史记录和未完成缓存。',
   settingsTransferHistoryCount: '历史记录条数',
   settingsResumeCacheCount: '未完成缓存数',
   settingsResumeCacheBytes: '未完成缓存大小',
   settingsClearTransferHistory: '清理历史',
+  settingsClearTransferHistoryConfirm: '确认清理历史',
   settingsClearResumeCache: '清理未完成缓存',
+  settingsClearResumeCacheConfirm: '确认清理缓存',
   settingsAcceptNote: '当前版本一旦接受文件，就会直接写入沙箱，因此不再区分“接受后是否下载”。',
   settingsSandboxFolder: '沙箱位置',
   settingsSandboxFolderDesc: '所有收到的文件都会按设备分目录存放在这里。',
@@ -462,16 +534,21 @@ const zh: Messages = {
   settingsSpaceRemaining: '剩余空间',
   settingsUsageOfLimit: (used, total) => `${used} / ${total}`,
   settingsSave: '保存',
+  settingsSaving: '保存中...',
   settingsCancel: '取消',
   dropZoneFileSelected: (fileName: string) => `已选择：${fileName}`,
   dropZoneClearFile: '清除',
   dropZoneSend: '发送',
+  dropZoneTrySend: '尝试发送',
+  dropZoneSending: '加入队列...',
   dropZoneSelectDevice: '请选择一台目标设备',
   dispatchTargetReady: (deviceName: string) => `正在发送文件给 ${deviceName}`,
   dispatchTargetIdle: '请选择一个目标设备后再发送',
   dropZoneClearAll: '清空',
+  dropZoneClearAllConfirm: '确认清空',
   dropZoneFileCount: (n: number) => `已选 ${n} 个文件`,
   dropZoneRemoveFile: '移除',
+  dropZoneRemoveRecipient: (deviceName: string) => `移除收件人 ${deviceName}`,
   dropZoneAddMore: '继续添加',
   dropZoneDropToAdd: '松开以加入当前队列',
   notificationIncomingTitle: 'syncFile 收到文件请求',
@@ -524,6 +601,7 @@ const en: Messages = {
   workflowTransferringNote: 'Progress and issues are mirrored into the transfer activity list.',
   onlineDevices: 'Online devices',
   refreshDevices: 'Refresh devices',
+  refreshingDevices: 'Refreshing...',
   sendFile: 'Send file',
   transferActivity: 'Transfer activity',
   manifestKicker: 'Manifest',
@@ -569,11 +647,13 @@ const en: Messages = {
   transferResume: 'Resume',
   transferRetry: 'Retry',
   transferDelete: 'Delete record',
+  transferDeleteConfirm: 'Confirm delete',
   transferDetails: 'View details',
-  transferClearAll: 'Clear all',
+  transferBatchFallback: 'Send batch',
   transferRateLabel: 'Rate',
   transferEtaLabel: 'ETA',
   transferPreparing: 'Preparing transfer',
+  transferWaitingForReceiver: 'Waiting for receiver confirmation',
   selectedRecipientLabel: 'Selected',
   sendDraftSummary: (fileCount, recipientCount) => `${fileCount} files · ${recipientCount} recipients`,
   recipientSelectionSummary: (recipientCount) => `${recipientCount} recipients selected`,
@@ -591,13 +671,25 @@ const en: Messages = {
   taskPeerAll: 'All peers',
   taskSearchPlaceholder: 'Search file or device',
   taskNoMatches: 'No tasks match the current filters.',
+  taskNoMatchesHint: 'Adjust the search, or reset filters to see transfer records again.',
+  taskResumeVisible: 'Resume visible paused',
   taskRetryVisible: 'Retry visible issues',
-  taskCancelVisible: 'Cancel visible active',
+  taskCancelVisible: 'Cancel visible active tasks',
+  taskCancelVisibleConfirm: 'Confirm cancel visible active tasks',
+  taskClearVisible: 'Clear visible records',
+  taskClearVisibleConfirm: 'Confirm clear visible',
+  taskResetFilters: 'Reset filters',
   requestsInbox: 'Inbox',
   requestFilesTab: 'File requests',
   requestPairsTab: 'Pair requests',
+  requestShowFiles: 'View file requests',
+  requestShowPairs: 'View pair requests',
   requestsEmptyTitle: 'No pending requests right now.',
   requestsEmptyBody: 'Incoming file offers and pair requests will appear here.',
+  requestFilesEmptyTitle: 'No file requests.',
+  requestFilesEmptyBody: 'Files offered by nearby devices will appear here so you can accept, reject, or trust first.',
+  requestPairsEmptyTitle: 'No pair requests.',
+  requestPairsEmptyBody: 'When another device asks to pair, both device fingerprints will be shown here.',
   logs: 'Logs',
   toolsMenuLabel: 'Tools',
   appearanceLight: 'Switch to light mode',
@@ -606,15 +698,22 @@ const en: Messages = {
   logViewerEmpty: 'No logs yet. Discovery, pairing, and transfer events will appear here.',
   logViewerRefresh: 'Refresh',
   logViewerClear: 'Clear logs',
+  logViewerClearConfirm: 'Confirm clear logs',
   logViewerCopy: 'Copy logs',
+  logViewerCopied: 'Logs copied.',
+  logViewerCopyFailed: 'Failed to copy logs.',
+  logViewerRefreshed: 'Logs refreshed.',
+  logViewerCleared: 'Logs cleared.',
   transferLocalPath: 'Local path',
   transferPeerId: 'Peer ID',
   pairDevice: 'Pair',
+  pairDeviceBusy: 'Pairing...',
   pairedDevice: 'Paired',
   pairPromptTitle: 'Confirm device fingerprint',
   pairPromptDesc: (deviceName) => `Compare the fingerprint shown on ${deviceName} before trusting this device.`,
   pairPromptConfirm: 'Confirm pair',
   pairPromptCancel: 'Not now',
+  pairPromptCancelConfirm: 'Confirm reject pair',
   pairPromptLocalFingerprint: 'This device',
   pairPromptRemoteFingerprint: 'Remote device',
   pairRequestQueueTitle: 'Pending pair requests',
@@ -626,9 +725,12 @@ const en: Messages = {
   receivePromptQueuedAt: 'Received',
   receivePromptSaveTo: 'Will be saved to',
   reject: 'Reject',
+  rejectConfirm: 'Confirm reject',
   accept: 'Accept',
   trustAndAccept: 'Trust & accept',
+  trustAndAcceptConfirm: 'Confirm trust & accept',
   failedToLoadDeviceInformation: 'Failed to load device information.',
+  failureReason: (reason) => `Reason: ${reason}`,
   sendFailed: 'Send failed.',
   sendQueueStarted: (fileCount, recipientCount) =>
     `Queued ${fileCount} files for ${recipientCount} recipient(s).`,
@@ -637,7 +739,10 @@ const en: Messages = {
   sendQueueUnavailable: (recipientCount) =>
     `${recipientCount} recipient(s) are selected, but none are currently reachable for sending.`,
   sendQueueStatusReady: (readyCount, totalCount) => `${readyCount} of ${totalCount} recipient(s) are ready`,
-  sendQueueStatusChecking: (checkingCount) => `Checking connectivity for ${checkingCount} recipient(s)`,
+  sendQueueStatusReadyWithChecking: (readyCount, checkingCount, totalCount) =>
+    `${readyCount} of ${totalCount} confirmed ready; ${checkingCount} checking will be tried too`,
+  sendQueueStatusChecking: (checkingCount) =>
+    `Checking connectivity for ${checkingCount} recipient(s); you can queue now`,
   sendQueueStatusNoRecipients: 'Choose at least one recipient device',
   sendQueueStatusNoReadyRecipients: 'No recipient is ready for immediate sending',
   failedToAcceptIncomingFile: 'Failed to accept incoming file.',
@@ -660,6 +765,7 @@ const en: Messages = {
   settingsProfileSectionDesc: 'Set the device name and avatar that other devices see on this LAN.',
   settingsProfileName: 'Device name',
   settingsProfileNameDesc: 'This name appears in discovery, recipient chips, and transfer records.',
+  settingsProfileNameRequired: 'Enter a device name.',
   settingsProfileAvatar: 'Device avatar',
   settingsProfileAvatarDesc: 'The avatar is stored locally and broadcast as a compressed thumbnail to peers.',
   settingsProfileChangeAvatar: 'Change avatar',
@@ -685,17 +791,21 @@ const en: Messages = {
   settingsNotificationsPermissionDefault: 'System notification permission has not been requested yet.',
   settingsNotificationsPermissionDenied: 'System notification permission is denied. Re-enable it in system or Electron permission settings.',
   settingsNotificationsRequestPermission: 'Request notification permission',
+  settingsNotificationsRequestingPermission: 'Requesting permission...',
   settingsTrustedDevices: 'Trusted devices',
   settingsTrustedDevicesDesc: 'Small files from these devices are auto-accepted within the size limit.',
   settingsTrustedDevicesEmpty: 'No trusted devices yet.',
   settingsTrustedDevicesRemove: 'Remove',
+  settingsTrustedDevicesRemoveConfirm: 'Confirm remove',
   settingsMaintenanceSection: 'Maintenance',
   settingsMaintenanceSectionDesc: 'Manage local history and unfinished cached data.',
   settingsTransferHistoryCount: 'History entries',
   settingsResumeCacheCount: 'Resumable cache count',
   settingsResumeCacheBytes: 'Resumable cache size',
   settingsClearTransferHistory: 'Clear history',
+  settingsClearTransferHistoryConfirm: 'Confirm clear history',
   settingsClearResumeCache: 'Clear resumable cache',
+  settingsClearResumeCacheConfirm: 'Confirm clear cache',
   settingsAcceptNote: 'In the current build, accepting a file immediately writes it into the sandbox, so there is no separate download step.',
   settingsSandboxFolder: 'Sandbox folder',
   settingsSandboxFolderDesc: 'All received files are stored here in per-device subfolders.',
@@ -706,16 +816,21 @@ const en: Messages = {
   settingsSpaceRemaining: 'Remaining',
   settingsUsageOfLimit: (used, total) => `${used} / ${total}`,
   settingsSave: 'Save',
+  settingsSaving: 'Saving...',
   settingsCancel: 'Cancel',
   dropZoneFileSelected: (fileName: string) => `Selected: ${fileName}`,
   dropZoneClearFile: 'Clear',
   dropZoneSend: 'Send',
+  dropZoneTrySend: 'Try send',
+  dropZoneSending: 'Queueing...',
   dropZoneSelectDevice: 'Select a target device',
   dispatchTargetReady: (deviceName: string) => `Sending files to ${deviceName}`,
   dispatchTargetIdle: 'Select a target device before sending',
   dropZoneClearAll: 'Clear all',
+  dropZoneClearAllConfirm: 'Confirm clear',
   dropZoneFileCount: (n: number) => `${n} file(s) selected`,
   dropZoneRemoveFile: 'Remove',
+  dropZoneRemoveRecipient: (deviceName: string) => `Remove recipient ${deviceName}`,
   dropZoneAddMore: 'Add more',
   dropZoneDropToAdd: 'Release to add to queue',
   notificationIncomingTitle: 'syncFile incoming file request',

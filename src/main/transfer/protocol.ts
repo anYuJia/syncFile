@@ -45,6 +45,12 @@ export interface FileCompleteMessage {
   bytesSent: number;
 }
 
+export interface FileCompleteAckMessage {
+  type: 'file-complete-ack';
+  fileId: string;
+  bytesReceived: number;
+}
+
 export interface FileCancelMessage {
   type: 'file-cancel';
   fileId: string;
@@ -84,6 +90,7 @@ export type ProtocolMessage =
   | FileAcceptMessage
   | FileRejectMessage
   | FileCompleteMessage
+  | FileCompleteAckMessage
   | FileCancelMessage
   | PairRequestMessage
   | PairResponseMessage
@@ -104,6 +111,10 @@ export function isFileReject(msg: ProtocolMessage): msg is FileRejectMessage {
 
 export function isFileComplete(msg: ProtocolMessage): msg is FileCompleteMessage {
   return msg.type === 'file-complete';
+}
+
+export function isFileCompleteAck(msg: ProtocolMessage): msg is FileCompleteAckMessage {
+  return msg.type === 'file-complete-ack';
 }
 
 export function isFileCancel(msg: ProtocolMessage): msg is FileCancelMessage {

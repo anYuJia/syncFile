@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Inbox } from 'lucide-react';
+import { ChevronRight, Inbox, Trash2 } from 'lucide-react';
 import type { TransferProgress } from '@shared/types';
 import type { Messages } from '../i18n';
 import type { RendererTransferProgress } from '../hooks/useSyncFile';
@@ -80,20 +80,30 @@ function canDeleteTransfer(item: RendererTransferProgress): boolean {
 }
 
 function hasLiveMetrics(item: RendererTransferProgress): boolean {
-  return Boolean(item.transferRateBytesPerSecond || item.estimatedSecondsRemaining);
+  return item.status === 'in-progress' && !isWaitingForReceiverConfirmation(item);
+}
+
+function isWaitingForReceiverConfirmation(item: RendererTransferProgress): boolean {
+  return item.direction === 'send' && item.status === 'in-progress' && item.fileSize > 0 && item.bytesTransferred >= item.fileSize;
 }
 
 function liveMetricSummary(item: RendererTransferProgress, messages: Messages): string | null {
-  if (!hasLiveMetrics(item)) {
+  if (item.status === 'pending') {
+    return messages.transferPreparing;
+  }
+  if (item.status !== 'in-progress') {
     return null;
+  }
+  if (isWaitingForReceiverConfirmation(item)) {
+    return messages.transferWaitingForReceiver;
   }
 
   const parts: string[] = [];
-  if (item.transferRateBytesPerSecond) {
-    parts.push(formatTransferRate(item.transferRateBytesPerSecond));
-  }
+  parts.push(item.transferRateBytesPerSecond ? formatTransferRate(item.transferRateBytesPerSecond) : '--/s');
   if (item.estimatedSecondsRemaining) {
     parts.push(`${messages.transferEtaLabel} ${formatEta(item.estimatedSecondsRemaining)}`);
+  } else if (item.status === 'in-progress' && item.fileSize > item.bytesTransferred) {
+    parts.push(`${messages.transferEtaLabel} --`);
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
@@ -113,6 +123,8 @@ export function TransferList({
   const [directionFilter, setDirectionFilter] = useState<'all' | 'send' | 'receive'>('all');
   const [peerFilter, setPeerFilter] = useState<string>('all');
   const [query, setQuery] = useState('');
+  const [bulkAction, setBulkAction] = useState<'cancel' | 'resume' | 'retry' | 'clear' | null>(null);
+  const [confirmingAction, setConfirmingAction] = useState<string | null>(null);
   const deferredQuery = useDeferredValue(query);
   const normalizedQuery = deferredQuery.trim().toLowerCase();
   const peerOptions = useMemo(() => {
@@ -145,14 +157,19 @@ export function TransferList({
         const matchesQuery =
           normalizedQuery.length === 0 ||
           item.fileName.toLowerCase().includes(normalizedQuery) ||
-          item.peerDeviceName.toLowerCase().includes(normalizedQuery);
+          (item.peerDeviceName || messages.unknownDevice).toLowerCase().includes(normalizedQuery);
 
         return matchesFilter && matchesDirection && matchesPeer && matchesQuery;
       }),
-    [directionFilter, filter, normalizedQuery, peerFilter, transfers]
+    [directionFilter, filter, messages.unknownDevice, normalizedQuery, peerFilter, transfers]
   );
   const selectedTransfer =
     transfers.find((item) => item.transferId === selectedTransferId) ?? null;
+  const hasActiveFilters =
+    filter !== 'all' ||
+    directionFilter !== 'all' ||
+    peerFilter !== 'all' ||
+    query.trim().length > 0;
   const groupedVisibleTransfers = useMemo(() => {
     const groups: Array<{ key: string; batchLabel?: string; transfers: RendererTransferProgress[] }> = [];
     const groupIndexByKey = new Map<string, number>();
@@ -180,6 +197,24 @@ export function TransferList({
   }, [onSelectedTransferIdChange, selectedTransfer, selectedTransferId]);
 
   useEffect(() => {
+    if (peerFilter === 'all') {
+      return;
+    }
+    if (!peerOptions.some(([value]) => value === peerFilter)) {
+      setPeerFilter('all');
+    }
+  }, [peerFilter, peerOptions]);
+
+  useEffect(() => {
+    if (!selectedTransferId) {
+      return;
+    }
+    if (!visibleTransfers.some((item) => item.transferId === selectedTransferId)) {
+      onSelectedTransferIdChange(null);
+    }
+  }, [onSelectedTransferIdChange, selectedTransferId, visibleTransfers]);
+
+  useEffect(() => {
     if (!selectedTransferId) {
       return;
     }
@@ -193,6 +228,14 @@ export function TransferList({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onSelectedTransferIdChange, selectedTransferId]);
+
+  useEffect(() => {
+    if (!confirmingAction) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmingAction(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmingAction]);
 
   if (transfers.length === 0) {
     return (
@@ -224,9 +267,134 @@ export function TransferList({
     }
   };
 
-  const finishedTransferIds = transfers
+  const finishedVisibleTransferIds = visibleTransfers
     .filter((item) => canDeleteTransfer(item))
     .map((item) => item.transferId);
+  const cancellableVisibleTransferIds = visibleTransfers
+    .filter(
+      (item) =>
+        ['pending', 'in-progress'].includes(item.status) ||
+        (item.direction === 'send' && item.status === 'paused')
+    )
+    .map((item) => item.transferId);
+  const resumableVisibleTransferIds = visibleTransfers
+    .filter(
+      (item) =>
+        item.direction === 'send' &&
+        item.status === 'paused' &&
+        Boolean(item.localPath) &&
+        Boolean(item.peerDeviceId)
+    )
+    .map((item) => item.transferId);
+  const retryableVisibleTransferIds = visibleTransfers
+    .filter(
+      (item) =>
+        item.direction === 'send' &&
+        ['failed', 'rejected', 'cancelled'].includes(item.status) &&
+        Boolean(item.localPath) &&
+        Boolean(item.peerDeviceId)
+    )
+    .map((item) => item.transferId);
+  const isBulkBusy = bulkAction !== null;
+
+  const runBulkAction = async (
+    action: NonNullable<typeof bulkAction>,
+    transferIds: string[],
+    handler: (transferId: string) => void | Promise<void>
+  ): Promise<void> => {
+    if (transferIds.length === 0 || isBulkBusy) {
+      return;
+    }
+
+    try {
+      setBulkAction(action);
+      setConfirmingAction(null);
+      await Promise.allSettled(transferIds.map((transferId) => handler(transferId)));
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const handleFilterChange = (nextFilter: typeof filter): void => {
+    if (isBulkBusy) {
+      return;
+    }
+    setFilter(nextFilter);
+    setConfirmingAction(null);
+  };
+
+  const handleDirectionFilterChange = (nextDirectionFilter: typeof directionFilter): void => {
+    if (isBulkBusy) {
+      return;
+    }
+    setDirectionFilter(nextDirectionFilter);
+    setConfirmingAction(null);
+  };
+
+  const handlePeerFilterChange = (nextPeerFilter: string): void => {
+    if (isBulkBusy) {
+      return;
+    }
+    setPeerFilter(nextPeerFilter);
+    setConfirmingAction(null);
+  };
+
+  const handleBulkCancel = async (): Promise<void> => {
+    if (cancellableVisibleTransferIds.length === 0 || isBulkBusy) {
+      return;
+    }
+    if (confirmingAction !== 'bulk-cancel') {
+      setConfirmingAction('bulk-cancel');
+      return;
+    }
+    await runBulkAction('cancel', cancellableVisibleTransferIds, onCancel);
+  };
+
+  const handleBulkClear = async (): Promise<void> => {
+    if (finishedVisibleTransferIds.length === 0 || isBulkBusy) {
+      return;
+    }
+    if (confirmingAction !== 'bulk-clear') {
+      setConfirmingAction('bulk-clear');
+      return;
+    }
+
+    try {
+      setBulkAction('clear');
+      setConfirmingAction(null);
+      await onClearTransfers(finishedVisibleTransferIds);
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const handleDeleteTransfer = async (transferId: string): Promise<void> => {
+    if (isBulkBusy || busyTransferIds?.has(transferId)) {
+      return;
+    }
+    const actionKey = `delete:${transferId}`;
+    if (confirmingAction !== actionKey) {
+      setConfirmingAction(actionKey);
+      return;
+    }
+    setConfirmingAction(null);
+    if (selectedTransferId === transferId) {
+      onSelectedTransferIdChange(null);
+    }
+    await onClearTransfers([transferId]);
+  };
+
+  const resetFilters = (): void => {
+    setFilter('all');
+    setDirectionFilter('all');
+    setPeerFilter('all');
+    setQuery('');
+    setConfirmingAction(null);
+  };
+
+  const toggleTransferDetails = (transferId: string): void => {
+    onSelectedTransferIdChange(selectedTransferId === transferId ? null : transferId);
+  };
 
   return (
     <div className="transfer-panel">
@@ -243,7 +411,9 @@ export function TransferList({
                 key={value}
                 type="button"
                 className={`transfer-filter${filter === value ? ' is-active' : ''}`}
-                onClick={() => setFilter(value as typeof filter)}
+                onClick={() => handleFilterChange(value as typeof filter)}
+                disabled={isBulkBusy}
+                aria-pressed={filter === value}
               >
                 {label}
               </button>
@@ -259,7 +429,9 @@ export function TransferList({
                 key={value}
                 type="button"
                 className={`transfer-filter${directionFilter === value ? ' is-active' : ''}`}
-                onClick={() => setDirectionFilter(value as typeof directionFilter)}
+                onClick={() => handleDirectionFilterChange(value as typeof directionFilter)}
+                disabled={isBulkBusy}
+                aria-pressed={directionFilter === value}
               >
                 {label}
               </button>
@@ -270,7 +442,9 @@ export function TransferList({
               <button
                 type="button"
                 className={`transfer-filter${peerFilter === 'all' ? ' is-active' : ''}`}
-                onClick={() => setPeerFilter('all')}
+                onClick={() => handlePeerFilterChange('all')}
+                disabled={isBulkBusy}
+                aria-pressed={peerFilter === 'all'}
               >
                 {messages.taskPeerAll}
               </button>
@@ -279,8 +453,10 @@ export function TransferList({
                   key={value}
                   type="button"
                   className={`transfer-filter${peerFilter === value ? ' is-active' : ''}`}
-                  onClick={() => setPeerFilter(value)}
+                  onClick={() => handlePeerFilterChange(value)}
+                  disabled={isBulkBusy}
                   title={peer.label}
+                  aria-pressed={peerFilter === value}
                 >
                   {peer.label}
                 </button>
@@ -288,65 +464,74 @@ export function TransferList({
             </div>
           )}
         </div>
-        {visibleTransfers.some(
-          (item) => ['pending', 'in-progress'].includes(item.status)
-        ) && (
+        {cancellableVisibleTransferIds.length > 0 && (
           <button
             type="button"
-            className="button button-ghost transfer-bulk-action"
-            onClick={() => {
-              void Promise.all(
-                visibleTransfers
-                  .filter((item) => ['pending', 'in-progress'].includes(item.status))
-                  .map((item) => onCancel(item.transferId))
-              );
-            }}
+            className={`button button-ghost transfer-bulk-action${confirmingAction === 'bulk-cancel' ? ' is-danger-confirm' : ''}`}
+            onClick={() => void handleBulkCancel()}
+            disabled={isBulkBusy}
+            aria-busy={bulkAction === 'cancel'}
           >
-            {messages.taskCancelVisible}
+            {confirmingAction === 'bulk-cancel'
+              ? messages.taskCancelVisibleConfirm
+              : messages.taskCancelVisible}
           </button>
         )}
-        {visibleTransfers.some(
-          (item) =>
-            item.direction === 'send' &&
-            ['failed', 'rejected', 'cancelled', 'paused'].includes(item.status) &&
-            Boolean(item.localPath) &&
-            Boolean(item.peerDeviceId)
-        ) && (
+        {resumableVisibleTransferIds.length > 0 && (
           <button
             type="button"
             className="button button-ghost transfer-bulk-action"
             onClick={() => {
-              void Promise.all(
-                visibleTransfers
-                  .filter(
-                    (item) =>
-                      item.direction === 'send' &&
-                      ['failed', 'rejected', 'cancelled', 'paused'].includes(item.status) &&
-                      Boolean(item.localPath) &&
-                      Boolean(item.peerDeviceId)
-                  )
-                  .map((item) => onRetry(item.transferId))
-              );
+              setConfirmingAction(null);
+              void runBulkAction('resume', resumableVisibleTransferIds, onRetry);
             }}
+            disabled={isBulkBusy}
+            aria-busy={bulkAction === 'resume'}
+          >
+            {messages.taskResumeVisible}
+          </button>
+        )}
+        {retryableVisibleTransferIds.length > 0 && (
+          <button
+            type="button"
+            className="button button-ghost transfer-bulk-action"
+            onClick={() => {
+              setConfirmingAction(null);
+              void runBulkAction('retry', retryableVisibleTransferIds, onRetry);
+            }}
+            disabled={isBulkBusy}
+            aria-busy={bulkAction === 'retry'}
           >
             {messages.taskRetryVisible}
           </button>
         )}
-        {finishedTransferIds.length > 0 && (
+        {finishedVisibleTransferIds.length > 0 && (
           <button
             type="button"
-            className="button button-ghost transfer-bulk-action"
-            onClick={() => void onClearTransfers(finishedTransferIds)}
+            className={`button button-ghost transfer-bulk-action${confirmingAction === 'bulk-clear' ? ' is-danger-confirm' : ''}`}
+            onClick={() => void handleBulkClear()}
+            disabled={isBulkBusy}
+            aria-busy={bulkAction === 'clear'}
           >
-            {messages.transferClearAll}
+            {confirmingAction === 'bulk-clear'
+              ? messages.taskClearVisibleConfirm
+              : messages.taskClearVisible}
           </button>
         )}
         <input
           type="search"
           className="transfer-search"
           placeholder={messages.taskSearchPlaceholder}
+          aria-label={messages.taskSearchPlaceholder}
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            if (isBulkBusy) {
+              return;
+            }
+            setQuery(event.target.value);
+            setConfirmingAction(null);
+          }}
+          disabled={isBulkBusy}
         />
       </div>
 
@@ -360,216 +545,255 @@ export function TransferList({
               ? messages.transferEmpty
               : messages.taskNoMatches}
           </span>
-          <span className="transfer-list-empty-copy">{messages.ledgerNote}</span>
+          <span className="transfer-list-empty-copy">
+            {hasActiveFilters ? messages.taskNoMatchesHint : messages.ledgerNote}
+          </span>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              className="button button-ghost transfer-list-empty-action"
+              onClick={resetFilters}
+              disabled={isBulkBusy}
+            >
+              {messages.taskResetFilters}
+            </button>
+          )}
         </div>
       ) : (
-      <ul className="transfer-list">
-      {groupedVisibleTransfers.map((group) => (
-        <li key={group.key} className="transfer-group">
-          {group.transfers[0]?.batchId && group.transfers.length > 1 && (
-            <div className="transfer-group-head">
-              <span className="transfer-group-title">{group.batchLabel ?? 'Send batch'}</span>
-              <span className="transfer-group-count">{group.transfers.length}</span>
-            </div>
-          )}
-          <ul className="transfer-group-list">
-          {group.transfers.map((item) => {
-        const percent = progressPercent(item);
-        const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
-        const statusText = statusLabel(item.status, messages);
-        const receiveModeText = receiveModeLabel(item, messages);
-        const canPause = item.direction === 'send' && (item.status === 'pending' || item.status === 'in-progress');
-        const canCancel = item.status === 'pending' || item.status === 'in-progress';
-        const canDelete = canDeleteTransfer(item);
-        const canRetry =
-          item.direction === 'send' &&
-          (item.status === 'failed' || item.status === 'rejected' || item.status === 'cancelled' || item.status === 'paused') &&
-          Boolean(item.localPath) &&
-          Boolean(item.peerDeviceId);
-        const canOpenPath = canOpenCompletedReceive(item);
-        const isBusy = busyTransferIds?.has(item.transferId) ?? false;
-        const isActiveTransfer = item.status === 'in-progress';
-        const activeMetricSummary = liveMetricSummary(item, messages);
-        const isSelected = selectedTransferId === item.transferId;
-        const showExpandedBody =
-          isSelected ||
-          item.status === 'pending' ||
-          isActiveTransfer ||
-          item.status === 'paused' ||
-          canRetry ||
-          canOpenPath ||
-          Boolean(item.error);
-        return (
-          <li
-            key={item.transferId}
-            className={`transfer-item is-${item.status}${showExpandedBody ? ' is-detailed' : ' is-compact'}${isSelected ? ' is-selected' : ''}`}
-          >
-            <div className="transfer-item-summary-row">
-              <div className="transfer-item-summary">
-                <div className="transfer-item-summary-main">
-                  <div className="transfer-item-summary-head">
-                    <div className="transfer-item-stamp">{statusText}</div>
-                    <div className="transfer-item-direction">{directionLabel}</div>
-                    {receiveModeText && <div className="transfer-item-note">{receiveModeText}</div>}
-                  </div>
-                  <div className="transfer-item-top">
-                    <div className="transfer-item-title-group">
-                      <div className="transfer-item-name">{item.fileName}</div>
-                      <div className="transfer-item-meta">{compactMeta(item, messages)}</div>
-                    </div>
-                  </div>
+        <ul className="transfer-list">
+          {groupedVisibleTransfers.map((group) => (
+            <li key={group.key} className="transfer-group">
+              {group.transfers[0]?.batchId && group.transfers.length > 1 && (
+                <div className="transfer-group-head">
+                  <span className="transfer-group-title">{group.batchLabel ?? messages.transferBatchFallback}</span>
+                  <span className="transfer-group-count">{group.transfers.length}</span>
                 </div>
-                <div className="transfer-item-summary-side">
-                  <div className="transfer-item-summary-metric-stack">
-                    <div className="transfer-item-percent">{percent}%</div>
-                    {activeMetricSummary && (
-                      <div className="transfer-item-summary-metrics">{activeMetricSummary}</div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    className="transfer-item-chevron transfer-item-detail-trigger"
-                    onClick={() => onSelectedTransferIdChange(isSelected ? null : item.transferId)}
-                    aria-expanded={isSelected}
-                    aria-label={`${isSelected ? messages.dismiss : messages.transferDetails} ${item.fileName}`}
-                    title={isSelected ? messages.dismiss : messages.transferDetails}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="9 6 15 12 9 18" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              {canDelete && (
-                <button
-                  type="button"
-                  className="button button-ghost transfer-item-delete"
-                  onClick={() => {
-                    if (selectedTransferId === item.transferId) {
-                      onSelectedTransferIdChange(null);
-                    }
-                    void onClearTransfers([item.transferId]);
-                  }}
-                  aria-label={`${messages.transferDelete} ${item.fileName}`}
-                  title={messages.transferDelete}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                    <line x1="10" y1="11" x2="10" y2="17" />
-                    <line x1="14" y1="11" x2="14" y2="17" />
-                  </svg>
-                </button>
               )}
-            </div>
-            {showExpandedBody && (
-              <>
-                <div className="transfer-progress-track" aria-hidden="true">
-                  <div className="transfer-progress-fill" style={{ width: `${percent}%` }} />
-                </div>
-                <div className="transfer-item-foot">
-                  <span>
-                    {formatBytes(item.bytesTransferred)} / {formatBytes(item.fileSize)}
-                  </span>
-                  <span>{item.peerDeviceName || messages.unknownDevice}</span>
-                </div>
-                {item.error && (
-                  <div className="transfer-item-error" title={item.error}>
-                    {item.error}
-                  </div>
-                )}
-                {hasLiveMetrics(item) && (
-                  <div className="transfer-item-metrics">
-                    {item.transferRateBytesPerSecond && (
-                      <span>
-                        {messages.transferRateLabel} {formatTransferRate(item.transferRateBytesPerSecond)}
-                      </span>
-                    )}
-                    {item.estimatedSecondsRemaining && (
-                      <span>
-                        {messages.transferEtaLabel} {formatEta(item.estimatedSecondsRemaining)}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {isSelected && (item.localPath || item.peerDeviceId) && (
-                  <div className="transfer-item-details">
-                    {item.localPath && (
-                      <div className="transfer-item-detail-row">
-                        <span className="transfer-item-detail-label">{messages.transferLocalPath}</span>
-                        <span className="transfer-item-detail-value">{item.localPath}</span>
+              <ul className="transfer-group-list">
+                {group.transfers.map((item) => {
+                  const percent = progressPercent(item);
+                  const directionLabel = item.direction === 'send' ? messages.sendTo : messages.receiveFrom;
+                  const isWaitingForReceiver = isWaitingForReceiverConfirmation(item);
+                  const statusText = isWaitingForReceiver
+                    ? messages.transferWaitingForReceiver
+                    : statusLabel(item.status, messages);
+                  const receiveModeText = receiveModeLabel(item, messages);
+                  const canPause =
+                    item.direction === 'send' &&
+                    !isWaitingForReceiver &&
+                    (item.status === 'pending' || item.status === 'in-progress');
+                  const canCancel =
+                    item.status === 'pending' ||
+                    item.status === 'in-progress' ||
+                    (item.direction === 'send' && item.status === 'paused');
+                  const canDelete = canDeleteTransfer(item);
+                  const canRetry =
+                    item.direction === 'send' &&
+                    (item.status === 'failed' ||
+                      item.status === 'rejected' ||
+                      item.status === 'cancelled' ||
+                      item.status === 'paused') &&
+                    Boolean(item.localPath) &&
+                    Boolean(item.peerDeviceId);
+                  const canOpenPath = canOpenCompletedReceive(item);
+                  const isBusy = busyTransferIds?.has(item.transferId) ?? false;
+                  const activeMetricSummary = liveMetricSummary(item, messages);
+                  const footStatusText = activeMetricSummary ?? item.error ?? null;
+                  const isSelected = selectedTransferId === item.transferId;
+                  const confirmingDelete = confirmingAction === `delete:${item.transferId}`;
+
+                  return (
+                    <li
+                      key={item.transferId}
+                      className={`transfer-item is-${item.status}${isWaitingForReceiver ? ' is-confirming' : ''}${isSelected ? ' is-selected is-detailed' : ''}`}
+                    >
+                      <div className="transfer-item-main">
+                        <button
+                          type="button"
+                          className="transfer-item-summary-row"
+                          aria-expanded={isSelected}
+                          aria-controls={isSelected ? `transfer-detail-${item.transferId}` : undefined}
+                          onClick={() => toggleTransferDetails(item.transferId)}
+                        >
+                          <div className="transfer-item-summary">
+                            <div className="transfer-item-summary-main">
+                              <div className="transfer-item-summary-head">
+                                <div className="transfer-item-stamp">{statusText}</div>
+                                <div className="transfer-item-direction">{directionLabel}</div>
+                                {receiveModeText && <div className="transfer-item-note">{receiveModeText}</div>}
+                              </div>
+                              <div className="transfer-item-top">
+                                <div className="transfer-item-title-group">
+                                  <div className="transfer-item-name">{item.fileName}</div>
+                                  <div className="transfer-item-meta">{compactMeta(item, messages)}</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="transfer-item-summary-side">
+                              <div className="transfer-item-summary-metric-stack">
+                                <div className="transfer-item-percent">{percent}%</div>
+                                <div className="transfer-item-summary-metrics">
+                                  {activeMetricSummary ?? ''}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                        <div
+                          className="transfer-progress-track"
+                          role="progressbar"
+                          aria-label={`${statusText} ${item.fileName}`}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={percent}
+                          aria-valuetext={isWaitingForReceiver ? messages.transferWaitingForReceiver : `${percent}%`}
+                        >
+                          <div className="transfer-progress-fill" style={{ width: `${percent}%` }} />
+                        </div>
+                        <div className="transfer-item-foot">
+                          <span className="transfer-item-foot-primary">
+                            {formatBytes(item.bytesTransferred)} / {formatBytes(item.fileSize)}
+                            <span className="transfer-item-foot-peer">
+                              {item.peerDeviceName || messages.unknownDevice}
+                            </span>
+                          </span>
+                          {footStatusText && (
+                            <span
+                              className={`transfer-item-foot-secondary${item.error && !activeMetricSummary ? ' is-error' : ''}`}
+                              title={footStatusText}
+                            >
+                              {footStatusText}
+                            </span>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <div id={`transfer-detail-${item.transferId}`} className="transfer-item-detail-body">
+                            {hasLiveMetrics(item) && (
+                              <div className="transfer-item-metrics">
+                                <span>
+                                  {messages.transferRateLabel}{' '}
+                                  {item.transferRateBytesPerSecond
+                                    ? formatTransferRate(item.transferRateBytesPerSecond)
+                                    : '--/s'}
+                                </span>
+                                <span>
+                                  {messages.transferEtaLabel}{' '}
+                                  {item.estimatedSecondsRemaining ? formatEta(item.estimatedSecondsRemaining) : '--'}
+                                </span>
+                              </div>
+                            )}
+                            {item.error && (
+                              <div className="transfer-item-error" title={item.error}>
+                                {item.error}
+                              </div>
+                            )}
+                            {(item.localPath || item.peerDeviceId) && (
+                              <div className="transfer-item-details">
+                                {item.localPath && (
+                                  <div className="transfer-item-detail-row">
+                                    <span className="transfer-item-detail-label">{messages.transferLocalPath}</span>
+                                    <span className="transfer-item-detail-value">{item.localPath}</span>
+                                  </div>
+                                )}
+                                {item.peerDeviceId && (
+                                  <div className="transfer-item-detail-row">
+                                    <span className="transfer-item-detail-label">{messages.transferPeerId}</span>
+                                    <span className="transfer-item-detail-value">{item.peerDeviceId}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {(canPause || canCancel || canRetry || canOpenPath) && (
+                              <div className="transfer-item-actions">
+                                {canPause && (
+                                  <button
+                                    type="button"
+                                    className="button button-ghost transfer-item-action"
+                                    onClick={() => void onPause(item.transferId)}
+                                    disabled={isBusy || isBulkBusy}
+                                    aria-busy={isBusy}
+                                  >
+                                    {messages.transferPause}
+                                  </button>
+                                )}
+                                {canCancel && (
+                                  <button
+                                    type="button"
+                                    className="button button-ghost transfer-item-action"
+                                    onClick={() => void onCancel(item.transferId)}
+                                    disabled={isBusy || isBulkBusy}
+                                    aria-busy={isBusy}
+                                  >
+                                    {messages.transferCancel}
+                                  </button>
+                                )}
+                                {canRetry && (
+                                  <button
+                                    type="button"
+                                    className="button button-ghost transfer-item-action"
+                                    onClick={() => void onRetry(item.transferId)}
+                                    disabled={isBusy || isBulkBusy}
+                                    aria-busy={isBusy}
+                                  >
+                                    {item.status === 'paused' ? messages.transferResume : messages.transferRetry}
+                                  </button>
+                                )}
+                                {canOpenPath && (
+                                  <button
+                                    type="button"
+                                    className="button button-ghost transfer-item-action"
+                                    onClick={() => void handleOpenPath(item.localPath!)}
+                                  >
+                                    {messages.transferOpenFile}
+                                  </button>
+                                )}
+                                {canOpenPath && (
+                                  <button
+                                    type="button"
+                                    className="button button-ghost transfer-item-action"
+                                    onClick={() => void handleRevealPath(item.localPath!)}
+                                  >
+                                    {messages.transferRevealFile}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    )}
-                    {item.peerDeviceId && (
-                      <div className="transfer-item-detail-row">
-                        <span className="transfer-item-detail-label">{messages.transferPeerId}</span>
-                        <span className="transfer-item-detail-value">{item.peerDeviceId}</span>
+                      <div className="transfer-item-controls">
+                        <button
+                          type="button"
+                          className="transfer-item-chevron transfer-item-detail-trigger"
+                          onClick={() => toggleTransferDetails(item.transferId)}
+                          aria-expanded={isSelected}
+                          aria-controls={isSelected ? `transfer-detail-${item.transferId}` : undefined}
+                          aria-label={`${isSelected ? messages.dismiss : messages.transferDetails} ${item.fileName}`}
+                          title={isSelected ? messages.dismiss : messages.transferDetails}
+                        >
+                          <ChevronRight aria-hidden="true" size={16} strokeWidth={2.2} />
+                        </button>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            className={`transfer-item-delete${confirmingDelete ? ' is-danger-confirm' : ''}`}
+                            onClick={() => void handleDeleteTransfer(item.transferId)}
+                            disabled={isBusy || isBulkBusy}
+                            aria-busy={isBusy}
+                            aria-label={`${confirmingDelete ? messages.transferDeleteConfirm : messages.transferDelete} ${item.fileName}`}
+                            title={confirmingDelete ? messages.transferDeleteConfirm : messages.transferDelete}
+                          >
+                            <Trash2 aria-hidden="true" size={15} strokeWidth={2} />
+                          </button>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
-                {(canPause || canCancel || canRetry || canOpenPath) && (
-                  <div className="transfer-item-actions">
-                    {canPause && (
-                      <button
-                        type="button"
-                        className="button button-ghost transfer-item-action"
-                        onClick={() => void onPause(item.transferId)}
-                        disabled={isBusy}
-                      >
-                        {messages.transferPause}
-                      </button>
-                    )}
-                    {canCancel && (
-                      <button
-                        type="button"
-                        className="button button-ghost transfer-item-action"
-                        onClick={() => void onCancel(item.transferId)}
-                        disabled={isBusy}
-                      >
-                        {messages.transferCancel}
-                      </button>
-                    )}
-                    {canRetry && (
-                      <button
-                        type="button"
-                        className="button button-ghost transfer-item-action"
-                        onClick={() => void onRetry(item.transferId)}
-                        disabled={isBusy}
-                      >
-                        {messages.transferRetry}
-                      </button>
-                    )}
-                    {canOpenPath && (
-                      <button
-                        type="button"
-                        className="button button-ghost transfer-item-action"
-                        onClick={() => void handleOpenPath(item.localPath!)}
-                      >
-                        {messages.transferOpenFile}
-                      </button>
-                    )}
-                    {canOpenPath && (
-                      <button
-                        type="button"
-                        className="button button-ghost transfer-item-action"
-                        onClick={() => void handleRevealPath(item.localPath!)}
-                      >
-                        {messages.transferRevealFile}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </li>
-        );
-      })}
-          </ul>
-        </li>
-      ))}
-      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -27,6 +27,8 @@ export const IpcChannels = {
   GetSandboxLocation: 'syncfile:get-sandbox-location',
   ChooseSandboxLocation: 'syncfile:choose-sandbox-location',
   SelectFile: 'syncfile:select-file',
+  SelectFiles: 'syncfile:select-files',
+  SelectFolderFiles: 'syncfile:select-folder-files',
   GetSettings: 'syncfile:get-settings',
   SaveSettings: 'syncfile:save-settings',
   SaveProfile: 'syncfile:save-profile',

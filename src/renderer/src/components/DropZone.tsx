@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import {
   Archive,
@@ -18,6 +18,7 @@ import {
 import type { Device, PeerReachabilityStatus } from '@shared/types';
 import type { Messages } from '../i18n';
 import { formatBytes } from '../utils/format';
+import { fileNameFromPath, isLikelyAbsolutePath } from '../utils/native-path';
 import { Avatar } from './Avatar';
 
 export interface PendingFile {
@@ -54,7 +55,7 @@ function fileToEntry(file: File): PendingFile | null {
       ? file.webkitRelativePath
       : file.name;
 
-  if (filePath.length > 0) {
+  if (filePath.length > 0 && isLikelyAbsolutePath(filePath)) {
     return { path: filePath, name: file.name, label: relativePath, size: file.size };
   }
   return null;
@@ -64,8 +65,10 @@ function pathToPendingFile(path: string): PendingFile | null {
   if (!path) {
     return null;
   }
-  const normalized = path.replace(/\\/g, '/');
-  const name = normalized.split('/').pop() || path;
+  if (!isLikelyAbsolutePath(path)) {
+    return null;
+  }
+  const name = fileNameFromPath(path);
   return {
     path,
     name,
@@ -131,6 +134,31 @@ function hasTauriRuntime(): boolean {
   return typeof internals?.invoke === 'function';
 }
 
+function hasNativeFileAccess(): boolean {
+  if (hasTauriRuntime()) {
+    return true;
+  }
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+  return /\bElectron\//.test(navigator.userAgent);
+}
+
+function hasUsableRecipientRoute(
+  device: Device & { isOnline?: boolean; reachability?: PeerReachabilityStatus; reachabilityError?: string }
+): boolean {
+  return device.address.trim().length > 0 && device.port > 0;
+}
+
+function canAttemptRecipientSend(
+  device: Device & { isOnline?: boolean; reachability?: PeerReachabilityStatus; reachabilityError?: string }
+): boolean {
+  return (
+    device.reachability !== 'unreachable' &&
+    (device.isOnline !== false || hasUsableRecipientRoute(device))
+  );
+}
+
 export function DropZone({
   onSend,
   messages,
@@ -142,7 +170,53 @@ export function DropZone({
 }: DropZoneProps): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const directoryInputRef = useRef<HTMLInputElement>(null);
+  const pendingFilesRef = useRef(pendingFiles);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'files' | 'folder' | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
+
+  useEffect(() => {
+    if (!confirmClearAll) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmClearAll(false), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmClearAll]);
+
+  const commitPendingFiles = useCallback(
+    (files: PendingFile[]): void => {
+      pendingFilesRef.current = files;
+      onPendingFilesChange(files);
+    },
+    [onPendingFilesChange]
+  );
+
+  const addPendingEntries = useCallback(
+    (entries: PendingFile[]): void => {
+      if (isSending) {
+        return;
+      }
+      if (entries.length === 0) {
+        return;
+      }
+
+      const current = pendingFilesRef.current;
+      const existing = new Set(current.map((file) => file.path));
+      const nextEntries = entries.filter((entry) => !existing.has(entry.path));
+      if (nextEntries.length === 0) {
+        return;
+      }
+
+      setConfirmClearAll(false);
+      commitPendingFiles([...current, ...nextEntries]);
+    },
+    [commitPendingFiles, isSending]
+  );
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -190,15 +264,7 @@ export function DropZone({
       disposed = true;
       unlisten?.();
     };
-  }, [pendingFiles]);
-
-  const addPendingEntries = (entries: PendingFile[]): void => {
-    if (entries.length === 0) {
-      return;
-    }
-    const existing = new Set(pendingFiles.map((file) => file.path));
-    onPendingFilesChange([...pendingFiles, ...entries.filter((entry) => !existing.has(entry.path))]);
-  };
+  }, [addPendingEntries]);
 
   const addFiles = (fileList: FileList): void => {
     const entries: PendingFile[] = [];
@@ -213,6 +279,9 @@ export function DropZone({
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
+    if (isSending) {
+      return;
+    }
     setIsDragActive(true);
   };
 
@@ -227,6 +296,9 @@ export function DropZone({
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
     setIsDragActive(false);
+    if (isSending) {
+      return;
+    }
     void collectDataTransferEntries(event.dataTransfer).then(addPendingEntries);
   };
 
@@ -238,47 +310,94 @@ export function DropZone({
   };
 
   const openFilePicker = (): void => {
+    if (pickerMode !== null || isSending) {
+      return;
+    }
+
+    if (hasNativeFileAccess() && typeof window.syncFile.selectFiles === 'function') {
+      setPickerMode('files');
+      void window.syncFile
+        .selectFiles()
+        .then((paths) => {
+          const entries = paths
+            .map(pathToPendingFile)
+            .filter((entry): entry is PendingFile => Boolean(entry));
+          addPendingEntries(entries);
+        })
+        .catch(() => {
+          fileInputRef.current?.click();
+        })
+        .finally(() => {
+          setPickerMode(null);
+        });
+      return;
+    }
     fileInputRef.current?.click();
   };
 
   const openDirectoryPicker = (): void => {
+    if (pickerMode !== null || isSending) {
+      return;
+    }
+
+    if (hasNativeFileAccess() && typeof window.syncFile.selectFolderFiles === 'function') {
+      setPickerMode('folder');
+      void window.syncFile
+        .selectFolderFiles()
+        .then((paths) => {
+          const entries = paths
+            .map(pathToPendingFile)
+            .filter((entry): entry is PendingFile => Boolean(entry));
+          addPendingEntries(entries);
+        })
+        .catch(() => {
+          directoryInputRef.current?.click();
+        })
+        .finally(() => {
+          setPickerMode(null);
+        });
+      return;
+    }
     directoryInputRef.current?.click();
   };
 
   const handleRemove = (event: MouseEvent, path: string): void => {
     event.preventDefault();
     event.stopPropagation();
-    onPendingFilesChange(pendingFiles.filter((file) => file.path !== path));
+    if (isSending) {
+      return;
+    }
+    setConfirmClearAll(false);
+    commitPendingFiles(pendingFilesRef.current.filter((file) => file.path !== path));
   };
 
   const handleClearAll = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    onPendingFilesChange([]);
-  };
-
-  const handleSend = (event: MouseEvent): void => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (pendingFiles.length === 0 || selectedDevices.length === 0) {
+    if (isSending) {
       return;
     }
-    const paths = pendingFiles.map((file) => file.path);
-    void Promise.resolve(onSend(paths));
+    if (!confirmClearAll) {
+      setConfirmClearAll(true);
+      return;
+    }
+    setConfirmClearAll(false);
+    commitPendingFiles([]);
   };
 
   const hasFiles = pendingFiles.length > 0;
   const totalBytes = pendingFiles.reduce((sum, file) => sum + file.size, 0);
   const readyRecipients = selectedDevices.filter(
-    (device) => device.isOnline !== false && device.reachability !== 'unreachable' && device.reachability !== 'checking'
+    (device) => canAttemptRecipientSend(device) && device.reachability !== 'checking'
   ).length;
   const checkingRecipients = selectedDevices.filter(
     (device) => device.isOnline !== false && device.reachability === 'checking'
   ).length;
+  const sendableRecipients = selectedDevices.filter(canAttemptRecipientSend).length;
   const selectedRecipientCount = selectedDevices.length;
   const canSend =
     hasFiles &&
-    selectedDevices.some((device) => device.isOnline !== false && device.reachability !== 'unreachable');
+    sendableRecipients > 0;
   const selectedDeviceNames = selectedDevices.map((device) => device.name).join(' · ');
   const hasSelectedDevices = selectedDevices.length > 0;
   const EmptyStateIcon = hasSelectedDevices ? UploadCloud : Monitor;
@@ -288,18 +407,41 @@ export function DropZone({
     selectedRecipientCount === 0
       ? messages.sendQueueStatusNoRecipients
       : readyRecipients > 0
-        ? messages.sendQueueStatusReady(readyRecipients, selectedRecipientCount)
+        ? checkingRecipients > 0
+          ? messages.sendQueueStatusReadyWithChecking(readyRecipients, checkingRecipients, selectedRecipientCount)
+          : messages.sendQueueStatusReady(readyRecipients, selectedRecipientCount)
         : checkingRecipients > 0
           ? messages.sendQueueStatusChecking(checkingRecipients)
           : messages.sendQueueStatusNoReadyRecipients;
   const sendSummary = `${messages.dropZoneFileCount(pendingFiles.length)} · ${formatBytes(totalBytes)}`;
+  const isPicking = pickerMode !== null;
+  const isQueueLocked = isSending || isPicking;
+  const sendButtonLabel =
+    isSending
+      ? messages.dropZoneSending
+      : canSend && readyRecipients === 0
+        ? messages.dropZoneTrySend
+        : messages.dropZoneSend;
+
+  const handleSend = (event: MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canSend || isQueueLocked) {
+      return;
+    }
+
+    const paths = pendingFiles.map((file) => file.path);
+    setIsSending(true);
+    void Promise.resolve(onSend(paths)).finally(() => setIsSending(false));
+  };
 
   return (
     <div
-      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}${hasFiles ? ' has-files' : ''}${hasSelectedDevices ? '' : ' is-awaiting-target'}`}
+      className={`drop-zone${isDragActive ? ' is-drag-active' : ''}${hasFiles ? ' has-files' : ''}${hasSelectedDevices ? '' : ' is-awaiting-target'}${isQueueLocked ? ' is-queue-locked' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      aria-busy={isQueueLocked}
     >
       <input
         ref={fileInputRef}
@@ -335,7 +477,9 @@ export function DropZone({
                 type="button"
                 className={`dz-recipient-chip${device.isOnline === false ? ' is-offline' : ''}${device.reachability === 'unreachable' ? ' is-unreachable' : ''}`}
                 onClick={() => onRemoveRecipient(device.deviceId)}
+                disabled={isQueueLocked}
                 title={device.name}
+                aria-label={messages.dropZoneRemoveRecipient(device.name)}
               >
                 <Avatar name={device.name} avatarDataUrl={device.avatarDataUrl} size="sm" />
                 <span className="dz-recipient-chip-copy">
@@ -359,7 +503,13 @@ export function DropZone({
 
       {!hasFiles ? (
         <>
-          <button type="button" className="drop-zone-label" onClick={openFilePicker}>
+          <button
+            type="button"
+            className="drop-zone-label"
+            onClick={openFilePicker}
+            disabled={isQueueLocked}
+            aria-busy={pickerMode === 'files'}
+          >
             <span className="drop-zone-icon" aria-hidden="true">
               <EmptyStateIcon aria-hidden="true" />
             </span>
@@ -367,10 +517,22 @@ export function DropZone({
             <span className="drop-zone-subtitle">{emptySubtitle}</span>
           </button>
           <div className="drop-zone-quick-actions">
-            <button type="button" className="button button-ghost drop-zone-quick-action" onClick={openFilePicker}>
+            <button
+              type="button"
+              className="button button-ghost drop-zone-quick-action"
+              onClick={openFilePicker}
+              disabled={isQueueLocked}
+              aria-busy={pickerMode === 'files'}
+            >
               {messages.dropZonePickFromDisk}
             </button>
-            <button type="button" className="button button-ghost drop-zone-quick-action" onClick={openDirectoryPicker}>
+            <button
+              type="button"
+              className="button button-ghost drop-zone-quick-action"
+              onClick={openDirectoryPicker}
+              disabled={isQueueLocked}
+              aria-busy={pickerMode === 'folder'}
+            >
               {messages.dropZoneAddFolder}
             </button>
           </div>
@@ -388,6 +550,7 @@ export function DropZone({
                     type="button"
                     className="dz-file-tile-remove"
                     onClick={(event) => handleRemove(event, file.path)}
+                    disabled={isQueueLocked}
                     title={messages.dropZoneRemoveFile}
                     aria-label={`${messages.dropZoneRemoveFile} ${file.name}`}
                   >
@@ -400,6 +563,8 @@ export function DropZone({
                 type="button"
                 className="dz-file-tile dz-file-tile-add"
                 onClick={openFilePicker}
+                disabled={isQueueLocked}
+                aria-busy={pickerMode === 'files'}
                 title={messages.dropZonePickFromDisk}
                 aria-label={messages.dropZonePickFromDisk}
               >
@@ -412,6 +577,8 @@ export function DropZone({
                 type="button"
                 className="dz-file-tile dz-file-tile-add"
                 onClick={openDirectoryPicker}
+                disabled={isQueueLocked}
+                aria-busy={pickerMode === 'folder'}
                 title={messages.dropZoneAddFolder}
                 aria-label={messages.dropZoneAddFolder}
               >
@@ -436,8 +603,13 @@ export function DropZone({
             <span className="dz-send-bar-info">
               <span className="dz-send-bar-summary">{sendSummary}</span>
               {pendingFiles.length > 1 && (
-                <button type="button" className="dz-send-bar-clear" onClick={handleClearAll}>
-                  {messages.dropZoneClearAll}
+                <button
+                  type="button"
+                  className={`dz-send-bar-clear${confirmClearAll ? ' is-confirming' : ''}`}
+                  onClick={handleClearAll}
+                  disabled={isQueueLocked}
+                >
+                  {confirmClearAll ? messages.dropZoneClearAllConfirm : messages.dropZoneClearAll}
                 </button>
               )}
             </span>
@@ -453,11 +625,12 @@ export function DropZone({
             </span>
             <button
               type="button"
-              className="dz-send-bar-button"
-              disabled={!canSend}
+              className={`dz-send-bar-button${isSending ? ' is-busy' : ''}`}
+              disabled={!canSend || isQueueLocked}
               onClick={handleSend}
+              aria-busy={isSending}
             >
-              {messages.dropZoneSend}
+              {sendButtonLabel}
             </button>
           </div>
         </div>

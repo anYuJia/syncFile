@@ -1,11 +1,18 @@
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { motion, type Transition } from 'framer-motion';
-import { FileDown, Inbox, UserRoundCheck } from 'lucide-react';
+import { FileDown, UserRoundCheck } from 'lucide-react';
 
 import type { IncomingOffer, PairRequest } from '@shared/types';
 import type { Messages } from '../i18n';
 import { formatBytes } from '../utils/format';
 
 type RequestsInboxTab = 'files' | 'pairs';
+type PendingInboxAction =
+  | 'offer-accept'
+  | 'offer-trust-accept'
+  | 'offer-reject'
+  | 'pair-accept'
+  | 'pair-reject';
 
 const panelSpring: Transition = {
   type: 'spring',
@@ -27,6 +34,7 @@ interface RequestsInboxPanelProps {
   onReject: (offerId: string) => void | Promise<void>;
   pairRequests: PairRequest[];
   selectedPairRequestId: string | null;
+  busyPairRequestId?: string | null;
   selfFingerprint?: string | null;
   onSelectPairRequest: (requestId: string) => void;
   onAcceptPairRequest: (requestId: string) => void | Promise<void>;
@@ -47,23 +55,24 @@ export function RequestsInboxPanel({
   onReject,
   pairRequests,
   selectedPairRequestId,
+  busyPairRequestId,
   selfFingerprint,
   onSelectPairRequest,
   onAcceptPairRequest,
   onRejectPairRequest,
   messages
 }: RequestsInboxPanelProps): JSX.Element {
-  const effectiveTab: RequestsInboxTab =
-    activeTab === 'pairs'
-      ? pairRequests.length > 0 || offers.length === 0
-        ? 'pairs'
-        : 'files'
-      : offers.length > 0 || pairRequests.length === 0
-        ? 'files'
-        : 'pairs';
+  const filesTabRef = useRef<HTMLButtonElement>(null);
+  const pairsTabRef = useRef<HTMLButtonElement>(null);
+  const [confirmingAction, setConfirmingAction] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingInboxAction | null>(null);
+  const effectiveTab: RequestsInboxTab = activeTab;
   const activeOffer = offers.find((item) => item.offerId === selectedOfferId) ?? offers[0] ?? null;
   const activePairRequest =
     pairRequests.find((item) => item.requestId === selectedPairRequestId) ?? pairRequests[0] ?? null;
+  const offerRejectActionKey = activeOffer ? `offer-reject:${activeOffer.offerId}` : null;
+  const offerTrustActionKey = activeOffer ? `offer-trust:${activeOffer.offerId}` : null;
+  const pairRejectActionKey = activePairRequest ? `pair-reject:${activePairRequest.requestId}` : null;
   const trustedSender =
     activeOffer &&
     (trustedDeviceKeys?.has(
@@ -71,11 +80,113 @@ export function RequestsInboxPanel({
     ) ??
       false);
   const isEmpty = offers.length + pairRequests.length === 0;
+  const isOfferActionBusy = busyOfferId !== null && busyOfferId !== undefined;
+  const isPairActionBusy = busyPairRequestId !== null && busyPairRequestId !== undefined;
+  const isInboxActionBusy = isOfferActionBusy || isPairActionBusy || pendingAction !== null;
+  const confirmingOfferReject = Boolean(offerRejectActionKey && confirmingAction === offerRejectActionKey);
+  const confirmingOfferTrust = Boolean(offerTrustActionKey && confirmingAction === offerTrustActionKey);
+  const confirmingPairReject = Boolean(pairRejectActionKey && confirmingAction === pairRejectActionKey);
+
+  useEffect(() => {
+    if (!confirmingAction) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmingAction(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmingAction]);
+
+  useEffect(() => {
+    setConfirmingAction(null);
+  }, [activeOffer?.offerId, activePairRequest?.requestId, effectiveTab]);
+
+  const changeInboxTab = (tab: RequestsInboxTab): void => {
+    if (isInboxActionBusy || tab === effectiveTab) {
+      return;
+    }
+    setConfirmingAction(null);
+    onTabChange(tab);
+  };
+  const focusTab = (tab: RequestsInboxTab): void => {
+    const target = tab === 'files' ? filesTabRef.current : pairsTabRef.current;
+    target?.focus();
+  };
+  const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    let nextTab: RequestsInboxTab | null = null;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextTab = effectiveTab === 'files' ? 'pairs' : 'files';
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextTab = effectiveTab === 'files' ? 'pairs' : 'files';
+    } else if (event.key === 'Home') {
+      nextTab = 'files';
+    } else if (event.key === 'End') {
+      nextTab = 'pairs';
+    }
+
+    if (!nextTab) {
+      return;
+    }
+    event.preventDefault();
+    if (isInboxActionBusy) {
+      return;
+    }
+    setConfirmingAction(null);
+    onTabChange(nextTab);
+    window.requestAnimationFrame(() => focusTab(nextTab));
+  };
+  const runInboxAction = async (
+    action: PendingInboxAction,
+    callback: () => void | Promise<void>
+  ): Promise<void> => {
+    if (isInboxActionBusy) {
+      return;
+    }
+    setConfirmingAction(null);
+    setPendingAction(action);
+    try {
+      await callback();
+    } finally {
+      setPendingAction((current) => (current === action ? null : current));
+    }
+  };
+  const handleRejectOffer = async (offerId: string): Promise<void> => {
+    const actionKey = `offer-reject:${offerId}`;
+    if (isInboxActionBusy) {
+      return;
+    }
+    if (confirmingAction !== actionKey) {
+      setConfirmingAction(actionKey);
+      return;
+    }
+    await runInboxAction('offer-reject', () => onReject(offerId));
+  };
+  const handleTrustAndAcceptOffer = async (offer: IncomingOffer): Promise<void> => {
+    const actionKey = `offer-trust:${offer.offerId}`;
+    if (isInboxActionBusy) {
+      return;
+    }
+    if (confirmingAction !== actionKey) {
+      setConfirmingAction(actionKey);
+      return;
+    }
+    await runInboxAction('offer-trust-accept', () => onTrustAndAccept(offer));
+  };
+  const handleRejectPairRequest = async (requestId: string): Promise<void> => {
+    const actionKey = `pair-reject:${requestId}`;
+    if (isInboxActionBusy) {
+      return;
+    }
+    if (confirmingAction !== actionKey) {
+      setConfirmingAction(actionKey);
+      return;
+    }
+    await runInboxAction('pair-reject', () => onRejectPairRequest(requestId));
+  };
 
   return (
     <motion.section
       className={`requests-inbox requests-inbox-panel${isEmpty ? ' is-empty' : ''}`}
       aria-label={messages.requestsInbox}
+      aria-busy={isInboxActionBusy}
       initial={false}
       animate={{ opacity: 1, y: 0 }}
       transition={panelSpring}
@@ -83,11 +194,17 @@ export function RequestsInboxPanel({
     >
       <div className="requests-inbox-tabs" role="tablist" aria-label={messages.requestsInbox}>
         <button
+          ref={filesTabRef}
+          id="requests-inbox-files-tab"
           type="button"
           role="tab"
           aria-selected={effectiveTab === 'files'}
+          aria-controls="requests-inbox-files-panel"
           className={`requests-inbox-tab${effectiveTab === 'files' ? ' is-active' : ''}`}
-          onClick={() => onTabChange('files')}
+          onClick={() => changeInboxTab('files')}
+          onKeyDown={handleTabKeyDown}
+          disabled={isInboxActionBusy}
+          tabIndex={effectiveTab === 'files' ? 0 : -1}
         >
           <span className="requests-inbox-tab-label">
             <FileDown aria-hidden="true" />
@@ -96,11 +213,17 @@ export function RequestsInboxPanel({
           <span className="requests-inbox-tab-count">{offers.length}</span>
         </button>
         <button
+          ref={pairsTabRef}
+          id="requests-inbox-pairs-tab"
           type="button"
           role="tab"
           aria-selected={effectiveTab === 'pairs'}
+          aria-controls="requests-inbox-pairs-panel"
           className={`requests-inbox-tab${effectiveTab === 'pairs' ? ' is-active' : ''}`}
-          onClick={() => onTabChange('pairs')}
+          onClick={() => changeInboxTab('pairs')}
+          onKeyDown={handleTabKeyDown}
+          disabled={isInboxActionBusy}
+          tabIndex={effectiveTab === 'pairs' ? 0 : -1}
         >
           <span className="requests-inbox-tab-label">
             <UserRoundCheck aria-hidden="true" />
@@ -112,11 +235,29 @@ export function RequestsInboxPanel({
 
       {effectiveTab === 'files' ? (
         offers.length === 0 || !activeOffer ? (
-          <RequestsInboxEmpty messages={messages} />
+          <RequestsInboxEmpty
+            icon="files"
+            title={messages.requestFilesEmptyTitle}
+            body={messages.requestFilesEmptyBody}
+            panelId="requests-inbox-files-panel"
+            labelledBy="requests-inbox-files-tab"
+            action={
+              pairRequests.length > 0
+                ? {
+                    label: messages.requestShowPairs,
+                    onClick: () => changeInboxTab('pairs'),
+                    disabled: isInboxActionBusy
+                  }
+                : undefined
+            }
+          />
         ) : (
           <motion.div
+            id="requests-inbox-files-panel"
+            role="tabpanel"
+            aria-labelledby="requests-inbox-files-tab"
             className="requests-inbox-body"
-            initial={{ opacity: 0, y: 4 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}
           >
@@ -129,7 +270,12 @@ export function RequestsInboxPanel({
                     className={`requests-inbox-list-item${
                       offer.offerId === activeOffer.offerId ? ' is-active' : ''
                     }`}
-                    onClick={() => onSelectOffer(offer.offerId)}
+                    onClick={() => {
+                      setConfirmingAction(null);
+                      onSelectOffer(offer.offerId);
+                    }}
+                    disabled={isInboxActionBusy}
+                    aria-current={offer.offerId === activeOffer.offerId ? 'true' : undefined}
                   >
                     <span className="requests-inbox-list-title">{offer.fileName}</span>
                     <span className="requests-inbox-list-meta">
@@ -140,7 +286,12 @@ export function RequestsInboxPanel({
               </div>
             )}
 
-            <div className="requests-inbox-detail">
+            <div
+              className={`requests-inbox-detail${confirmingOfferReject ? ' is-confirming-reject' : ''}${
+                confirmingOfferTrust ? ' is-confirming-trust' : ''
+              }`}
+              aria-busy={busyOfferId === activeOffer.offerId || pendingAction?.startsWith('offer-')}
+            >
               <div className="requests-inbox-stamp">{messages.incomingFileRequest}</div>
               <h3 className="requests-inbox-detail-title">{activeOffer.fileName}</h3>
               <p className="requests-inbox-detail-copy">
@@ -167,27 +318,32 @@ export function RequestsInboxPanel({
               <div className="requests-inbox-actions">
                 <button
                   type="button"
-                  className="button button-muted"
-                  onClick={() => onReject(activeOffer.offerId)}
-                  disabled={busyOfferId === activeOffer.offerId}
+                  className={`button button-muted${confirmingOfferReject ? ' is-danger-confirm' : ''}`}
+                  onClick={() => void handleRejectOffer(activeOffer.offerId)}
+                  disabled={isInboxActionBusy}
+                  aria-busy={pendingAction === 'offer-reject'}
+                  aria-label={`${confirmingOfferReject ? messages.rejectConfirm : messages.reject} ${activeOffer.fileName}`}
                 >
-                  {messages.reject}
+                  {confirmingOfferReject ? messages.rejectConfirm : messages.reject}
                 </button>
                 {!trustedSender && (
                   <button
                     type="button"
-                    className="button button-muted"
-                    onClick={() => onTrustAndAccept(activeOffer)}
-                    disabled={busyOfferId === activeOffer.offerId}
+                    className={`button button-muted${confirmingOfferTrust ? ' is-trust-confirm' : ''}`}
+                    onClick={() => void handleTrustAndAcceptOffer(activeOffer)}
+                    disabled={isInboxActionBusy}
+                    aria-busy={pendingAction === 'offer-trust-accept'}
+                    aria-label={`${confirmingOfferTrust ? messages.trustAndAcceptConfirm : messages.trustAndAccept} ${activeOffer.fromDevice.name}`}
                   >
-                    {messages.trustAndAccept}
+                    {confirmingOfferTrust ? messages.trustAndAcceptConfirm : messages.trustAndAccept}
                   </button>
                 )}
                 <button
                   type="button"
                   className="button"
-                  onClick={() => onAccept(activeOffer.offerId)}
-                  disabled={busyOfferId === activeOffer.offerId}
+                  onClick={() => void runInboxAction('offer-accept', () => onAccept(activeOffer.offerId))}
+                  disabled={isInboxActionBusy}
+                  aria-busy={pendingAction === 'offer-accept'}
                 >
                   {messages.accept}
                 </button>
@@ -196,11 +352,29 @@ export function RequestsInboxPanel({
           </motion.div>
         )
       ) : pairRequests.length === 0 || !activePairRequest ? (
-        <RequestsInboxEmpty messages={messages} />
+        <RequestsInboxEmpty
+          icon="pairs"
+          title={messages.requestPairsEmptyTitle}
+          body={messages.requestPairsEmptyBody}
+          panelId="requests-inbox-pairs-panel"
+          labelledBy="requests-inbox-pairs-tab"
+          action={
+            offers.length > 0
+              ? {
+                  label: messages.requestShowFiles,
+                  onClick: () => changeInboxTab('files'),
+                  disabled: isInboxActionBusy
+                }
+              : undefined
+          }
+        />
       ) : (
         <motion.div
+          id="requests-inbox-pairs-panel"
+          role="tabpanel"
+          aria-labelledby="requests-inbox-pairs-tab"
           className="requests-inbox-body"
-          initial={{ opacity: 0, y: 4 }}
+          initial={false}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}
         >
@@ -213,7 +387,12 @@ export function RequestsInboxPanel({
                   className={`requests-inbox-list-item${
                     request.requestId === activePairRequest.requestId ? ' is-active' : ''
                   }`}
-                  onClick={() => onSelectPairRequest(request.requestId)}
+                  onClick={() => {
+                    setConfirmingAction(null);
+                    onSelectPairRequest(request.requestId);
+                  }}
+                  disabled={isInboxActionBusy}
+                  aria-current={request.requestId === activePairRequest.requestId ? 'true' : undefined}
                 >
                   <span className="requests-inbox-list-title">{request.fromDevice.name}</span>
                   <span className="requests-inbox-list-meta">
@@ -224,7 +403,12 @@ export function RequestsInboxPanel({
             </div>
           )}
 
-          <div className="requests-inbox-detail">
+          <div
+            className={`requests-inbox-detail${confirmingPairReject ? ' is-confirming-reject' : ''}`}
+            aria-busy={
+              busyPairRequestId === activePairRequest.requestId || pendingAction?.startsWith('pair-')
+            }
+          >
             <div className="requests-inbox-stamp">{messages.pairDevice}</div>
             <h3 className="requests-inbox-detail-title">{activePairRequest.fromDevice.name}</h3>
             <p className="requests-inbox-detail-copy">
@@ -247,15 +431,24 @@ export function RequestsInboxPanel({
             <div className="requests-inbox-actions">
               <button
                 type="button"
-                className="button button-muted"
-                onClick={() => onRejectPairRequest(activePairRequest.requestId)}
+                className={`button button-muted${confirmingPairReject ? ' is-danger-confirm' : ''}`}
+                onClick={() => void handleRejectPairRequest(activePairRequest.requestId)}
+                disabled={isInboxActionBusy}
+                aria-busy={pendingAction === 'pair-reject'}
+                aria-label={`${confirmingPairReject ? messages.pairPromptCancelConfirm : messages.pairPromptCancel} ${activePairRequest.fromDevice.name}`}
               >
-                {messages.pairPromptCancel}
+                {confirmingPairReject ? messages.pairPromptCancelConfirm : messages.pairPromptCancel}
               </button>
               <button
                 type="button"
                 className="button"
-                onClick={() => onAcceptPairRequest(activePairRequest.requestId)}
+                onClick={() =>
+                  void runInboxAction('pair-accept', () =>
+                    onAcceptPairRequest(activePairRequest.requestId)
+                  )
+                }
+                disabled={isInboxActionBusy}
+                aria-busy={pendingAction === 'pair-accept'}
               >
                 {messages.pairPromptConfirm}
               </button>
@@ -267,21 +460,54 @@ export function RequestsInboxPanel({
   );
 }
 
-function RequestsInboxEmpty({ messages }: { messages: Messages }): JSX.Element {
+function RequestsInboxEmpty({
+  icon,
+  title,
+  body,
+  panelId,
+  labelledBy,
+  action
+}: {
+  icon: RequestsInboxTab;
+  title: string;
+  body: string;
+  panelId: string;
+  labelledBy: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+  };
+}): JSX.Element {
+  const Icon = icon === 'files' ? FileDown : UserRoundCheck;
+
   return (
     <motion.div
+      id={panelId}
+      role="tabpanel"
+      aria-labelledby={labelledBy}
       className="requests-inbox-empty"
-      initial={{ opacity: 0, y: 4 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}
     >
       <span className="requests-inbox-empty-mark" aria-hidden="true">
-        <Inbox />
+        <Icon />
       </span>
       <div className="requests-inbox-empty-copy-block">
-        <p className="requests-inbox-empty-title">{messages.requestsEmptyTitle}</p>
-        <p className="requests-inbox-empty-copy">{messages.requestsEmptyBody}</p>
+        <p className="requests-inbox-empty-title">{title}</p>
+        <p className="requests-inbox-empty-copy">{body}</p>
       </div>
+      {action && (
+        <button
+          type="button"
+          className="button button-ghost requests-inbox-empty-action"
+          onClick={action.onClick}
+          disabled={action.disabled}
+        >
+          {action.label}
+        </button>
+      )}
     </motion.div>
   );
 }

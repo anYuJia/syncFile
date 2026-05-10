@@ -549,6 +549,121 @@ describe('registerIpcHandlers', () => {
     expect(removeMany).toHaveBeenCalledWith(['failed-1', 'done-1']);
   });
 
+  it('cancels a paused outbound transfer from history', () => {
+    const send = vi.fn();
+    const registry = Object.assign(new EventEmitter(), {
+      list: vi.fn(() => [])
+    });
+    const tcpClient = Object.assign(new EventEmitter(), {
+      sendFile: vi.fn(),
+      pairWithPeer: vi.fn(),
+      pause: vi.fn().mockReturnValue(false),
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const tcpServer = Object.assign(new EventEmitter(), {
+      cancel: vi.fn().mockReturnValue(false)
+    });
+    const pausedRecord = {
+      transferId: 'paused-send-1',
+      direction: 'send' as const,
+      fileName: 'paused.bin',
+      fileSize: 100,
+      bytesTransferred: 40,
+      peerDeviceName: 'Peer',
+      peerDeviceId: 'peer-1',
+      localPath: join(root, 'paused.bin'),
+      status: 'paused' as const,
+      updatedAt: 1
+    };
+    const upsert = vi.fn();
+    const handle = vi.mocked(ipcMain.handle);
+
+    registerIpcHandlers({
+      registry: registry as never,
+      mdnsService: { refresh: vi.fn() } as never,
+      tcpServer: tcpServer as never,
+      tcpClient: tcpClient as never,
+      sandbox: {
+        rootPath: vi.fn(() => join(root, 'sandbox')),
+        currentUsageBytes: vi.fn().mockResolvedValue(0),
+        matchingResumeBytes: vi.fn(() => 0),
+        hasIncomingResume: vi.fn(() => false),
+        resumeCacheSummary: vi.fn(() => ({ count: 0, bytes: 0 })),
+        discardIncomingResume: vi.fn(),
+        clearResumeCache: vi.fn(() => []),
+        directoryForIncoming: vi.fn(() => join(root, 'sandbox', 'peer-1')),
+        setRoot: vi.fn(),
+        assertContainsPath: vi.fn((path: string) => path)
+      } as never,
+      sandboxLocation: {
+        currentPath: vi.fn(() => null),
+        save: vi.fn((path: string) => path)
+      } as never,
+      pendingOfferStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn(),
+        remove: vi.fn()
+      } as never,
+      recentPeerStore: {
+        list: vi.fn(() => []),
+        upsert: vi.fn()
+      } as never,
+      settingsStore: {
+        get: vi.fn(() => ({
+          maxSandboxSizeMB: 1024,
+          autoAccept: false,
+          autoAcceptMaxSizeMB: 64,
+          openReceivedFolder: false,
+          desktopNotifications: true,
+          trustedDevices: []
+        })),
+        save: vi.fn()
+      } as never,
+      transferHistoryStore: {
+        list: vi.fn(() => [pausedRecord]),
+        upsert,
+        get: vi.fn((transferId: string) => (transferId === pausedRecord.transferId ? pausedRecord : undefined)),
+        count: vi.fn(() => 1),
+        remove: vi.fn(),
+        removeMany: vi.fn()
+      } as never,
+      identity: {} as never,
+      userDataDir: root,
+      getSelfDevice: vi.fn(),
+      getWindow: vi.fn(
+        () =>
+          ({
+            isDestroyed: () => false,
+            webContents: { send }
+          }) as never
+      )
+    });
+
+    const cancelTransferHandler = handle.mock.calls.find(
+      ([channel]) => channel === IpcChannels.CancelTransfer
+    )?.[1] as ((event: unknown, transferId: string) => void);
+
+    cancelTransferHandler({}, pausedRecord.transferId);
+
+    expect(tcpClient.cancel).not.toHaveBeenCalled();
+    expect(tcpServer.cancel).not.toHaveBeenCalled();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transferId: pausedRecord.transferId,
+        status: 'cancelled',
+        bytesTransferred: pausedRecord.bytesTransferred,
+        error: 'Transfer cancelled.'
+      })
+    );
+    expect(send).toHaveBeenCalledWith(
+      IpcChannels.TransferProgress,
+      expect.objectContaining({
+        transferId: pausedRecord.transferId,
+        status: 'cancelled'
+      })
+    );
+  });
+
   it('defers device-offline renderer events while an outbound transfer is active', async () => {
     vi.mocked(sha256File).mockResolvedValue('demo-hash');
 

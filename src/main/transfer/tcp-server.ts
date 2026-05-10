@@ -310,6 +310,11 @@ export class TcpServer extends EventEmitter {
             });
             return;
           }
+          socket.write(encodeMessage({
+            type: 'file-complete-ack',
+            fileId: finalOffer.fileId,
+            bytesReceived
+          }));
           settled = true;
           this.emit('transfer-complete', {
             offerId: finalOffer.fileId,

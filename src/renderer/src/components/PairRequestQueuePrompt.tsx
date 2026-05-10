@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import type { PairRequest } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -25,6 +27,32 @@ export function PairRequestQueuePrompt({
 }: PairRequestQueuePromptProps): JSX.Element {
   const request = requests.find((item) => item.requestId === selectedRequestId) ?? requests[0];
   const dialogRef = useDialogA11y(undefined);
+  const [confirmingRejectRequestId, setConfirmingRejectRequestId] = useState<string | null>(null);
+  const confirmingReject = confirmingRejectRequestId === request.requestId;
+
+  useEffect(() => {
+    if (!confirmingRejectRequestId) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmingRejectRequestId(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmingRejectRequestId]);
+
+  useEffect(() => {
+    setConfirmingRejectRequestId(null);
+  }, [request.requestId]);
+
+  const handleReject = (): void => {
+    if (busy) {
+      return;
+    }
+    if (!confirmingReject) {
+      setConfirmingRejectRequestId(request.requestId);
+      return;
+    }
+    setConfirmingRejectRequestId(null);
+    void onReject(request.requestId);
+  };
 
   return (
     <div className="receive-prompt-overlay" role="presentation">
@@ -34,6 +62,7 @@ export function PairRequestQueuePrompt({
         role="dialog"
         aria-modal="true"
         aria-label={messages.pairPromptTitle}
+        aria-busy={busy}
         tabIndex={-1}
       >
         <div className={`receive-prompt-shell${requests.length > 1 ? '' : ' receive-prompt-shell-single'}`}>
@@ -51,7 +80,12 @@ export function PairRequestQueuePrompt({
                       key={item.requestId}
                       type="button"
                       className={`receive-prompt-queue-item${selected ? ' is-active' : ''}`}
-                      onClick={() => onSelectRequest(item.requestId)}
+                      onClick={() => {
+                        setConfirmingRejectRequestId(null);
+                        onSelectRequest(item.requestId);
+                      }}
+                      disabled={busy}
+                      aria-current={selected ? 'true' : undefined}
                     >
                       <span className="receive-prompt-queue-file">{item.fromDevice.name}</span>
                       <span className="receive-prompt-queue-meta">
@@ -64,7 +98,7 @@ export function PairRequestQueuePrompt({
             </aside>
           )}
 
-          <div className="receive-prompt-main">
+          <div className={`receive-prompt-main${confirmingReject ? ' is-confirming-reject' : ''}`}>
             <div className="receive-prompt-stamp">{messages.pairDevice}</div>
             <h3 className="receive-prompt-title">{request.fromDevice.name}</h3>
             <p className="receive-prompt-from">{messages.pairPromptDesc(request.fromDevice.name)}</p>
@@ -87,16 +121,20 @@ export function PairRequestQueuePrompt({
             <div className="receive-prompt-actions">
               <button
                 type="button"
-                className="button button-muted"
-                onClick={() => void onReject(request.requestId)}
+                className={`button button-muted${confirmingReject ? ' is-danger-confirm' : ''}`}
+                onClick={handleReject}
                 disabled={busy}
+                aria-label={`${confirmingReject ? messages.pairPromptCancelConfirm : messages.pairPromptCancel} ${request.fromDevice.name}`}
               >
-                {messages.pairPromptCancel}
+                {confirmingReject ? messages.pairPromptCancelConfirm : messages.pairPromptCancel}
               </button>
               <button
                 type="button"
                 className="button"
-                onClick={() => void onAccept(request.requestId)}
+                onClick={() => {
+                  setConfirmingRejectRequestId(null);
+                  void onAccept(request.requestId);
+                }}
                 disabled={busy}
               >
                 {messages.pairPromptConfirm}

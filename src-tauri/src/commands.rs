@@ -10,9 +10,10 @@ use crate::storage::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tauri::{command, AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex, RwLock};
 use uuid::Uuid;
@@ -295,6 +296,38 @@ async fn emit_transfer_history_reset(state: &AppStateInner) {
     let _ = state.app_handle.emit("transfer-history-reset", history);
 }
 
+fn cancelled_progress_from_record(record: &TransferRecord, now: u64) -> TransferProgress {
+    TransferProgress {
+        transfer_id: record.transfer_id.clone(),
+        batch_id: record.batch_id.clone(),
+        batch_label: record.batch_label.clone(),
+        direction: record.direction.clone(),
+        file_name: record.file_name.clone(),
+        file_size: record.file_size,
+        bytes_transferred: record.bytes_transferred,
+        peer_device_name: record.peer_device_name.clone(),
+        peer_device_id: record.peer_device_id.clone(),
+        status: "cancelled".to_string(),
+        receive_mode: record.receive_mode.clone(),
+        local_path: record.local_path.clone(),
+        source_file_modified_at: record.source_file_modified_at,
+        source_file_sha256: record.source_file_sha256.clone(),
+        error: Some("Transfer cancelled.".to_string()),
+        transfer_rate_bytes_per_second: None,
+        estimated_seconds_remaining: None,
+        updated_at: Some(now),
+    }
+}
+
+fn cancelled_record_from_record(record: TransferRecord, now: u64) -> TransferRecord {
+    TransferRecord {
+        status: "cancelled".to_string(),
+        error: Some("Transfer cancelled.".to_string()),
+        updated_at: now,
+        ..record
+    }
+}
+
 async fn current_sandbox_location(state: &AppStateInner) -> Result<SandboxLocationInfo, String> {
     let path = state.sandbox.root_path();
     let path_str = path
@@ -347,6 +380,54 @@ fn validate_sandbox_root(root_path: PathBuf) -> Result<PathBuf, String> {
     let _ = std::fs::remove_file(probe);
 
     Ok(resolved)
+}
+
+fn collect_regular_files(root: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(root)? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+
+        if file_type.is_dir() {
+            let _ = collect_regular_files(&path, files);
+        } else if file_type.is_file() {
+            files.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn transfer_live_metrics(
+    bytes_transferred: u64,
+    file_size: u64,
+    started_at: Instant,
+) -> (Option<u64>, Option<u64>) {
+    if bytes_transferred == 0 {
+        return (None, None);
+    }
+
+    let elapsed_seconds = started_at.elapsed().as_secs_f64();
+    if elapsed_seconds <= 0.0 {
+        return (None, None);
+    }
+
+    let rate = ((bytes_transferred as f64) / elapsed_seconds).round() as u64;
+    if rate == 0 {
+        return (None, None);
+    }
+
+    let eta = if bytes_transferred < file_size {
+        Some((((file_size - bytes_transferred) as f64) / (rate as f64)).ceil() as u64)
+    } else {
+        None
+    };
+
+    (Some(rate), eta)
 }
 
 async fn persist_settings(state: &AppStateInner, settings: &Settings) -> Result<(), String> {
@@ -682,7 +763,7 @@ pub async fn send_file(
     let transfer_id = existing_transfer_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // 获取目标设备信息
-    let devices = state.device_registry.list().await;
+    let devices = state.device_registry.list_all().await;
     let device = devices
         .iter()
         .find(|candidate| candidate.device_id == device_id)
@@ -849,6 +930,7 @@ pub async fn send_file(
 
         let client = crate::transfer::tcp::TcpClient::new(self_device);
         let sent_bytes = Arc::new(AtomicU64::new(0));
+        let transfer_started_at = Instant::now();
         let progress_sent_bytes = sent_bytes.clone();
         let progress_app_handle = app_handle_clone.clone();
         let progress_transfer_id = transfer_id_clone.clone();
@@ -862,6 +944,7 @@ pub async fn send_file(
         let progress_callback: crate::transfer::tcp::SendProgressCallback =
             Arc::new(move |bytes_sent| {
                 progress_sent_bytes.store(bytes_sent, Ordering::SeqCst);
+                let (rate, eta) = transfer_live_metrics(bytes_sent, file_size, transfer_started_at);
                 let _ = progress_app_handle.emit(
                     "transfer-progress",
                     TransferProgress {
@@ -880,8 +963,8 @@ pub async fn send_file(
                         source_file_modified_at: None,
                         source_file_sha256: Some(progress_sha256.clone()),
                         error: None,
-                        transfer_rate_bytes_per_second: None,
-                        estimated_seconds_remaining: None,
+                        transfer_rate_bytes_per_second: rate,
+                        estimated_seconds_remaining: eta,
                         updated_at: Some(now_ms()),
                     },
                 );
@@ -903,6 +986,7 @@ pub async fn send_file(
         match result {
             Ok(file_id) => {
                 let now = now_ms();
+                let (rate, eta) = transfer_live_metrics(file_size, file_size, transfer_started_at);
                 let completed_progress = TransferProgress {
                     transfer_id: file_id.clone(),
                     batch_id: batch_id.clone(),
@@ -919,8 +1003,8 @@ pub async fn send_file(
                     source_file_modified_at: None,
                     source_file_sha256: Some(sha256.clone()),
                     error: None,
-                    transfer_rate_bytes_per_second: None,
-                    estimated_seconds_remaining: None,
+                    transfer_rate_bytes_per_second: rate,
+                    estimated_seconds_remaining: eta,
                     updated_at: Some(now),
                 };
                 let _ = app_handle_clone.emit("transfer-progress", completed_progress.clone());
@@ -977,6 +1061,8 @@ pub async fn send_file(
                 .await;
                 let now = now_ms();
                 let bytes_transferred = sent_bytes.load(Ordering::SeqCst);
+                let (rate, eta) =
+                    transfer_live_metrics(bytes_transferred, file_size, transfer_started_at);
                 let _ = app_handle_clone.emit(
                     "transfer-progress",
                     TransferProgress {
@@ -995,8 +1081,8 @@ pub async fn send_file(
                         source_file_modified_at: None,
                         source_file_sha256: Some(sha256.clone()),
                         error: Some(error.clone()),
-                        transfer_rate_bytes_per_second: None,
-                        estimated_seconds_remaining: None,
+                        transfer_rate_bytes_per_second: rate,
+                        estimated_seconds_remaining: eta,
                         updated_at: Some(now),
                     },
                 );
@@ -1095,14 +1181,41 @@ pub async fn cancel_transfer(
         .get(&transfer_id)
     {
         control.request_cancel();
+        let _ = app_handle.emit("transfer-cancelled", transfer_id);
+        return Ok(());
+    }
+
+    let paused_send_record = {
+        let history = state.transfer_history.read().await;
+        history
+            .iter()
+            .find(|record| {
+                record.transfer_id == transfer_id
+                    && record.direction == "send"
+                    && record.status == "paused"
+            })
+            .cloned()
+    };
+
+    if let Some(record) = paused_send_record {
+        let now = now_ms();
+        let progress = cancelled_progress_from_record(&record, now);
+        let _ = app_handle.emit("transfer-progress", progress);
+        let _ = persist_transfer_record(
+            state.inner().as_ref(),
+            cancelled_record_from_record(record, now),
+        )
+        .await
+        .map_err(|e| format!("Failed to update transfer history: {}", e))?;
+        let _ = app_handle.emit("transfer-cancelled", transfer_id);
     } else {
         state
             .inbound_cancel_transfers
             .write()
             .await
             .insert(transfer_id.clone());
+        let _ = app_handle.emit("transfer-cancelled", transfer_id);
     }
-    let _ = app_handle.emit("transfer-cancelled", transfer_id);
     Ok(())
 }
 
@@ -1554,4 +1667,85 @@ pub async fn select_file() -> Result<Option<String>, String> {
     Ok(rfd::FileDialog::new()
         .pick_file()
         .map(|path| path.to_string_lossy().to_string()))
+}
+
+#[command]
+pub async fn select_files() -> Result<Vec<String>, String> {
+    Ok(rfd::FileDialog::new()
+        .pick_files()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect())
+}
+
+#[command]
+pub async fn select_folder_files() -> Result<Vec<String>, String> {
+    let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+        return Ok(Vec::new());
+    };
+
+    let mut files = Vec::new();
+    collect_regular_files(&folder, &mut files)
+        .map_err(|e| format!("Failed to read folder {}: {}", folder.display(), e))?;
+    files.sort();
+
+    Ok(files
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paused_send_record() -> TransferRecord {
+        TransferRecord {
+            transfer_id: "paused-send-1".to_string(),
+            batch_id: Some("batch-1".to_string()),
+            batch_label: Some("Batch".to_string()),
+            direction: "send".to_string(),
+            file_name: "paused.bin".to_string(),
+            file_size: 100,
+            bytes_transferred: 40,
+            peer_device_name: Some("Peer".to_string()),
+            peer_device_id: Some("peer-1".to_string()),
+            status: "paused".to_string(),
+            receive_mode: None,
+            local_path: Some("/tmp/paused.bin".to_string()),
+            source_file_modified_at: Some(123),
+            source_file_sha256: Some("sha".to_string()),
+            error: Some("Transfer paused. Retry to continue.".to_string()),
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn cancelled_progress_preserves_paused_send_metadata() {
+        let record = paused_send_record();
+        let progress = cancelled_progress_from_record(&record, 99);
+
+        assert_eq!(progress.transfer_id, record.transfer_id);
+        assert_eq!(progress.direction, "send");
+        assert_eq!(progress.status, "cancelled");
+        assert_eq!(progress.bytes_transferred, 40);
+        assert_eq!(progress.local_path, record.local_path);
+        assert_eq!(progress.error.as_deref(), Some("Transfer cancelled."));
+        assert_eq!(progress.updated_at, Some(99));
+    }
+
+    #[test]
+    fn cancelled_record_preserves_paused_send_metadata() {
+        let record = paused_send_record();
+        let cancelled = cancelled_record_from_record(record, 99);
+
+        assert_eq!(cancelled.transfer_id, "paused-send-1");
+        assert_eq!(cancelled.direction, "send");
+        assert_eq!(cancelled.status, "cancelled");
+        assert_eq!(cancelled.bytes_transferred, 40);
+        assert_eq!(cancelled.local_path.as_deref(), Some("/tmp/paused.bin"));
+        assert_eq!(cancelled.error.as_deref(), Some("Transfer cancelled."));
+        assert_eq!(cancelled.updated_at, 99);
+    }
 }

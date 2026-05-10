@@ -5,9 +5,11 @@ import { Avatar } from './Avatar';
 interface DeviceListProps {
   devices: Device[];
   selectedDeviceIds: string[];
+  retainedDeviceIds?: Set<string>;
   focusedDeviceId: string | null;
   reachabilityByDeviceId?: Record<string, DeviceReachability>;
   trustedDeviceKeys?: Set<string>;
+  isRefreshing?: boolean;
   onToggleSelect: (deviceId: string) => void;
   onFocusDevice: (deviceId: string) => void;
   onRefresh?: () => void | Promise<void>;
@@ -24,9 +26,11 @@ function formatPlatform(platform: string): string {
 export function DeviceList({
   devices,
   selectedDeviceIds,
+  retainedDeviceIds,
   focusedDeviceId,
   reachabilityByDeviceId,
   trustedDeviceKeys,
+  isRefreshing = false,
   onToggleSelect,
   onFocusDevice,
   onRefresh,
@@ -51,8 +55,14 @@ export function DeviceList({
             <li>{messages.deviceListEmptyStepRefresh}</li>
           </ol>
           {onRefresh && (
-            <button type="button" className="button device-list-empty-refresh" onClick={() => void onRefresh()}>
-              {messages.refreshDevices}
+            <button
+              type="button"
+              className="button device-list-empty-refresh"
+              onClick={() => void onRefresh()}
+              disabled={isRefreshing}
+              aria-busy={isRefreshing}
+            >
+              {isRefreshing ? messages.refreshingDevices : messages.refreshDevices}
             </button>
           )}
         </div>
@@ -61,13 +71,22 @@ export function DeviceList({
   }
 
   return (
-    <ul className="device-list" role="listbox" aria-label={messages.onlineDevicesAriaLabel} aria-multiselectable="true">
+    <ul
+      className="device-list"
+      role="listbox"
+      aria-label={messages.onlineDevicesAriaLabel}
+      aria-multiselectable="true"
+      aria-busy={isRefreshing}
+    >
       {devices.map((device, index) => {
         const selected = selectedDeviceIds.includes(device.deviceId);
+        const retained = retainedDeviceIds?.has(device.deviceId) ?? false;
         const trusted = trustedDeviceKeys?.has(`${device.deviceId}:${device.trustFingerprint}`) ?? false;
         const reachability = reachabilityByDeviceId?.[device.deviceId];
         const reachabilityLabel =
-          reachability?.status === 'checking'
+          retained
+            ? messages.recipientOfflineLabel
+            : reachability?.status === 'checking'
             ? messages.deviceReachabilityChecking
             : reachability?.status === 'unreachable'
               ? messages.deviceReachabilityUnreachable
@@ -90,7 +109,7 @@ export function DeviceList({
             <button
               id={optionId}
               type="button"
-              className={`device-item${selected ? ' is-selected' : ''}`}
+              className={`device-item${selected ? ' is-selected' : ''}${retained ? ' is-retained' : ''}`}
               onClick={() => {
                 onFocusDevice(device.deviceId);
                 onToggleSelect(device.deviceId);
@@ -110,6 +129,7 @@ export function DeviceList({
                   moveFocus(devices.length - 1);
                 } else if (event.key === ' ' || event.key === 'Enter') {
                   event.preventDefault();
+                  onFocusDevice(device.deviceId);
                   onToggleSelect(device.deviceId);
                 }
               }}
@@ -119,7 +139,9 @@ export function DeviceList({
             >
               <span
                 className={`device-item-indicator${
-                  reachability?.status === 'unreachable'
+                  retained
+                    ? ' is-retained'
+                    : reachability?.status === 'unreachable'
                     ? ' is-error'
                     : reachability?.status === 'checking'
                       ? ' is-checking'
@@ -137,7 +159,9 @@ export function DeviceList({
                   </span>
                   <span
                     className={`device-item-reachability${
-                      reachability?.status === 'unreachable'
+                      retained
+                        ? ' is-retained'
+                        : reachability?.status === 'unreachable'
                         ? ' is-error'
                         : reachability?.status === 'checking'
                           ? ' is-checking'

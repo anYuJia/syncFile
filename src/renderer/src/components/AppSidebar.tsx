@@ -162,7 +162,7 @@ export function AppSidebar({
     >
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark" aria-hidden="true">
-          <span />
+          <SendHorizontal aria-hidden="true" />
         </span>
         <span className="sidebar-brand-copy">
           <strong>syncFile</strong>
@@ -207,6 +207,9 @@ export function AppSidebar({
           </span>
           <span className="sidebar-progress-readout">{statusDetail}</span>
         </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {statusDetail}
+        </span>
       </div>
 
       <nav className="sidebar-nav" aria-label={messages.workspaceSectionsAriaLabel}>
@@ -268,11 +271,17 @@ export function AppSidebar({
             </SidebarTooltip>
           ))}
         </div>
-        <div className="locale-switch sidebar-locale-switch" aria-label={messages.languageLabel}>
+        <div
+          className="locale-switch sidebar-locale-switch"
+          aria-label={messages.languageLabel}
+          aria-hidden={isCollapsed}
+        >
           <button
             type="button"
             className={`locale-switch-button${locale === 'zh' ? ' is-active' : ''}`}
             onClick={() => setLocale('zh')}
+            aria-pressed={locale === 'zh'}
+            tabIndex={isCollapsed ? -1 : 0}
           >
             中文
           </button>
@@ -280,6 +289,8 @@ export function AppSidebar({
             type="button"
             className={`locale-switch-button${locale === 'en' ? ' is-active' : ''}`}
             onClick={() => setLocale('en')}
+            aria-pressed={locale === 'en'}
+            tabIndex={isCollapsed ? -1 : 0}
           >
             EN
           </button>

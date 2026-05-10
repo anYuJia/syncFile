@@ -40,6 +40,7 @@ const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_DECISION_TIMEOUT: Duration = Duration::from_secs(180);
 #[allow(dead_code)]
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const DEFAULT_COMPLETE_ACK_TIMEOUT: Duration = Duration::from_secs(30);
 #[allow(dead_code)]
 const MAX_SECURE_FRAME_BYTES: usize = 1024 * 1024;
 
@@ -941,6 +942,18 @@ async fn handle_file_offer(
                     let _ = app_handle.emit("transfer-progress", completed_progress.clone());
                     let _ = app_handle.emit("transfer-complete", completed_progress.clone());
 
+                    let ack = ProtocolMessage::FileCompleteAck {
+                        file_id: file_id.clone(),
+                        bytes_received,
+                    };
+                    let encoded_ack = encode_message(&ack).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("encode failed: {}", e),
+                        )
+                    })?;
+                    socket.write_frame(&encoded_ack).await?;
+
                     let _ = persist_transfer_record(
                         &state,
                         TransferRecord {
@@ -1396,6 +1409,41 @@ impl TcpClient {
         })?;
         secure_socket.write_frame(&encoded).await?;
 
+        let ack_frame = tokio::time::timeout(
+            DEFAULT_COMPLETE_ACK_TIMEOUT,
+            secure_socket.read_frame(),
+        )
+        .await
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "waiting for receiver completion acknowledgement timed out",
+            )
+        })??;
+        let mut decoder = MessageDecoder::new();
+        let messages = decoder.push(&ack_frame).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("decode completion acknowledgement failed: {}", error),
+            )
+        })?;
+        let acknowledged = messages.into_iter().any(|message| {
+            matches!(
+                message,
+                ProtocolMessage::FileCompleteAck {
+                    file_id: ref ack_file_id,
+                    bytes_received
+                } if ack_file_id == &file_id && bytes_received == bytes_sent
+            )
+        });
+
+        if !acknowledged {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "receiver completion acknowledgement did not match transfer",
+            ));
+        }
+
         Ok(file_id)
     }
 
@@ -1530,6 +1578,26 @@ mod tests {
             }) => {
                 assert_eq!(file_id, "file-1");
                 assert_eq!(bytes_sent, 42);
+            }
+            other => panic!("unexpected decoded frame: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn decode_control_frame_accepts_completion_ack() {
+        let encoded = encode_message(&ProtocolMessage::FileCompleteAck {
+            file_id: "file-1".to_string(),
+            bytes_received: 42,
+        })
+        .expect("encode control frame");
+
+        match decode_control_frame(&encoded) {
+            Some(ProtocolMessage::FileCompleteAck {
+                file_id,
+                bytes_received,
+            }) => {
+                assert_eq!(file_id, "file-1");
+                assert_eq!(bytes_received, 42);
             }
             other => panic!("unexpected decoded frame: {:?}", other),
         }

@@ -116,6 +116,22 @@ export const tauriSyncFileApi = {
     }
   },
 
+  selectFiles: async (): Promise<string[]> => {
+    try {
+      return await invoke<string[]>('select_files');
+    } catch {
+      return [];
+    }
+  },
+
+  selectFolderFiles: async (): Promise<string[]> => {
+    try {
+      return await invoke<string[]>('select_folder_files');
+    } catch {
+      return [];
+    }
+  },
+
   clearResumeCache: (): Promise<void> => invoke('clear_resume_cache'),
 
   getPathForFile: (file: File): string => {
@@ -123,7 +139,7 @@ export const tauriSyncFileApi = {
     if ('path' in file && typeof (file as File & { path: string }).path === 'string') {
       return (file as File & { path: string }).path;
     }
-    return file.webkitRelativePath || file.name;
+    return '';
   },
 
   // --- Settings ---
@@ -230,8 +246,10 @@ const previewSyncFileApi: SyncFileAPI = {
   getSandboxLocation: async () => previewSettings.sandboxLocation,
   chooseSandboxLocation: async () => null,
   selectFile: async () => null,
+  selectFiles: async () => [],
+  selectFolderFiles: async () => [],
   clearResumeCache: async () => undefined,
-  getPathForFile: (file) => file.webkitRelativePath || file.name,
+  getPathForFile: () => '',
   getSettings: async () => previewSettings,
   saveSettings: async (settings) => ({ ...previewSettings, ...settings }),
   saveProfile: async (profile) => ({ ...previewDevice, ...profile }),

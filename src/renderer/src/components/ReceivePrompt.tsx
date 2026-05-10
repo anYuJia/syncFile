@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 import type { IncomingOffer } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -30,6 +32,44 @@ export function ReceivePrompt({
   const trustedSender =
     trustedDeviceKeys?.has(`${offer.fromDevice.deviceId}:${offer.fromDevice.trustFingerprint}`) ?? false;
   const dialogRef = useDialogA11y(undefined);
+  const [confirmingAction, setConfirmingAction] = useState<string | null>(null);
+  const confirmingReject = confirmingAction === `reject:${offer.offerId}`;
+  const confirmingTrust = confirmingAction === `trust:${offer.offerId}`;
+
+  useEffect(() => {
+    if (!confirmingAction) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmingAction(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmingAction]);
+
+  useEffect(() => {
+    setConfirmingAction(null);
+  }, [offer.offerId]);
+
+  const handleReject = (): void => {
+    if (busy) {
+      return;
+    }
+    if (!confirmingReject) {
+      setConfirmingAction(`reject:${offer.offerId}`);
+      return;
+    }
+    setConfirmingAction(null);
+    void onReject(offer.offerId);
+  };
+  const handleTrustAndAccept = (): void => {
+    if (busy) {
+      return;
+    }
+    if (!confirmingTrust) {
+      setConfirmingAction(`trust:${offer.offerId}`);
+      return;
+    }
+    setConfirmingAction(null);
+    void onTrustAndAccept(offer);
+  };
 
   return (
     <div className="receive-prompt-overlay" role="presentation">
@@ -39,6 +79,7 @@ export function ReceivePrompt({
         role="dialog"
         aria-modal="true"
         aria-label={messages.incomingFileRequestAriaLabel}
+        aria-busy={busy}
         tabIndex={-1}
       >
         <div className={`receive-prompt-shell${offers.length > 1 ? '' : ' receive-prompt-shell-single'}`}>
@@ -56,7 +97,12 @@ export function ReceivePrompt({
                       key={item.offerId}
                       type="button"
                       className={`receive-prompt-queue-item${selected ? ' is-active' : ''}`}
-                      onClick={() => onSelectOffer(item.offerId)}
+                      onClick={() => {
+                        setConfirmingAction(null);
+                        onSelectOffer(item.offerId);
+                      }}
+                      disabled={busy}
+                      aria-current={selected ? 'true' : undefined}
                     >
                       <span className="receive-prompt-queue-file">{item.fileName}</span>
                       <span className="receive-prompt-queue-meta">
@@ -69,7 +115,11 @@ export function ReceivePrompt({
             </aside>
           )}
 
-          <div className="receive-prompt-main">
+          <div
+            className={`receive-prompt-main${confirmingReject ? ' is-confirming-reject' : ''}${
+              confirmingTrust ? ' is-confirming-trust' : ''
+            }`}
+          >
             <div className="receive-prompt-stamp">{messages.incomingFileRequest}</div>
             <h3 className="receive-prompt-title">{offer.fileName}</h3>
             <p className="receive-prompt-from">
@@ -91,23 +141,33 @@ export function ReceivePrompt({
             <div className="receive-prompt-actions">
               <button
                 type="button"
-                className="button button-muted"
-                onClick={() => onReject(offer.offerId)}
+                className={`button button-muted${confirmingReject ? ' is-danger-confirm' : ''}`}
+                onClick={handleReject}
                 disabled={busy}
+                aria-label={`${confirmingReject ? messages.rejectConfirm : messages.reject} ${offer.fileName}`}
               >
-                {messages.reject}
+                {confirmingReject ? messages.rejectConfirm : messages.reject}
               </button>
               {!trustedSender && (
                 <button
                   type="button"
-                  className="button button-muted"
-                  onClick={() => onTrustAndAccept(offer)}
+                  className={`button button-muted${confirmingTrust ? ' is-trust-confirm' : ''}`}
+                  onClick={handleTrustAndAccept}
                   disabled={busy}
+                  aria-label={`${confirmingTrust ? messages.trustAndAcceptConfirm : messages.trustAndAccept} ${offer.fromDevice.name}`}
                 >
-                  {messages.trustAndAccept}
+                  {confirmingTrust ? messages.trustAndAcceptConfirm : messages.trustAndAccept}
                 </button>
               )}
-              <button type="button" className="button" onClick={() => onAccept(offer.offerId)} disabled={busy}>
+              <button
+                type="button"
+                className="button"
+                onClick={() => {
+                  setConfirmingAction(null);
+                  void onAccept(offer.offerId);
+                }}
+                disabled={busy}
+              >
                 {messages.accept}
               </button>
             </div>

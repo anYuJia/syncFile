@@ -6,6 +6,7 @@ interface ManifestPanelProps {
   messages: Messages;
   devices: Device[];
   selectedDeviceIds: string[];
+  retainedDeviceIds: Set<string>;
   focusedDeviceId: string | null;
   reachabilityByDeviceId: Record<string, DeviceReachability>;
   trustedDeviceKeys: Set<string>;
@@ -20,6 +21,7 @@ export function ManifestPanel({
   messages,
   devices,
   selectedDeviceIds,
+  retainedDeviceIds,
   focusedDeviceId,
   reachabilityByDeviceId,
   trustedDeviceKeys,
@@ -42,6 +44,8 @@ export function ManifestPanel({
             type="button"
             className={`button button-ghost manifest-refresh-button${isRefreshingDevices ? ' is-spinning' : ''}`}
             onClick={() => void onRefreshDevices()}
+            disabled={isRefreshingDevices}
+            aria-busy={isRefreshingDevices}
             title={messages.refreshDevices}
             aria-label={messages.refreshDevices}
           >
@@ -52,15 +56,23 @@ export function ManifestPanel({
               <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14" />
             </svg>
           </button>
-          <span className="card-counter">{devices.length}</span>
+          <span
+            className="card-counter"
+            aria-label={isRefreshingDevices ? messages.refreshingDevices : undefined}
+            aria-live="polite"
+          >
+            {devices.length}
+          </span>
         </div>
       </div>
       <DeviceList
         devices={devices}
         selectedDeviceIds={selectedDeviceIds}
+        retainedDeviceIds={retainedDeviceIds}
         focusedDeviceId={focusedDeviceId}
         reachabilityByDeviceId={reachabilityByDeviceId}
         trustedDeviceKeys={trustedDeviceKeys}
+        isRefreshing={isRefreshingDevices}
         onToggleSelect={onToggleDeviceSelection}
         onFocusDevice={onFocusDevice}
         onRefresh={onRefreshDevices}

@@ -14,6 +14,7 @@ import {
   isFileCancel,
   isProfileResponse,
   isPairResponse,
+  isFileCompleteAck,
   isFileReject,
   type FileOfferMessage,
   type ProfileResponseMessage,
@@ -25,6 +26,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 8000;
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 15000;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 180000;
 const DEFAULT_IDLE_TIMEOUT_MS = 120000;
+const DEFAULT_COMPLETE_ACK_TIMEOUT_MS = 30000;
 
 export interface TcpClientOptions {
   selfDevice: {
@@ -186,6 +188,7 @@ export class TcpClient extends EventEmitter {
       await new Promise<void>((resolve, reject) => {
         let settled = false;
         const responseTimeoutMs = this.options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+        let completionAckTimer: NodeJS.Timeout | null = null;
         let responseTimer: NodeJS.Timeout | null = setTimeout(() => {
           responseTimer = null;
           logWarn('transfer', 'peer did not respond to file offer before response timeout', {
@@ -200,6 +203,10 @@ export class TcpClient extends EventEmitter {
           if (responseTimer) {
             clearTimeout(responseTimer);
             responseTimer = null;
+          }
+          if (completionAckTimer) {
+            clearTimeout(completionAckTimer);
+            completionAckTimer = null;
           }
           socket.off('data', onData);
           socket.off('error', onError);
@@ -223,10 +230,29 @@ export class TcpClient extends EventEmitter {
           socket.end(() => resolve());
         };
 
+        const waitForCompletionAck = (): void => {
+          if (settled || completionAckTimer) {
+            return;
+          }
+          completionAckTimer = setTimeout(() => {
+            completionAckTimer = null;
+            fail(new Error('waiting for receiver completion acknowledgement timed out'));
+          }, DEFAULT_COMPLETE_ACK_TIMEOUT_MS);
+        };
+
         const onData = (chunk: Buffer): void => {
           try {
             const messages = decoder.push(chunk);
             for (const message of messages) {
+              if (isFileCompleteAck(message) && message.fileId === fileId) {
+                if (message.bytesReceived !== stats.size) {
+                  fail(new Error('receiver completion acknowledgement did not match transfer'));
+                  return;
+                }
+                finish();
+                return;
+              }
+
               if (isFileAccept(message) && message.fileId === fileId) {
                 activeTransfer.accepted = true;
                 socket.setTimeout(this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
@@ -252,7 +278,7 @@ export class TcpClient extends EventEmitter {
                   stats.size,
                   message.startOffset ?? 0
                 )
-                  .then(finish)
+                  .then(waitForCompletionAck)
                   .catch((error) => fail(error as Error));
                 return;
               }

@@ -110,11 +110,7 @@ impl DeviceRegistry {
                 .as_ref()
                 .map(|e| e.persistent)
                 .unwrap_or(false);
-        let online = if is_persistent && !persistent {
-            was_online
-        } else {
-            true
-        };
+        let online = if persistent { was_online } else { true };
 
         devices.insert(
             device.device_id.clone(),
@@ -195,5 +191,18 @@ mod tests {
 
         assert!(registry.list().await.is_empty());
         assert_eq!(registry.list_all().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn live_discovery_brings_cached_persistent_device_back_online() {
+        let registry = DeviceRegistry::new();
+        registry.upsert_persistent(test_device("device-1")).await;
+        registry.remove("device-1", true).await;
+
+        assert!(registry.list().await.is_empty());
+
+        registry.upsert(test_device("device-1")).await;
+
+        assert_eq!(registry.list().await.len(), 1);
     }
 }

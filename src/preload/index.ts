@@ -64,6 +64,8 @@ const api = {
   chooseSandboxLocation: (): Promise<SandboxLocationInfo | null> =>
     ipcRenderer.invoke(IpcChannels.ChooseSandboxLocation),
   selectFile: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.SelectFile),
+  selectFiles: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.SelectFiles),
+  selectFolderFiles: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.SelectFolderFiles),
   getSettings: (): Promise<SettingsPayload> => ipcRenderer.invoke(IpcChannels.GetSettings),
   saveSettings: (settings: Partial<Settings>): Promise<Settings> =>
     ipcRenderer.invoke(IpcChannels.SaveSettings, settings),

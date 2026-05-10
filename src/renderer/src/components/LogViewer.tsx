@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { useEffect, useState } from 'react';
 import type { RuntimeLogEntry } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -19,13 +20,71 @@ export function LogViewer({
   onClose
 }: LogViewerProps): JSX.Element {
   const dialogRef = useDialogA11y(onClose);
+  const [busyAction, setBusyAction] = useState<'refresh' | 'copy' | 'clear' | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (!statusMessage) {
+      return;
+    }
+    const timer = window.setTimeout(() => setStatusMessage(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (!confirmClear) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmClear(false), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmClear]);
 
   const handleCopy = async (): Promise<void> => {
+    if (busyAction || entries.length === 0) {
+      return;
+    }
+
     const text = entries.map(formatLogEntryForCopy).join('\n');
     try {
+      setBusyAction('copy');
       await navigator.clipboard.writeText(text);
+      setStatusMessage(messages.logViewerCopied);
     } catch {
-      // Copy is best-effort; logs remain visible in the panel.
+      setStatusMessage(messages.logViewerCopyFailed);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleRefresh = async (): Promise<void> => {
+    if (busyAction) {
+      return;
+    }
+    try {
+      setBusyAction('refresh');
+      await onRefresh();
+      setStatusMessage(messages.logViewerRefreshed);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleClear = async (): Promise<void> => {
+    if (busyAction || entries.length === 0) {
+      return;
+    }
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    try {
+      setBusyAction('clear');
+      await onClear();
+      setStatusMessage(messages.logViewerCleared);
+      setConfirmClear(false);
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -36,7 +95,9 @@ export function LogViewer({
         className="log-viewer-panel"
         role="dialog"
         aria-modal="true"
-        aria-label={messages.logViewerTitle}
+        aria-labelledby="log-viewer-title"
+        aria-describedby="log-viewer-status"
+        aria-busy={busyAction !== null}
         tabIndex={-1}
       >
         <button
@@ -53,20 +114,41 @@ export function LogViewer({
         <header className="log-viewer-header">
           <div>
             <p className="log-viewer-kicker">{messages.logs}</p>
-            <h2>{messages.logViewerTitle}</h2>
+            <h2 id="log-viewer-title">{messages.logViewerTitle}</h2>
           </div>
         </header>
 
         <div className="log-viewer-toolbar">
-          <button type="button" className="button button-muted" onClick={() => void onRefresh()}>
+          <button
+            type="button"
+            className="button button-muted"
+            onClick={() => void handleRefresh()}
+            disabled={busyAction !== null}
+            aria-busy={busyAction === 'refresh'}
+          >
             {messages.logViewerRefresh}
           </button>
-          <button type="button" className="button button-muted" onClick={() => void handleCopy()}>
+          <button
+            type="button"
+            className="button button-muted"
+            onClick={() => void handleCopy()}
+            disabled={busyAction !== null || entries.length === 0}
+            aria-busy={busyAction === 'copy'}
+          >
             {messages.logViewerCopy}
           </button>
-          <button type="button" className="button button-muted" onClick={() => void onClear()}>
-            {messages.logViewerClear}
+          <button
+            type="button"
+            className={`button button-muted${confirmClear ? ' is-danger-confirm' : ''}`}
+            onClick={() => void handleClear()}
+            disabled={busyAction !== null || entries.length === 0}
+            aria-busy={busyAction === 'clear'}
+          >
+            {confirmClear ? messages.logViewerClearConfirm : messages.logViewerClear}
           </button>
+          <span id="log-viewer-status" className="log-viewer-status" role="status" aria-live="polite">
+            {statusMessage ?? ''}
+          </span>
         </div>
 
         <div className="log-viewer-list" role="log" aria-live="polite">

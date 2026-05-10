@@ -25,6 +25,8 @@ pub enum ProtocolMessage {
     FileReject { file_id: String, reason: String },
     #[serde(rename = "file-complete")]
     FileComplete { file_id: String, bytes_sent: u64 },
+    #[serde(rename = "file-complete-ack")]
+    FileCompleteAck { file_id: String, bytes_received: u64 },
     #[serde(rename = "file-cancel")]
     FileCancel { file_id: String, reason: String },
     #[serde(rename = "profile-request")]
@@ -136,4 +138,12 @@ pub struct FileCompleteMessage {
     pub r#type: String,
     pub file_id: String,
     pub bytes_sent: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileCompleteAckMessage {
+    #[serde(rename = "type")]
+    pub r#type: String,
+    pub file_id: String,
+    pub bytes_received: u64,
 }

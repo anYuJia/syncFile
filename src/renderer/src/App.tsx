@@ -13,6 +13,8 @@ import { WorkspaceHeader } from './components/WorkspaceHeader';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
 import type { SelectedRecipientSnapshot, WorkspaceSection } from './types/workspace';
+import { fileNameFromPath, isLikelyAbsolutePath } from './utils/native-path';
+import { formatTransferRate } from './utils/format';
 import type {
   Device,
   DeviceReachability,
@@ -36,6 +38,10 @@ interface StoredRecipientDraft {
   hasAvatar?: boolean;
   profileRevision?: number;
   trustFingerprint: string;
+  trustPublicKey?: string;
+  host?: string;
+  address?: string;
+  port?: number;
   platform: string;
   version: string;
 }
@@ -43,6 +49,11 @@ interface StoredRecipientDraft {
 interface NoticeState {
   kind: 'info' | 'warn';
   message: string;
+  action?: {
+    label: string;
+    section: WorkspaceSection;
+    transferId?: string;
+  };
 }
 
 function progressPercent(fileSize: number, bytesTransferred: number, status?: string): number {
@@ -81,11 +92,54 @@ function loadInitialSendDraft(): {
               ])
             )
           : {},
-      pendingSendFiles: Array.isArray(parsed.pendingSendFiles) ? parsed.pendingSendFiles : []
+      pendingSendFiles: normalizeStoredPendingFiles(parsed.pendingSendFiles)
     };
   } catch {
     return { selectedDeviceIds: [], selectedRecipientSnapshots: {}, pendingSendFiles: [] };
   }
+}
+
+function normalizeStoredPendingFiles(value: unknown): PendingFile[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const files: PendingFile[] = [];
+
+  for (const item of value) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const candidate = item as Partial<PendingFile>;
+    if (typeof candidate.path !== 'string' || !isLikelyAbsolutePath(candidate.path)) {
+      continue;
+    }
+
+    if (seen.has(candidate.path)) {
+      continue;
+    }
+
+    const fallbackName = fileNameFromPath(candidate.path);
+    const name =
+      typeof candidate.name === 'string' && candidate.name.trim().length > 0
+        ? candidate.name
+        : fallbackName;
+    const label =
+      typeof candidate.label === 'string' && candidate.label.trim().length > 0
+        ? candidate.label
+        : name;
+    const size =
+      typeof candidate.size === 'number' && Number.isFinite(candidate.size) && candidate.size >= 0
+        ? candidate.size
+        : 0;
+
+    seen.add(candidate.path);
+    files.push({ path: candidate.path, name, label, size });
+  }
+
+  return files;
 }
 
 function inflateStoredRecipientDraft(snapshot: StoredRecipientDraft): Device {
@@ -96,10 +150,10 @@ function inflateStoredRecipientDraft(snapshot: StoredRecipientDraft): Device {
     hasAvatar: snapshot.hasAvatar,
     profileRevision: snapshot.profileRevision,
     trustFingerprint: snapshot.trustFingerprint,
-    trustPublicKey: '',
-    host: '',
-    address: '',
-    port: 0,
+    trustPublicKey: snapshot.trustPublicKey ?? '',
+    host: snapshot.host ?? '',
+    address: snapshot.address ?? '',
+    port: snapshot.port ?? 0,
     platform: snapshot.platform,
     version: snapshot.version
   };
@@ -113,14 +167,60 @@ function compactRecipientSnapshot(device: Device): StoredRecipientDraft {
     hasAvatar: device.hasAvatar,
     profileRevision: device.profileRevision,
     trustFingerprint: device.trustFingerprint,
+    trustPublicKey: device.trustPublicKey,
+    host: device.host,
+    address: device.address,
+    port: device.port,
     platform: device.platform,
     version: device.version
   };
 }
 
-function appendFailureReason(message: string, failureReasons: string[]): string {
+function hasUsableRecipientRoute(device: Device): boolean {
+  return device.address.trim().length > 0 && device.port > 0;
+}
+
+function canAttemptRecipientSend(device: SelectedRecipientSnapshot): boolean {
+  return (
+    device.reachability !== 'unreachable' &&
+    (device.isOnline !== false || hasUsableRecipientRoute(device))
+  );
+}
+
+function mergeSelectedSnapshotsIntoDeviceList(
+  devices: Device[],
+  selectedDeviceIds: string[],
+  snapshots: Record<string, Device>
+): Device[] {
+  if (selectedDeviceIds.length === 0) {
+    return devices;
+  }
+
+  const seen = new Set(devices.map((device) => device.deviceId));
+  const retained = selectedDeviceIds
+    .map((deviceId) => snapshots[deviceId])
+    .filter((device): device is Device => Boolean(device) && !seen.has(device.deviceId));
+
+  return retained.length > 0 ? [...retained, ...devices] : devices;
+}
+
+function appendFailureReason(
+  message: string,
+  failureReasons: string[],
+  formatReason: (reason: string) => string
+): string {
   const reason = failureReasons.find((item) => item.trim().length > 0);
-  return reason ? `${message} 原因：${reason}` : message;
+  return reason ? `${message} ${formatReason(reason)}` : message;
+}
+
+function upsertPairRequest(requests: PairRequest[], request: PairRequest): PairRequest[] {
+  const existingIndex = requests.findIndex((item) => item.requestId === request.requestId);
+  if (existingIndex >= 0) {
+    const next = [...requests];
+    next[existingIndex] = request;
+    return next;
+  }
+  return [request, ...requests];
 }
 
 export function App(): JSX.Element {
@@ -152,7 +252,9 @@ export function App(): JSX.Element {
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
   const [pendingPairRequests, setPendingPairRequests] = useState<PairRequest[]>([]);
   const [selectedPairRequestId, setSelectedPairRequestId] = useState<string | null>(null);
+  const [busyPairRequestId, setBusyPairRequestId] = useState<string | null>(null);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
+  const [busyPairingDeviceId, setBusyPairingDeviceId] = useState<string | null>(null);
   const [selectedTransferId, setSelectedTransferId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
@@ -186,20 +288,38 @@ export function App(): JSX.Element {
   const seenPairRequestIdsRef = useRef<Set<string>>(new Set());
   const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
   const probeKeyByDeviceIdRef = useRef<Map<string, string>>(new Map());
-  const selectedDevices: SelectedRecipientSnapshot[] = selectedDeviceIds.flatMap((deviceId) => {
+  const busyTransferIdsRef = useRef<Set<string>>(new Set());
+  const selectedDevices = useMemo<SelectedRecipientSnapshot[]>(
+    () => selectedDeviceIds.flatMap((deviceId) => {
       const onlineDevice = devices.find((device) => device.deviceId === deviceId);
       const snapshot = onlineDevice ?? selectedRecipientSnapshots[deviceId];
       if (!snapshot) {
         return [];
       }
       const reachability = reachabilityByDeviceId[deviceId];
-      return [{
-        ...snapshot,
-        isOnline: Boolean(onlineDevice),
-        reachability: onlineDevice ? reachability?.status ?? 'checking' : 'unknown',
-        reachabilityError: reachability?.error
-      } satisfies SelectedRecipientSnapshot];
-    });
+      return [
+        {
+          ...snapshot,
+          isOnline: Boolean(onlineDevice),
+          reachability: onlineDevice ? reachability?.status ?? 'checking' : 'unknown',
+          reachabilityError: reachability?.error
+        } satisfies SelectedRecipientSnapshot
+      ];
+    }),
+    [devices, reachabilityByDeviceId, selectedDeviceIds, selectedRecipientSnapshots]
+  );
+  const manifestDevices = useMemo(
+    () => mergeSelectedSnapshotsIntoDeviceList(devices, selectedDeviceIds, selectedRecipientSnapshots),
+    [devices, selectedDeviceIds, selectedRecipientSnapshots]
+  );
+  const retainedSelectedDeviceIds = useMemo(() => {
+    const liveDeviceIds = new Set(devices.map((device) => device.deviceId));
+    return new Set(
+      selectedDeviceIds.filter(
+        (deviceId) => !liveDeviceIds.has(deviceId) && Boolean(selectedRecipientSnapshots[deviceId])
+      )
+    );
+  }, [devices, selectedDeviceIds, selectedRecipientSnapshots]);
   const pairingDevice = devices.find((device) => device.deviceId === pairingDeviceId) ?? null;
   const trustedDeviceKeys = useMemo(
     () => new Set(trustedDevices.map((device) => `${device.deviceId}:${device.trustFingerprint}`)),
@@ -222,10 +342,11 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const offIncomingPairRequest = window.syncFile.onIncomingPairRequest((request) => {
-      setPendingPairRequests((prev) => [...prev, request]);
+      setPendingPairRequests((prev) => upsertPairRequest(prev, request));
     });
     const offPairRequestRemoved = window.syncFile.onPairRequestRemoved((requestId) => {
       setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
+      setBusyPairRequestId((current) => (current === requestId ? null : current));
       setUnreadPairRequestIds((current) => {
         if (!current.has(requestId)) {
           return current;
@@ -243,8 +364,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (devices.length === 0) {
-      setFocusedDeviceId(null);
-      if (isCompactLayout) {
+      setFocusedDeviceId((current) => current ?? selectedDeviceIds[0] ?? null);
+      if (isCompactLayout && selectedDeviceIds.length === 0 && pendingSendFiles.length === 0) {
         setActiveSection('manifest');
       }
       return;
@@ -265,7 +386,7 @@ export function App(): JSX.Element {
       }
       return devices[0]?.deviceId ?? null;
     });
-  }, [devices, isCompactLayout, selectedDeviceIds]);
+  }, [devices, isCompactLayout, pendingSendFiles.length, selectedDeviceIds]);
 
   useEffect(() => {
     if (pendingOffers.length === 0) {
@@ -281,7 +402,6 @@ export function App(): JSX.Element {
   }, [pendingOffers, selectedIncomingOfferId]);
 
   useEffect(() => {
-    let active = true;
     const onlineDeviceIds = new Set(devices.map((device) => device.deviceId));
     for (const deviceId of [...probeKeyByDeviceIdRef.current.keys()]) {
       if (!onlineDeviceIds.has(deviceId)) {
@@ -290,20 +410,22 @@ export function App(): JSX.Element {
     }
 
     setReachabilityByDeviceId((current) => {
+      let changed = false;
       const next: Record<string, DeviceReachability> = {};
       for (const [deviceId, reachability] of Object.entries(current)) {
         if (onlineDeviceIds.has(deviceId)) {
           next[deviceId] = reachability;
+        } else {
+          changed = true;
         }
       }
-      return next;
+      return changed ? next : current;
     });
 
     for (const device of devices) {
       const probeKey = `${device.address}:${device.port}:${device.trustFingerprint}`;
       const previousKey = probeKeyByDeviceIdRef.current.get(device.deviceId);
-      const previousReachability = reachabilityByDeviceId[device.deviceId];
-      if (previousKey === probeKey && previousReachability) {
+      if (previousKey === probeKey) {
         continue;
       }
 
@@ -318,20 +440,29 @@ export function App(): JSX.Element {
       }));
 
       void window.syncFile.probeDevice(device.deviceId).then((reachability) => {
-        if (!active) {
+        if (probeKeyByDeviceIdRef.current.get(device.deviceId) !== probeKey) {
           return;
         }
         setReachabilityByDeviceId((current) => ({
           ...current,
           [device.deviceId]: reachability
         }));
+      }).catch((error) => {
+        if (probeKeyByDeviceIdRef.current.get(device.deviceId) !== probeKey) {
+          return;
+        }
+        setReachabilityByDeviceId((current) => ({
+          ...current,
+          [device.deviceId]: {
+            deviceId: device.deviceId,
+            status: 'unreachable',
+            checkedAt: Date.now(),
+            error: error instanceof Error ? error.message : String(error)
+          }
+        }));
       });
     }
-
-    return () => {
-      active = false;
-    };
-  }, [devices, reachabilityByDeviceId]);
+  }, [devices]);
 
   useEffect(() => {
     if (pendingPairRequests.length === 0) {
@@ -358,12 +489,6 @@ export function App(): JSX.Element {
     mediaQuery.addEventListener('change', updateLayout);
     return () => mediaQuery.removeEventListener('change', updateLayout);
   }, []);
-
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-  }, [isSettingsOpen]);
 
   useEffect(() => {
     for (const offer of pendingOffers) {
@@ -440,7 +565,7 @@ export function App(): JSX.Element {
       if (activeSection !== 'inbox' || document.visibilityState !== 'visible' || !document.hasFocus()) {
         return;
       }
-      if (selectedIncomingOfferId) {
+      if (requestsInboxTab === 'files' && selectedIncomingOfferId) {
         setUnreadOfferIds((current) => {
           if (!current.has(selectedIncomingOfferId)) {
             return current;
@@ -450,7 +575,7 @@ export function App(): JSX.Element {
           return next;
         });
       }
-      if (selectedPairRequestId) {
+      if (requestsInboxTab === 'pairs' && selectedPairRequestId) {
         setUnreadPairRequestIds((current) => {
           if (!current.has(selectedPairRequestId)) {
             return current;
@@ -469,7 +594,7 @@ export function App(): JSX.Element {
       window.removeEventListener('focus', clearVisibleUnread);
       document.removeEventListener('visibilitychange', clearVisibleUnread);
     };
-  }, [activeSection, selectedIncomingOfferId, selectedPairRequestId]);
+  }, [activeSection, requestsInboxTab, selectedIncomingOfferId, selectedPairRequestId]);
 
   useEffect(() => {
     const trackedStatuses = new Set(['completed', 'failed', 'rejected', 'cancelled']);
@@ -487,10 +612,6 @@ export function App(): JSX.Element {
         continue;
       }
 
-      if (isCompactLayout) {
-        setActiveSection('ledger');
-      }
-
       if (transfer.status === 'completed') {
         maybeShowDesktopNotification(
           desktopNotificationsEnabled,
@@ -504,6 +625,15 @@ export function App(): JSX.Element {
           }
         );
       } else {
+        setNotice({
+          kind: 'warn',
+          message: messages.notificationTransferFailedBody(transfer.fileName),
+          action: {
+            label: messages.transferDetails,
+            section: 'ledger',
+            transferId: transfer.transferId
+          }
+        });
         maybeShowDesktopNotification(
           desktopNotificationsEnabled,
           messages.notificationTransferFailedTitle,
@@ -562,10 +692,16 @@ export function App(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (activeSection !== 'ledger' && selectedTransferId) {
+      setSelectedTransferId(null);
+    }
+  }, [activeSection, selectedTransferId]);
+
   async function handleSendFiles(filePaths: string[]): Promise<void> {
     setNotice(null);
     const targetDeviceIds = selectedDevices
-      .filter((device) => device.isOnline && device.reachability !== 'unreachable')
+      .filter(canAttemptRecipientSend)
       .map((device) => device.deviceId);
     if (targetDeviceIds.length === 0) {
       setNotice({
@@ -602,16 +738,8 @@ export function App(): JSX.Element {
       }
     }
 
-    if (successfulDeviceIds.size === targetDeviceIds.length) {
+    if (skippedCount === 0 && successfulDeviceIds.size === targetDeviceIds.length) {
       setPendingSendFiles([]);
-      setSelectedDeviceIds((current) => current.filter((deviceId) => !successfulDeviceIds.has(deviceId)));
-      setSelectedRecipientSnapshots((current) => {
-        const next = { ...current };
-        for (const deviceId of successfulDeviceIds) {
-          delete next[deviceId];
-        }
-        return next;
-      });
       setNotice({
         kind: 'info',
         message: messages.sendQueueStarted(filePaths.length, successfulDeviceIds.size)
@@ -633,7 +761,8 @@ export function App(): JSX.Element {
             targetDeviceIds.length - successfulDeviceIds.size,
             skippedCount
           ),
-          failureReasons
+          failureReasons,
+          messages.failureReason
         )
       });
     } else {
@@ -641,17 +770,18 @@ export function App(): JSX.Element {
         kind: 'warn',
         message: appendFailureReason(
           messages.sendQueuePartial(0, targetDeviceIds.length, skippedCount),
-          failureReasons
+          failureReasons,
+          messages.failureReason
         )
       });
-    }
-
-    if (isCompactLayout) {
-      setActiveSection('ledger');
     }
   }
 
   async function handleAccept(offerId: string): Promise<void> {
+    if (busyOfferId) {
+      return;
+    }
+
     try {
       setBusyOfferId(offerId);
       setUnreadOfferIds((current) => {
@@ -668,6 +798,10 @@ export function App(): JSX.Element {
   }
 
   async function handleReject(offerId: string): Promise<void> {
+    if (busyOfferId) {
+      return;
+    }
+
     try {
       setBusyOfferId(offerId);
       setUnreadOfferIds((current) => {
@@ -692,6 +826,10 @@ export function App(): JSX.Element {
   }
 
   async function handleCancelTransfer(transferId: string): Promise<void> {
+    if (busyTransferIdsRef.current.has(transferId)) {
+      return;
+    }
+
     try {
       markTransferBusy(transferId, true);
       await cancelTransfer(transferId);
@@ -703,6 +841,10 @@ export function App(): JSX.Element {
   }
 
   async function handlePauseTransfer(transferId: string): Promise<void> {
+    if (busyTransferIdsRef.current.has(transferId)) {
+      return;
+    }
+
     try {
       markTransferBusy(transferId, true);
       await pauseTransfer(transferId);
@@ -714,6 +856,10 @@ export function App(): JSX.Element {
   }
 
   async function handleRetryTransfer(transferId: string): Promise<void> {
+    if (busyTransferIdsRef.current.has(transferId)) {
+      return;
+    }
+
     try {
       markTransferBusy(transferId, true);
       await retryTransfer(transferId);
@@ -725,13 +871,24 @@ export function App(): JSX.Element {
   }
 
   async function handleClearTransfers(transferIds: string[]): Promise<void> {
-    if (transferIds.length === 0) {
+    const idleTransferIds = [...new Set(transferIds)].filter(
+      (transferId) => !busyTransferIdsRef.current.has(transferId)
+    );
+
+    if (idleTransferIds.length === 0) {
       return;
     }
     try {
-      await window.syncFile.removeTransferHistoryItems(transferIds);
+      for (const transferId of idleTransferIds) {
+        markTransferBusy(transferId, true);
+      }
+      await window.syncFile.removeTransferHistoryItems(idleTransferIds);
     } catch {
       // Best effort only.
+    } finally {
+      for (const transferId of idleTransferIds) {
+        markTransferBusy(transferId, false);
+      }
     }
   }
 
@@ -763,6 +920,10 @@ export function App(): JSX.Element {
   }
 
   async function handleRefreshDevices(): Promise<void> {
+    if (isRefreshingDevices) {
+      return;
+    }
+
     try {
       setIsRefreshingDevices(true);
       await refreshDevices();
@@ -776,6 +937,10 @@ export function App(): JSX.Element {
   }
 
   async function handleTrustAndAccept(offer: IncomingOffer): Promise<void> {
+    if (busyOfferId) {
+      return;
+    }
+
     try {
       setBusyOfferId(offer.offerId);
       try {
@@ -806,17 +971,29 @@ export function App(): JSX.Element {
   }
 
   async function handlePairDevice(device: Device): Promise<void> {
+    if (busyPairingDeviceId) {
+      return;
+    }
+
     try {
+      setBusyPairingDeviceId(device.deviceId);
       await window.syncFile.pairDevice(device.deviceId);
       await refreshAppSettings();
       setPairingDeviceId(null);
     } catch {
       // Best effort; settings error remains in UI elsewhere.
+    } finally {
+      setBusyPairingDeviceId((current) => (current === device.deviceId ? null : current));
     }
   }
 
   async function handleAcceptPairRequest(requestId: string): Promise<void> {
+    if (busyPairRequestId) {
+      return;
+    }
+
     try {
+      setBusyPairRequestId(requestId);
       setUnreadPairRequestIds((current) => {
         const next = new Set(current);
         next.delete(requestId);
@@ -827,11 +1004,18 @@ export function App(): JSX.Element {
       await refreshAppSettings();
     } catch {
       // Best effort only.
+    } finally {
+      setBusyPairRequestId((current) => (current === requestId ? null : current));
     }
   }
 
   async function handleRejectPairRequest(requestId: string): Promise<void> {
+    if (busyPairRequestId) {
+      return;
+    }
+
     try {
+      setBusyPairRequestId(requestId);
       setUnreadPairRequestIds((current) => {
         const next = new Set(current);
         next.delete(requestId);
@@ -841,6 +1025,8 @@ export function App(): JSX.Element {
       setPendingPairRequests((prev) => prev.filter((request) => request.requestId !== requestId));
     } catch {
       // Best effort only.
+    } finally {
+      setBusyPairRequestId((current) => (current === requestId ? null : current));
     }
   }
 
@@ -865,6 +1051,14 @@ export function App(): JSX.Element {
   const pendingRequestCount = pendingOffers.length + pendingPairRequests.length;
 
   const markTransferBusy = (transferId: string, isBusy: boolean): void => {
+    const nextRef = new Set(busyTransferIdsRef.current);
+    if (isBusy) {
+      nextRef.add(transferId);
+    } else {
+      nextRef.delete(transferId);
+    }
+    busyTransferIdsRef.current = nextRef;
+
     setBusyTransferIds((current) => {
       const next = new Set(current);
       if (isBusy) {
@@ -878,6 +1072,7 @@ export function App(): JSX.Element {
 
   const handleToggleDeviceSelection = (deviceId: string): void => {
     setFocusedDeviceId(deviceId);
+    const wasSelected = selectedDeviceIds.includes(deviceId);
     const device = devices.find((item) => item.deviceId === deviceId);
     if (device) {
       setSelectedRecipientSnapshots((current) => ({
@@ -888,7 +1083,8 @@ export function App(): JSX.Element {
     setSelectedDeviceIds((current) =>
       current.includes(deviceId) ? current.filter((id) => id !== deviceId) : [...current, deviceId]
     );
-    setActiveSection('dispatch');
+    const nextSelectedCount = wasSelected ? selectedDeviceIds.length - 1 : selectedDeviceIds.length + 1;
+    setActiveSection(nextSelectedCount > 0 || pendingSendFiles.length > 0 ? 'dispatch' : 'manifest');
   };
 
   const handleRemoveRecipient = (deviceId: string): void => {
@@ -898,6 +1094,10 @@ export function App(): JSX.Element {
       delete next[deviceId];
       return next;
     });
+    const nextSelectedCount = selectedDeviceIds.filter((id) => id !== deviceId).length;
+    if (nextSelectedCount === 0 && pendingSendFiles.length === 0 && activeSection === 'dispatch') {
+      setActiveSection('manifest');
+    }
   };
 
   const handleOpenRequestsInbox = (): void => {
@@ -937,8 +1137,8 @@ export function App(): JSX.Element {
 
   const handleWorkspaceSectionChange = (section: WorkspaceSection): void => {
     setActiveSection(section);
-    if (section === 'ledger' && transfers[0]) {
-      setSelectedTransferId(transfers[0].transferId);
+    if (section !== 'ledger') {
+      setSelectedTransferId(null);
     }
   };
 
@@ -961,6 +1161,10 @@ export function App(): JSX.Element {
         primaryActiveSendTransfer.status
       )
     : 0;
+  const primaryActiveSendWaitingForReceiver =
+    primaryActiveSendTransfer?.status === 'in-progress' &&
+    primaryActiveSendTransfer.fileSize > 0 &&
+    primaryActiveSendTransfer.bytesTransferred >= primaryActiveSendTransfer.fileSize;
   const sendDraftSummary =
     pendingSendFiles.length > 0
       ? messages.sendDraftSummary(pendingSendFiles.length, selectedDevices.length)
@@ -974,8 +1178,14 @@ export function App(): JSX.Element {
       : selectedDevices.length > 0
         ? sendDraftSummary
         : messages.routeMetaIdle;
+  const primaryActiveSendRate =
+    primaryActiveSendTransfer?.transferRateBytesPerSecond && !primaryActiveSendWaitingForReceiver
+    ? ` · ${formatTransferRate(primaryActiveSendTransfer.transferRateBytesPerSecond)}`
+    : '';
   const statusDetail = primaryActiveSendTransfer
-    ? `${primaryActiveSendPercent}% · ${primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}`
+    ? primaryActiveSendWaitingForReceiver
+      ? `${primaryActiveSendPercent}% · ${messages.transferWaitingForReceiver}`
+      : `${primaryActiveSendPercent}% · ${primaryActiveSendTransfer.peerDeviceName || messages.unknownDevice}${primaryActiveSendRate}`
     : messages.sidebarStatusDetail(pendingOffers.length, pendingPairRequests.length, activeTransferCount);
 
   return (
@@ -1024,7 +1234,7 @@ export function App(): JSX.Element {
           pendingRequestCount={pendingRequestCount}
         />
         {errorMessage && (
-          <div className="error-banner" role="alert">
+          <div className="error-banner" role="alert" aria-live="assertive">
             <span>{errorMessage}</span>
             <button type="button" className="button button-ghost" onClick={clearError}>
               {messages.dismiss}
@@ -1032,8 +1242,27 @@ export function App(): JSX.Element {
           </div>
         )}
         {notice && (
-          <div className={`notice-banner is-${notice.kind}`} role="status">
+          <div
+            className={`notice-banner is-${notice.kind}`}
+            role={notice.kind === 'warn' ? 'alert' : 'status'}
+            aria-live={notice.kind === 'warn' ? 'assertive' : 'polite'}
+          >
             <span>{notice.message}</span>
+            {notice.action && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => {
+                  setActiveSection(notice.action!.section);
+                  if (notice.action!.transferId) {
+                    setSelectedTransferId(notice.action!.transferId);
+                  }
+                  setNotice(null);
+                }}
+              >
+                {notice.action.label}
+              </button>
+            )}
             <button type="button" className="button button-ghost" onClick={() => setNotice(null)}>
               {messages.dismiss}
             </button>
@@ -1046,8 +1275,9 @@ export function App(): JSX.Element {
           {showManifest && (
             <ManifestPanel
               messages={messages}
-              devices={devices}
+              devices={manifestDevices}
               selectedDeviceIds={selectedDeviceIds}
+              retainedDeviceIds={retainedSelectedDeviceIds}
               focusedDeviceId={focusedDeviceId}
               reachabilityByDeviceId={reachabilityByDeviceId}
               trustedDeviceKeys={trustedDeviceKeys}
@@ -1064,13 +1294,14 @@ export function App(): JSX.Element {
               messages={messages}
               selectedDevices={selectedDevices}
               trustedDeviceKeys={trustedDeviceKeys}
+              busyPairingDeviceId={busyPairingDeviceId}
               pendingFiles={pendingSendFiles}
               activeSendTransfers={activeSendTransfers}
               primaryActiveSendTransfer={primaryActiveSendTransfer}
               primaryActiveSendPercent={primaryActiveSendPercent}
               selfDevice={selfDevice}
               onPairDevice={setPairingDeviceId}
-              onSendFiles={(filePaths) => void handleSendFiles(filePaths)}
+              onSendFiles={handleSendFiles}
               onPendingFilesChange={setPendingSendFiles}
               onRemoveRecipient={handleRemoveRecipient}
             />
@@ -1116,6 +1347,7 @@ export function App(): JSX.Element {
               onReject={handleReject}
               pairRequests={pendingPairRequests}
               selectedPairRequestId={selectedPairRequestId}
+              busyPairRequestId={busyPairRequestId}
               selfFingerprint={selfDevice?.trustFingerprint}
               onSelectPairRequest={(requestId) => {
                 setSelectedPairRequestId(requestId);
@@ -1140,6 +1372,7 @@ export function App(): JSX.Element {
         <PairDevicePrompt
           device={pairingDevice}
           selfFingerprint={selfDevice.trustFingerprint}
+          busy={busyPairingDeviceId === pairingDevice.deviceId}
           onConfirm={handlePairDevice}
           onClose={() => setPairingDeviceId(null)}
           messages={messages}

@@ -55,14 +55,16 @@ function basename(filePath: string): string {
 function buildTransferFromEvent(
   previous: RendererTransferProgress | undefined,
   incoming: TransferProgress,
-  now = Date.now()
+  now = Date.now(),
+  fallbackPeerName = ''
 ): RendererTransferProgress {
+  const eventTime = typeof incoming.updatedAt === 'number' ? incoming.updatedAt : now;
   const nextDirection = incoming.direction ?? previous?.direction ?? 'send';
   const nextFileName = incoming.fileName || previous?.fileName || 'unknown-file';
   const nextFileSize = incoming.fileSize > 0 ? incoming.fileSize : previous?.fileSize ?? 0;
   const nextBytesTransferred =
     incoming.bytesTransferred >= 0 ? incoming.bytesTransferred : previous?.bytesTransferred ?? 0;
-  const nextPeerName = incoming.peerDeviceName || previous?.peerDeviceName || 'Unknown device';
+  const nextPeerName = incoming.peerDeviceName || previous?.peerDeviceName || fallbackPeerName;
   const nextPeerId = incoming.peerDeviceId || previous?.peerDeviceId || '';
   const nextStatus = incoming.status ?? previous?.status ?? 'pending';
   const nextError =
@@ -78,7 +80,7 @@ function buildTransferFromEvent(
       fileSize: nextFileSize,
       bytesTransferred: nextBytesTransferred
     },
-    now
+    eventTime
   );
 
   return {
@@ -97,8 +99,10 @@ function buildTransferFromEvent(
     sourceFileModifiedAt: incoming.sourceFileModifiedAt ?? previous?.sourceFileModifiedAt,
     sourceFileSha256: incoming.sourceFileSha256 ?? previous?.sourceFileSha256,
     error: nextError,
-    updatedAt: now,
-    ...telemetry
+    updatedAt: eventTime,
+    ...telemetry,
+    transferRateBytesPerSecond: incoming.transferRateBytesPerSecond ?? telemetry.transferRateBytesPerSecond,
+    estimatedSecondsRemaining: incoming.estimatedSecondsRemaining ?? telemetry.estimatedSecondsRemaining
   };
 }
 
@@ -113,11 +117,22 @@ function buildTransferMap(records: TransferRecord[]): Map<string, RendererTransf
   return map;
 }
 
+function upsertOffer(offers: IncomingOffer[], offer: IncomingOffer): IncomingOffer[] {
+  const existingIndex = offers.findIndex((item) => item.offerId === offer.offerId);
+  if (existingIndex >= 0) {
+    const next = [...offers];
+    next[existingIndex] = offer;
+    return next;
+  }
+  return [offer, ...offers];
+}
+
 export function useSyncFile(messages: Messages): UseSyncFileResult {
   const [selfDevice, setSelfDevice] = useState<Device | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [pendingOffers, setPendingOffers] = useState<IncomingOffer[]>([]);
   const transferMapRef = useRef<Map<string, RendererTransferProgress>>(new Map());
+  const offlineRemovalTimersRef = useRef<Map<string, number>>(new Map());
   const [transferVersion, setTransferVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -142,7 +157,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
         setDevices(list);
         transferMapRef.current = buildTransferMap(history);
         setTransferVersion((version) => version + 1);
-        setPendingOffers(pending);
+        setPendingOffers(dedupeOffers(pending));
       } catch (error) {
         if (!active) {
           return;
@@ -161,6 +176,11 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     void init();
 
     const offOnline = window.syncFile.onDeviceOnline((device) => {
+      const pendingTimer = offlineRemovalTimersRef.current.get(device.deviceId);
+      if (pendingTimer !== undefined) {
+        window.clearTimeout(pendingTimer);
+        offlineRemovalTimersRef.current.delete(device.deviceId);
+      }
       setDevices((prev) => {
         const existed = prev.some((item) => item.deviceId === device.deviceId);
         if (existed) {
@@ -171,11 +191,19 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     });
 
     const offOffline = window.syncFile.onDeviceOffline((deviceId) => {
-      setDevices((prev) => prev.filter((item) => item.deviceId !== deviceId));
+      const previousTimer = offlineRemovalTimersRef.current.get(deviceId);
+      if (previousTimer !== undefined) {
+        window.clearTimeout(previousTimer);
+      }
+      const timer = window.setTimeout(() => {
+        offlineRemovalTimersRef.current.delete(deviceId);
+        setDevices((prev) => prev.filter((item) => item.deviceId !== deviceId));
+      }, 8000);
+      offlineRemovalTimersRef.current.set(deviceId, timer);
     });
 
     const offIncomingOffer = window.syncFile.onIncomingOffer((offer) => {
-      setPendingOffers((prev) => [...prev, offer]);
+      setPendingOffers((prev) => upsertOffer(prev, offer));
     });
 
     const offSelfDeviceUpdated = window.syncFile.onSelfDeviceUpdated((device) => {
@@ -191,7 +219,7 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       const map = transferMapRef.current;
       map.set(
         progress.transferId,
-        buildTransferFromEvent(map.get(progress.transferId), progress)
+        buildTransferFromEvent(map.get(progress.transferId), progress, Date.now(), messagesRef.current.unknownDevice)
       );
       setTransferVersion((version) => version + 1);
     };
@@ -215,6 +243,10 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       offTransferHistoryReset();
       offTransferProgress();
       offTransferComplete();
+      for (const timer of offlineRemovalTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      offlineRemovalTimersRef.current.clear();
     };
   }, []);
 
@@ -255,24 +287,39 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
       const transferId = await window.syncFile.sendFile(deviceId, filePath, existingTransferId, batchMeta);
       const target = devices.find((device) => device.deviceId === deviceId);
       const previous = transferMapRef.current.get(transferId.value);
-      transferMapRef.current.set(
-        transferId.value,
-        buildTransferFromEvent(previous, {
-          transferId: transferId.value,
-          batchId: batchMeta?.batchId,
-          batchLabel: batchMeta?.batchLabel,
-          direction: 'send',
-          fileName: basename(filePath),
-          fileSize: previous?.fileSize ?? 0,
-          bytesTransferred: previous?.bytesTransferred ?? 0,
-          peerDeviceName: target?.name ?? 'Unknown device',
-          peerDeviceId: target?.deviceId ?? '',
-          status: 'pending',
-          localPath: filePath,
-          sourceFileModifiedAt: previous?.sourceFileModifiedAt,
-          sourceFileSha256: previous?.sourceFileSha256
-        })
-      );
+      const unknownDeviceName = messagesRef.current.unknownDevice;
+      if (previous) {
+        transferMapRef.current.set(transferId.value, {
+          ...previous,
+          batchId: previous.batchId ?? batchMeta?.batchId,
+          batchLabel: previous.batchLabel ?? batchMeta?.batchLabel,
+          localPath: previous.localPath ?? filePath,
+          peerDeviceName:
+            previous.peerDeviceName === unknownDeviceName || previous.peerDeviceName === 'Unknown device'
+              ? target?.name ?? unknownDeviceName
+              : previous.peerDeviceName,
+          peerDeviceId: previous.peerDeviceId || target?.deviceId || deviceId
+        });
+      } else {
+        transferMapRef.current.set(
+          transferId.value,
+          buildTransferFromEvent(undefined, {
+            transferId: transferId.value,
+            batchId: batchMeta?.batchId,
+            batchLabel: batchMeta?.batchLabel,
+            direction: 'send',
+            fileName: basename(filePath),
+            fileSize: 0,
+            bytesTransferred: 0,
+            peerDeviceName: target?.name ?? unknownDeviceName,
+            peerDeviceId: target?.deviceId ?? deviceId,
+            status: 'pending',
+            localPath: filePath,
+            sourceFileModifiedAt: undefined,
+            sourceFileSha256: undefined
+          })
+        );
+      }
       setTransferVersion((version) => version + 1);
       return transferId;
     } catch (error) {
@@ -371,6 +418,14 @@ export function useSyncFile(messages: Messages): UseSyncFileResult {
     rejectOffer,
     openSandbox
   };
+}
+
+function dedupeOffers(offers: IncomingOffer[]): IncomingOffer[] {
+  const byId = new Map<string, IncomingOffer>();
+  for (const offer of offers) {
+    byId.set(offer.offerId, offer);
+  }
+  return [...byId.values()].sort((left, right) => right.receivedAt - left.receivedAt);
 }
 
 function localizeError(error: unknown, messages: Messages): string | null {

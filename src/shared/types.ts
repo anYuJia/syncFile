@@ -56,6 +56,9 @@ export interface TransferProgress {
   sourceFileModifiedAt?: number;
   sourceFileSha256?: string;
   error?: string;
+  transferRateBytesPerSecond?: number;
+  estimatedSecondsRemaining?: number;
+  updatedAt?: number;
 }
 
 export interface TransferRecord extends TransferProgress {

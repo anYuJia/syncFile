@@ -33,6 +33,7 @@ export function PairDevicePrompt({
         role="dialog"
         aria-modal="true"
         aria-label={messages.pairPromptTitle}
+        aria-busy={busy}
         tabIndex={-1}
       >
         <div className="receive-prompt-stamp">{messages.pairDevice}</div>
@@ -54,8 +55,14 @@ export function PairDevicePrompt({
           <button type="button" className="button button-muted" onClick={onClose} disabled={busy}>
             {messages.pairPromptCancel}
           </button>
-          <button type="button" className="button" onClick={() => onConfirm(device)} disabled={busy}>
-            {messages.pairPromptConfirm}
+          <button
+            type="button"
+            className="button"
+            onClick={() => void onConfirm(device)}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            {busy ? messages.pairDeviceBusy : messages.pairPromptConfirm}
           </button>
         </div>
       </div>

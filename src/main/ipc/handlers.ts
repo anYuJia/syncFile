@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { basename, join, parse, resolve } from 'path';
-import { accessSync, constants, mkdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { accessSync, constants, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 
 import { BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from 'electron';
 
@@ -123,6 +123,23 @@ function validateSandboxRoot(rootPath: string): string {
   return resolvedPath;
 }
 
+function collectRegularFilePaths(rootPath: string, files: string[] = []): string[] {
+  for (const entry of readdirSync(rootPath, { withFileTypes: true })) {
+    const entryPath = join(rootPath, entry.name);
+    if (entry.isDirectory()) {
+      try {
+        collectRegularFilePaths(entryPath, files);
+      } catch {
+        // Ignore unreadable nested folders; the selected readable files are still useful.
+      }
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
 interface PendingOffer {
   info: IncomingOfferInfo;
   responder: OfferResponder;
@@ -198,6 +215,8 @@ export const handledIpcChannels = [
   IpcChannels.GetSandboxLocation,
   IpcChannels.ChooseSandboxLocation,
   IpcChannels.SelectFile,
+  IpcChannels.SelectFiles,
+  IpcChannels.SelectFolderFiles,
   IpcChannels.GetSettings,
   IpcChannels.SaveSettings,
   IpcChannels.SaveProfile,
@@ -927,7 +946,9 @@ export function registerIpcHandlers(context: IpcContext): void {
       existingTransferId?: string,
       batchMeta?: { batchId?: string; batchLabel?: string }
     ): Promise<TransferId> => {
-      const device = context.registry.list().find((candidate) => candidate.deviceId === deviceId);
+      const device =
+        context.registry.list().find((candidate) => candidate.deviceId === deviceId) ??
+        context.registry.listAll().find((candidate) => candidate.deviceId === deviceId);
       if (!device) {
         context.logger?.warn('transfer', 'send requested for unknown device', { deviceId, filePath });
         throw new Error(`device ${deviceId} not found`);
@@ -1048,6 +1069,17 @@ export function registerIpcHandlers(context: IpcContext): void {
       if (!cancelled) {
         throw new Error(`transfer ${transferId} not found`);
       }
+      return;
+    }
+
+    const pausedSend = context.transferHistoryStore.get(transferId);
+    if (pausedSend?.direction === 'send' && pausedSend.status === 'paused') {
+      publishTransferEvent(IpcChannels.TransferProgress, {
+        ...pausedSend,
+        status: 'cancelled',
+        error: 'Transfer cancelled.',
+        updatedAt: Date.now()
+      });
       return;
     }
 
@@ -1211,6 +1243,39 @@ export function registerIpcHandlers(context: IpcContext): void {
       return null;
     }
     return selected.filePaths[0];
+  });
+
+  ipcMain.handle(IpcChannels.SelectFiles, async (): Promise<string[]> => {
+    const window = context.getWindow();
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Select Files',
+      properties: ['openFile', 'multiSelections']
+    };
+    const selected = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (selected.canceled) {
+      return [];
+    }
+    return selected.filePaths;
+  });
+
+  ipcMain.handle(IpcChannels.SelectFolderFiles, async (): Promise<string[]> => {
+    const window = context.getWindow();
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Select Folder',
+      properties: ['openDirectory']
+    };
+    const selected = window
+      ? await dialog.showOpenDialog(window, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (selected.canceled || selected.filePaths.length === 0) {
+      return [];
+    }
+
+    return collectRegularFilePaths(selected.filePaths[0]).sort((left, right) => left.localeCompare(right));
   });
 
   ipcMain.handle(IpcChannels.GetSettings, async (): Promise<SettingsPayload> => {

@@ -57,6 +57,8 @@ pub fn run() {
             commands::get_runtime_logs,
             commands::clear_runtime_logs,
             commands::select_file,
+            commands::select_files,
+            commands::select_folder_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

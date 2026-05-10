@@ -41,14 +41,18 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     resumableTransferBytes: 0
   });
   const [saving, setSaving] = useState(false);
-  const [choosingSandbox, setChoosingSandbox] = useState(false);
+  const [settingsAction, setSettingsAction] = useState<
+    'open-sandbox' | 'choose-sandbox' | 'clear-history' | 'clear-resume-cache' | null
+  >(null);
+  const [requestingNotificationPermission, setRequestingNotificationPermission] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [confirmingAction, setConfirmingAction] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
     return typeof window.Notification?.permission === 'string' ? window.Notification.permission : 'default';
   });
   const api = window.syncFile as SettingsApi;
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const busy = saving || choosingSandbox;
+  const busy = saving || settingsAction !== null || requestingNotificationPermission;
   const handleClose = (): void => {
     if (!busy) {
       onClose();
@@ -88,8 +92,19 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     void refreshSettings();
   }, []);
 
+  useEffect(() => {
+    if (!confirmingAction) {
+      return;
+    }
+    const timer = window.setTimeout(() => setConfirmingAction(null), 3600);
+    return () => window.clearTimeout(timer);
+  }, [confirmingAction]);
+
   const handleOpenSandbox = async (): Promise<void> => {
-    setChoosingSandbox(true);
+    if (busy) {
+      return;
+    }
+    setSettingsAction('open-sandbox');
     try {
       setInlineError(null);
       await window.syncFile.openSandbox();
@@ -97,11 +112,14 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.failedToOpenSandbox);
     } finally {
-      setChoosingSandbox(false);
+      setSettingsAction(null);
     }
   };
 
   const handleSave = async (): Promise<void> => {
+    if (busy) {
+      return;
+    }
     setSaving(true);
     try {
       setInlineError(null);
@@ -109,7 +127,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         throw new Error(messages.failedToLoadDeviceInformation);
       }
       if (profileName.trim().length === 0) {
-        throw new Error(messages.settingsProfileName);
+        throw new Error(messages.settingsProfileNameRequired);
       }
       const normalized: Settings = {
         ...settings,
@@ -141,10 +159,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   };
 
   const handleChooseSandbox = async (): Promise<void> => {
-    if (typeof api.chooseSandboxLocation !== 'function') {
+    if (busy || typeof api.chooseSandboxLocation !== 'function') {
       return;
     }
-    setChoosingSandbox(true);
+    setSettingsAction('choose-sandbox');
     try {
       setInlineError(null);
       const selected = await api.chooseSandboxLocation();
@@ -155,7 +173,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.settingsSandboxFolder);
     } finally {
-      setChoosingSandbox(false);
+      setSettingsAction(null);
     }
   };
 
@@ -166,18 +184,33 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const displayPath = sandboxLocation?.path ?? '';
 
   const handleRequestNotificationPermission = async (): Promise<void> => {
-    if (typeof window.Notification?.requestPermission !== 'function') {
+    if (
+      requestingNotificationPermission ||
+      busy ||
+      typeof window.Notification?.requestPermission !== 'function'
+    ) {
       return;
     }
     try {
+      setRequestingNotificationPermission(true);
       const result = await window.Notification.requestPermission();
       setNotificationPermission(result);
     } catch {
       // Best effort only.
+    } finally {
+      setRequestingNotificationPermission(false);
     }
   };
 
   const handleRemoveTrustedDevice = (deviceId: string, trustFingerprint: string): void => {
+    if (busy) {
+      return;
+    }
+    const actionKey = `trusted:${deviceId}:${trustFingerprint}`;
+    if (confirmingAction !== actionKey) {
+      setConfirmingAction(actionKey);
+      return;
+    }
     setSettings((current) => ({
       ...current,
       trustedDevices: current.trustedDevices.filter(
@@ -185,9 +218,13 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
           !(device.deviceId === deviceId && device.trustFingerprint === trustFingerprint)
       )
     }));
+    setConfirmingAction(null);
   };
 
   const handlePickAvatar = (): void => {
+    if (busy) {
+      return;
+    }
     avatarInputRef.current?.click();
   };
 
@@ -195,6 +232,9 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) {
+      return;
+    }
+    if (busy) {
       return;
     }
     try {
@@ -206,33 +246,55 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   };
 
   const handleClearTransferHistory = async (): Promise<void> => {
-    setChoosingSandbox(true);
+    if (busy || maintenance.transferHistoryCount === 0) {
+      return;
+    }
+    if (confirmingAction !== 'clear-history') {
+      setConfirmingAction('clear-history');
+      return;
+    }
+    setSettingsAction('clear-history');
     try {
       setInlineError(null);
       await window.syncFile.clearTransferHistory();
       await refreshSettings();
+      setConfirmingAction(null);
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.settingsClearTransferHistory);
     } finally {
-      setChoosingSandbox(false);
+      setSettingsAction(null);
     }
   };
 
   const handleClearResumeCache = async (): Promise<void> => {
-    setChoosingSandbox(true);
+    if (busy || maintenance.resumableTransferCount === 0) {
+      return;
+    }
+    if (confirmingAction !== 'clear-resume-cache') {
+      setConfirmingAction('clear-resume-cache');
+      return;
+    }
+    setSettingsAction('clear-resume-cache');
     try {
       setInlineError(null);
       await window.syncFile.clearResumeCache();
       await refreshSettings();
+      setConfirmingAction(null);
     } catch (error) {
       setInlineError(error instanceof Error ? error.message : messages.settingsClearResumeCache);
     } finally {
-      setChoosingSandbox(false);
+      setSettingsAction(null);
     }
   };
 
   const handleScrollToSettingsSection = (sectionId: string): void => {
-    document.getElementById(sectionId)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (busy) {
+      return;
+    }
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document
+      .getElementById(sectionId)
+      ?.scrollIntoView({ block: 'start', behavior: prefersReducedMotion ? 'auto' : 'smooth' });
   };
 
   const content = (
@@ -244,11 +306,18 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
+        aria-busy={busy}
         tabIndex={-1}
       >
         <div className="settings-shell">
           <aside className="settings-rail" aria-label={messages.settings}>
-            <button type="button" className="settings-back" onClick={handleClose} aria-label={messages.dismiss}>
+            <button
+              type="button"
+              className="settings-back"
+              onClick={handleClose}
+              disabled={busy}
+              aria-label={messages.dismiss}
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M15 18l-6-6 6-6" />
               </svg>
@@ -259,19 +328,39 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
               <p>{messages.settingsReceiveSectionDesc}</p>
             </div>
             <nav className="settings-rail-nav" aria-label={messages.settings}>
-              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-profile')}>
+              <button
+                type="button"
+                className="settings-rail-link"
+                onClick={() => handleScrollToSettingsSection('settings-profile')}
+                disabled={busy}
+              >
                 <span>01</span>
                 {messages.settingsProfileSection}
               </button>
-              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-receive')}>
+              <button
+                type="button"
+                className="settings-rail-link"
+                onClick={() => handleScrollToSettingsSection('settings-receive')}
+                disabled={busy}
+              >
                 <span>02</span>
                 {messages.settingsReceiveSection}
               </button>
-              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-storage')}>
+              <button
+                type="button"
+                className="settings-rail-link"
+                onClick={() => handleScrollToSettingsSection('settings-storage')}
+                disabled={busy}
+              >
                 <span>03</span>
                 {messages.settingsStorageSection}
               </button>
-              <button type="button" className="settings-rail-link" onClick={() => handleScrollToSettingsSection('settings-maintenance')}>
+              <button
+                type="button"
+                className="settings-rail-link"
+                onClick={() => handleScrollToSettingsSection('settings-maintenance')}
+                disabled={busy}
+              >
                 <span>04</span>
                 {messages.settingsMaintenanceSection}
               </button>
@@ -297,7 +386,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             </div>
 
             <div className="settings-body">
-          {inlineError && <div className="settings-error-banner">{inlineError}</div>}
+          {inlineError && <div className="settings-error-banner" role="alert">{inlineError}</div>}
 
           <section id="settings-profile" className="settings-section">
             <div className="settings-section-head">
@@ -354,6 +443,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                       className="settings-input settings-profile-input"
                       maxLength={64}
                       value={profileName}
+                      disabled={busy}
                       onChange={(event) => setProfileName(event.target.value)}
                     />
                     <span className="settings-desc">{messages.settingsProfileAvatarDesc}</span>
@@ -388,7 +478,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   <button
                     type="button"
                     className={`settings-toggle${settings.autoAccept ? ' is-on' : ''}`}
-                    onClick={() => setSettings({ ...settings, autoAccept: !settings.autoAccept })}
+                    onClick={() =>
+                      setSettings((current) => ({ ...current, autoAccept: !current.autoAccept }))
+                    }
+                    disabled={busy}
                     role="switch"
                     aria-checked={settings.autoAccept}
                   >
@@ -407,9 +500,12 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     min={1}
                     max={102400}
                     value={settings.autoAcceptMaxSizeMB}
-                    disabled={!settings.autoAccept}
+                    disabled={busy || !settings.autoAccept}
                     onChange={(e) =>
-                      setSettings({ ...settings, autoAcceptMaxSizeMB: Math.max(0, Number(e.target.value)) })
+                      setSettings((current) => ({
+                        ...current,
+                        autoAcceptMaxSizeMB: Math.max(0, Number(e.target.value))
+                      }))
                     }
                   />
                   <span className="settings-unit">{messages.settingsMaxSandboxSizeUnit}</span>
@@ -427,8 +523,12 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     type="button"
                     className={`settings-toggle${settings.openReceivedFolder ? ' is-on' : ''}`}
                     onClick={() =>
-                      setSettings({ ...settings, openReceivedFolder: !settings.openReceivedFolder })
+                      setSettings((current) => ({
+                        ...current,
+                        openReceivedFolder: !current.openReceivedFolder
+                      }))
                     }
+                    disabled={busy}
                     role="switch"
                     aria-checked={settings.openReceivedFolder}
                   >
@@ -447,32 +547,40 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     type="button"
                     className={`settings-toggle${settings.desktopNotifications ? ' is-on' : ''}`}
                     onClick={() =>
-                      setSettings({ ...settings, desktopNotifications: !settings.desktopNotifications })
+                      setSettings((current) => ({
+                        ...current,
+                        desktopNotifications: !current.desktopNotifications
+                      }))
                     }
+                    disabled={busy}
                     role="switch"
                     aria-checked={settings.desktopNotifications}
+                  >
+                    <span className="settings-toggle-knob" />
+                  </button>
+                </div>
+                <div className="settings-note settings-inline-note">
+                  {notificationPermission === 'granted'
+                    ? messages.settingsNotificationsPermissionGranted
+                    : notificationPermission === 'denied'
+                      ? messages.settingsNotificationsPermissionDenied
+                      : messages.settingsNotificationsPermissionDefault}
+                </div>
+                {notificationPermission === 'default' && (
+                  <div className="settings-inline-actions">
+                    <button
+                      type="button"
+                      className="button button-muted"
+                      onClick={() => void handleRequestNotificationPermission()}
+                      disabled={busy}
+                      aria-busy={requestingNotificationPermission}
                     >
-                      <span className="settings-toggle-knob" />
+                      {requestingNotificationPermission
+                        ? messages.settingsNotificationsRequestingPermission
+                        : messages.settingsNotificationsRequestPermission}
                     </button>
                   </div>
-                  <div className="settings-note settings-inline-note">
-                    {notificationPermission === 'granted'
-                      ? messages.settingsNotificationsPermissionGranted
-                      : notificationPermission === 'denied'
-                        ? messages.settingsNotificationsPermissionDenied
-                        : messages.settingsNotificationsPermissionDefault}
-                  </div>
-                  {notificationPermission === 'default' && (
-                    <div className="settings-inline-actions">
-                      <button
-                        type="button"
-                        className="button button-muted"
-                        onClick={() => void handleRequestNotificationPermission()}
-                      >
-                        {messages.settingsNotificationsRequestPermission}
-                      </button>
-                    </div>
-                  )}
+                )}
                 </div>
 
               <div className="settings-card">
@@ -483,23 +591,33 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   <div className="settings-empty-state">{messages.settingsTrustedDevicesEmpty}</div>
                 ) : (
                   <div className="settings-trusted-list">
-                    {settings.trustedDevices.map((device) => (
-                      <div key={device.deviceId} className="settings-trusted-item">
-                        <div className="settings-trusted-copy">
-                          <span className="settings-trusted-name">{device.name}</span>
-                          <span className="settings-trusted-id">
-                            ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="button button-ghost"
-                          onClick={() => handleRemoveTrustedDevice(device.deviceId, device.trustFingerprint)}
+                    {settings.trustedDevices.map((device) => {
+                      const removeActionKey = `trusted:${device.deviceId}:${device.trustFingerprint}`;
+                      const confirmingRemove = confirmingAction === removeActionKey;
+                      return (
+                        <div
+                          key={device.deviceId}
+                          className={`settings-trusted-item${confirmingRemove ? ' is-confirming' : ''}`}
                         >
-                          {messages.settingsTrustedDevicesRemove}
-                        </button>
-                      </div>
-                    ))}
+                          <div className="settings-trusted-copy">
+                            <span className="settings-trusted-name">{device.name}</span>
+                            <span className="settings-trusted-id">
+                              ID {device.deviceId.slice(0, 8)} · {messages.deviceFingerprintLabel} {device.trustFingerprint}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className={`button button-ghost${confirmingRemove ? ' is-danger-confirm' : ''}`}
+                            onClick={() => handleRemoveTrustedDevice(device.deviceId, device.trustFingerprint)}
+                            disabled={busy}
+                          >
+                            {confirmingRemove
+                              ? messages.settingsTrustedDevicesRemoveConfirm
+                              : messages.settingsTrustedDevicesRemove}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -523,8 +641,12 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     min={64}
                     max={102400}
                     value={settings.maxSandboxSizeMB}
+                    disabled={busy}
                     onChange={(e) =>
-                      setSettings({ ...settings, maxSandboxSizeMB: Math.max(0, Number(e.target.value)) })
+                      setSettings((current) => ({
+                        ...current,
+                        maxSandboxSizeMB: Math.max(0, Number(e.target.value))
+                      }))
                     }
                   />
                   <span className="settings-unit">{messages.settingsMaxSandboxSizeUnit}</span>
@@ -570,6 +692,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     className="button button-muted"
                     onClick={() => void handleOpenSandbox()}
                     disabled={busy}
+                    aria-busy={settingsAction === 'open-sandbox'}
                   >
                     {messages.openSandbox}
                   </button>
@@ -578,6 +701,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     className="button button-muted"
                     onClick={() => void handleChooseSandbox()}
                     disabled={busy}
+                    aria-busy={settingsAction === 'choose-sandbox'}
                   >
                     {messages.settingsChangeSandboxFolder}
                   </button>
@@ -593,22 +717,25 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             </div>
 
             <div className="settings-card-list">
-              <div className="settings-card">
+              <div className={`settings-card${confirmingAction === 'clear-history' ? ' is-confirming' : ''}`}>
                 <div className="settings-maintenance-metric">
                   <span className="settings-label">{messages.settingsTransferHistoryCount}</span>
                   <span className="settings-maintenance-value">{maintenance.transferHistoryCount}</span>
                 </div>
                 <button
                   type="button"
-                  className="button button-muted"
+                  className={`button button-muted${confirmingAction === 'clear-history' ? ' is-danger-confirm' : ''}`}
                   onClick={() => void handleClearTransferHistory()}
                   disabled={busy || maintenance.transferHistoryCount === 0}
+                  aria-busy={settingsAction === 'clear-history'}
                 >
-                  {messages.settingsClearTransferHistory}
+                  {confirmingAction === 'clear-history'
+                    ? messages.settingsClearTransferHistoryConfirm
+                    : messages.settingsClearTransferHistory}
                 </button>
               </div>
 
-              <div className="settings-card">
+              <div className={`settings-card${confirmingAction === 'clear-resume-cache' ? ' is-confirming' : ''}`}>
                 <div className="settings-maintenance-metric">
                   <span className="settings-label">{messages.settingsResumeCacheCount}</span>
                   <span className="settings-maintenance-value">{maintenance.resumableTransferCount}</span>
@@ -621,11 +748,14 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 </div>
                 <button
                   type="button"
-                  className="button button-muted"
+                  className={`button button-muted${confirmingAction === 'clear-resume-cache' ? ' is-danger-confirm' : ''}`}
                   onClick={() => void handleClearResumeCache()}
                   disabled={busy || maintenance.resumableTransferCount === 0}
+                  aria-busy={settingsAction === 'clear-resume-cache'}
                 >
-                  {messages.settingsClearResumeCache}
+                  {confirmingAction === 'clear-resume-cache'
+                    ? messages.settingsClearResumeCacheConfirm
+                    : messages.settingsClearResumeCache}
                 </button>
               </div>
             </div>
@@ -641,8 +771,9 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 className="button"
                 disabled={busy}
                 onClick={() => void handleSave()}
+                aria-busy={saving}
               >
-                {messages.settingsSave}
+                {saving ? messages.settingsSaving : messages.settingsSave}
               </button>
             </div>
           </main>
