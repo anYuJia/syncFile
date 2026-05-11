@@ -271,7 +271,7 @@ export function App(): JSX.Element {
   });
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem(THEME_KEY);
-    return saved ? saved === 'dark' : true;
+    return saved ? saved === 'dark' : false;
   });
   const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => {
     return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
