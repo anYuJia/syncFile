@@ -74,6 +74,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
 
     let identity = load_or_create_identity(&data_dir);
     let persistent_settings = load_settings(&data_dir);
+    let runtime_settings = commands::Settings::from(persistent_settings.clone());
     let trusted_devices = persistent_settings.trusted_devices.clone();
     let sandbox_path = persistent_settings
         .sandbox_location
@@ -86,6 +87,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
+    let mut transfer_history_changed = false;
     for record in &mut transfer_history {
         if record.direction == "send" && matches!(record.status.as_str(), "pending" | "in-progress")
         {
@@ -93,6 +95,7 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
             record.error =
                 Some("App restarted before transfer completion. Retry to continue.".to_string());
             record.updated_at = now;
+            transfer_history_changed = true;
         }
     }
     for resume in sandbox.list_resume_entries() {
@@ -120,6 +123,10 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
             error: Some("Partial receive cached. Sender retry can resume.".to_string()),
             updated_at: now,
         });
+        transfer_history_changed = true;
+    }
+    if transfer_history_changed {
+        let _ = storage::persistent::save_transfer_history(&data_dir, &transfer_history);
     }
     let device_registry = Arc::new(DeviceRegistry::new());
 
@@ -154,13 +161,13 @@ async fn bootstrap(app_handle: tauri::AppHandle) {
         identity: Arc::new(RwLock::new(identity)),
         sandbox: sandbox.clone(),
         settings: RwLock::new(commands::Settings {
-            max_sandbox_size_mb: persistent_settings.max_sandbox_size_mb,
-            auto_accept: persistent_settings.auto_accept,
-            auto_accept_max_size_mb: persistent_settings.auto_accept_max_size_mb,
-            open_received_folder: persistent_settings.open_received_folder,
-            trusted_devices: trusted_devices.clone(),
-            desktop_notifications: persistent_settings.desktop_notifications,
-            sandbox_location: persistent_settings.sandbox_location,
+            max_sandbox_size_mb: runtime_settings.max_sandbox_size_mb,
+            auto_accept: runtime_settings.auto_accept,
+            auto_accept_max_size_mb: runtime_settings.auto_accept_max_size_mb,
+            open_received_folder: runtime_settings.open_received_folder,
+            trusted_devices: runtime_settings.trusted_devices.clone(),
+            desktop_notifications: runtime_settings.desktop_notifications,
+            sandbox_location: runtime_settings.sandbox_location,
         }),
         pending_offers: RwLock::new(Vec::new()),
         pending_pair_responses: RwLock::new(std::collections::HashMap::new()),

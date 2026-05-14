@@ -23,9 +23,7 @@ pub fn load_or_create_identity(data_dir: &Path) -> DeviceIdentity {
     }
 
     let identity = generate_identity();
-    if let Ok(json) = serde_json::to_string_pretty(&identity) {
-        let _ = std::fs::write(path, json);
-    }
+    let _ = save_identity(data_dir, &identity);
     identity
 }
 
@@ -50,7 +48,5 @@ fn generate_identity() -> DeviceIdentity {
 
 pub fn save_identity(data_dir: &Path, identity: &DeviceIdentity) -> std::io::Result<()> {
     let path = data_dir.join("identity.json");
-    let json = serde_json::to_string_pretty(identity)?;
-    std::fs::write(path, json)?;
-    Ok(())
+    crate::storage::persistent::save_json_atomic(&path, identity)
 }

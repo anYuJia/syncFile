@@ -1,5 +1,5 @@
 //! Tauri IPC 命令实现
-//! 与 Electron ipcMain 一一对应的命令处理函数
+//! Tauri command handlers exposed to the React renderer.
 
 use crate::discovery::device_registry::DeviceRegistry;
 use crate::discovery::mdns_service::MdnsService;
@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 use tauri::{command, AppHandle, Emitter, State};
 use tokio::sync::{oneshot, Mutex, RwLock};
 use uuid::Uuid;
@@ -430,6 +430,39 @@ fn transfer_live_metrics(
     (Some(rate), eta)
 }
 
+fn file_modified_ms(metadata: &std::fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+}
+
+fn source_file_changed(
+    record: &TransferRecord,
+    file_size: u64,
+    modified_at: Option<u64>,
+    sha256: Option<&str>,
+) -> bool {
+    if record.file_size > 0 && record.file_size != file_size {
+        return true;
+    }
+
+    if let (Some(recorded), Some(current)) = (record.source_file_modified_at, modified_at) {
+        if recorded != current {
+            return true;
+        }
+    }
+
+    if let (Some(recorded), Some(current)) = (record.source_file_sha256.as_deref(), sha256) {
+        if !recorded.eq_ignore_ascii_case(current) {
+            return true;
+        }
+    }
+
+    false
+}
+
 async fn persist_settings(state: &AppStateInner, settings: &Settings) -> Result<(), String> {
     let data_dir = state.data_dir.read().await.clone();
     persistent::save_settings(&data_dir, &PersistentSettings::from(settings.clone()))
@@ -760,6 +793,7 @@ pub async fn send_file(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<TransferId, String> {
+    let requested_transfer_id = existing_transfer_id.clone();
     let transfer_id = existing_transfer_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // 获取目标设备信息
@@ -803,8 +837,8 @@ pub async fn send_file(
         .to_string();
 
     // 获取文件大小
-    let file_size = match tokio::fs::metadata(&file_path).await {
-        Ok(meta) => meta.len(),
+    let file_metadata = match tokio::fs::metadata(&file_path).await {
+        Ok(meta) => meta,
         Err(e) => {
             push_runtime_log(
                 state.inner().as_ref(),
@@ -829,6 +863,35 @@ pub async fn send_file(
             ));
         }
     };
+    let file_size = file_metadata.len();
+    let file_modified_at = file_modified_ms(&file_metadata);
+
+    let retry_record = if let Some(existing_transfer_id) = requested_transfer_id.as_ref() {
+        let history = state.transfer_history.read().await;
+        history
+            .iter()
+            .find(|record| record.transfer_id == *existing_transfer_id)
+            .cloned()
+    } else {
+        None
+    };
+
+    if let Some(record) = retry_record.as_ref() {
+        if source_file_changed(record, file_size, file_modified_at, None) {
+            push_runtime_log(
+                state.inner().as_ref(),
+                "error",
+                "transfer",
+                "send preflight failed",
+                Some(format!(
+                    "transferId={} reason=source-file-changed file={} path={} peerDeviceId={} peerName={}",
+                    transfer_id, file_name, file_path, device.device_id, device.name
+                )),
+            )
+            .await;
+            return Err("source file changed since the previous transfer attempt".to_string());
+        }
+    }
 
     // 创建 SecureIdentity
     let identity = state.identity.read().await;
@@ -889,7 +952,7 @@ pub async fn send_file(
                             status: "failed".to_string(),
                             receive_mode: None,
                             local_path: Some(file_path_clone.clone()),
-                            source_file_modified_at: None,
+                            source_file_modified_at: file_modified_at,
                             source_file_sha256: None,
                             error: Some(error.clone()),
                             transfer_rate_bytes_per_second: None,
@@ -912,7 +975,7 @@ pub async fn send_file(
                             status: "failed".to_string(),
                             receive_mode: None,
                             local_path: Some(file_path_clone),
-                            source_file_modified_at: None,
+                            source_file_modified_at: file_modified_at,
                             source_file_sha256: None,
                             error: Some(error),
                             updated_at: now,
@@ -927,6 +990,49 @@ pub async fn send_file(
                     return;
                 }
             };
+
+        if let Some(record) = retry_record.as_ref() {
+            if source_file_changed(record, file_size, file_modified_at, Some(&sha256)) {
+                let error = "source file changed since the previous transfer attempt".to_string();
+                let now = now_ms();
+                let failed_record = TransferRecord {
+                    status: "failed".to_string(),
+                    error: Some(error.clone()),
+                    updated_at: now,
+                    ..record.clone()
+                };
+                let _ = app_handle_clone.emit(
+                    "transfer-progress",
+                    TransferProgress {
+                        transfer_id: failed_record.transfer_id.clone(),
+                        batch_id: failed_record.batch_id.clone(),
+                        batch_label: failed_record.batch_label.clone(),
+                        direction: failed_record.direction.clone(),
+                        file_name: failed_record.file_name.clone(),
+                        file_size: failed_record.file_size,
+                        bytes_transferred: failed_record.bytes_transferred,
+                        peer_device_name: failed_record.peer_device_name.clone(),
+                        peer_device_id: failed_record.peer_device_id.clone(),
+                        status: failed_record.status.clone(),
+                        receive_mode: failed_record.receive_mode.clone(),
+                        local_path: failed_record.local_path.clone(),
+                        source_file_modified_at: failed_record.source_file_modified_at,
+                        source_file_sha256: failed_record.source_file_sha256.clone(),
+                        error: failed_record.error.clone(),
+                        transfer_rate_bytes_per_second: None,
+                        estimated_seconds_remaining: None,
+                        updated_at: Some(now),
+                    },
+                );
+                let _ = persist_transfer_record(state_clone.as_ref(), failed_record).await;
+                state_clone
+                    .outbound_transfer_controls
+                    .write()
+                    .await
+                    .remove(&transfer_id_clone);
+                return;
+            }
+        }
 
         let client = crate::transfer::tcp::TcpClient::new(self_device);
         let sent_bytes = Arc::new(AtomicU64::new(0));
@@ -960,7 +1066,7 @@ pub async fn send_file(
                         status: "in-progress".to_string(),
                         receive_mode: None,
                         local_path: Some(progress_file_path.clone()),
-                        source_file_modified_at: None,
+                        source_file_modified_at: file_modified_at,
                         source_file_sha256: Some(progress_sha256.clone()),
                         error: None,
                         transfer_rate_bytes_per_second: rate,
@@ -1000,7 +1106,7 @@ pub async fn send_file(
                     status: "completed".to_string(),
                     receive_mode: None,
                     local_path: Some(file_path_clone.clone()),
-                    source_file_modified_at: None,
+                    source_file_modified_at: file_modified_at,
                     source_file_sha256: Some(sha256.clone()),
                     error: None,
                     transfer_rate_bytes_per_second: rate,
@@ -1024,7 +1130,7 @@ pub async fn send_file(
                         status: "completed".to_string(),
                         receive_mode: None,
                         local_path: Some(file_path_clone),
-                        source_file_modified_at: None,
+                        source_file_modified_at: file_modified_at,
                         source_file_sha256: Some(sha256),
                         error: None,
                         updated_at: now,
@@ -1078,7 +1184,7 @@ pub async fn send_file(
                         status: status.clone(),
                         receive_mode: None,
                         local_path: Some(file_path_clone.clone()),
-                        source_file_modified_at: None,
+                        source_file_modified_at: file_modified_at,
                         source_file_sha256: Some(sha256.clone()),
                         error: Some(error.clone()),
                         transfer_rate_bytes_per_second: rate,
@@ -1101,7 +1207,7 @@ pub async fn send_file(
                         status,
                         receive_mode: None,
                         local_path: Some(file_path_clone),
-                        source_file_modified_at: None,
+                        source_file_modified_at: file_modified_at,
                         source_file_sha256: Some(sha256),
                         error: Some(error),
                         updated_at: now,
@@ -1141,7 +1247,7 @@ pub async fn send_file(
             status: "pending".to_string(),
             receive_mode: None,
             local_path: Some(file_path),
-            source_file_modified_at: None,
+            source_file_modified_at: file_modified_at,
             source_file_sha256: None,
             error: None,
             transfer_rate_bytes_per_second: None,
@@ -1747,5 +1853,25 @@ mod tests {
         assert_eq!(cancelled.local_path.as_deref(), Some("/tmp/paused.bin"));
         assert_eq!(cancelled.error.as_deref(), Some("Transfer cancelled."));
         assert_eq!(cancelled.updated_at, 99);
+    }
+
+    #[test]
+    fn source_file_changed_uses_available_resume_metadata() {
+        let record = paused_send_record();
+
+        assert!(!source_file_changed(&record, 100, Some(123), Some("SHA")));
+        assert!(source_file_changed(&record, 101, Some(123), Some("sha")));
+        assert!(source_file_changed(&record, 100, Some(124), Some("sha")));
+        assert!(source_file_changed(&record, 100, Some(123), Some("other")));
+    }
+
+    #[test]
+    fn source_file_changed_allows_missing_legacy_metadata() {
+        let mut record = paused_send_record();
+        record.file_size = 0;
+        record.source_file_modified_at = None;
+        record.source_file_sha256 = None;
+
+        assert!(!source_file_changed(&record, 100, Some(123), None));
     }
 }

@@ -52,6 +52,34 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn live_transfer_metrics(
+    bytes_transferred: u64,
+    file_size: u64,
+    started_at: Instant,
+) -> (Option<u64>, Option<u64>) {
+    if bytes_transferred == 0 {
+        return (None, None);
+    }
+
+    let elapsed_seconds = started_at.elapsed().as_secs_f64();
+    if elapsed_seconds <= 0.0 {
+        return (None, None);
+    }
+
+    let rate = ((bytes_transferred as f64) / elapsed_seconds).round() as u64;
+    if rate == 0 {
+        return (None, None);
+    }
+
+    let eta = if bytes_transferred < file_size {
+        Some((((file_size - bytes_transferred) as f64) / (rate as f64)).ceil() as u64)
+    } else {
+        None
+    };
+
+    (Some(rate), eta)
+}
+
 fn normalize_remote_address(addr: &str) -> String {
     addr.strip_prefix("::ffff:").unwrap_or(addr).to_string()
 }
@@ -696,6 +724,8 @@ async fn handle_file_offer(
             // 初始化 hash
             let mut hasher = seed_hash_for_resume(&resume_info.partial_path, resume_offset).await?;
             let mut bytes_received = resume_offset;
+            let receive_started_at = Instant::now();
+            let mut last_progress_emit = Instant::now();
 
             // 添加到 active_receives
             {
@@ -872,30 +902,38 @@ async fn handle_file_offer(
                     }
                 }
 
-                // 发射进度事件
-                let _ = app_handle.emit(
-                    "transfer-progress",
-                    TransferProgress {
-                        transfer_id: file_id.clone(),
-                        batch_id: None,
-                        batch_label: None,
-                        direction: "receive".to_string(),
-                        file_name: file_name.clone(),
-                        file_size,
-                        bytes_transferred: bytes_received,
-                        peer_device_name: Some(device.name.clone()),
-                        peer_device_id: Some(device.device_id.clone()),
-                        status: "in-progress".to_string(),
-                        receive_mode: Some(accepted_receive_mode.clone()),
-                        local_path: Some(resume_info.partial_path.to_string_lossy().to_string()),
-                        source_file_modified_at: None,
-                        source_file_sha256: sha256.clone(),
-                        error: None,
-                        transfer_rate_bytes_per_second: None,
-                        estimated_seconds_remaining: None,
-                        updated_at: Some(now_ms()),
-                    },
-                );
+                if last_progress_emit.elapsed() >= Duration::from_millis(200)
+                    || bytes_received >= file_size
+                {
+                    let (rate, eta) =
+                        live_transfer_metrics(bytes_received, file_size, receive_started_at);
+                    let _ = app_handle.emit(
+                        "transfer-progress",
+                        TransferProgress {
+                            transfer_id: file_id.clone(),
+                            batch_id: None,
+                            batch_label: None,
+                            direction: "receive".to_string(),
+                            file_name: file_name.clone(),
+                            file_size,
+                            bytes_transferred: bytes_received,
+                            peer_device_name: Some(device.name.clone()),
+                            peer_device_id: Some(device.device_id.clone()),
+                            status: "in-progress".to_string(),
+                            receive_mode: Some(accepted_receive_mode.clone()),
+                            local_path: Some(
+                                resume_info.partial_path.to_string_lossy().to_string(),
+                            ),
+                            source_file_modified_at: None,
+                            source_file_sha256: sha256.clone(),
+                            error: None,
+                            transfer_rate_bytes_per_second: rate,
+                            estimated_seconds_remaining: eta,
+                            updated_at: Some(now_ms()),
+                        },
+                    );
+                    last_progress_emit = Instant::now();
+                }
             }
 
             // 读取 file-complete
@@ -1409,17 +1447,15 @@ impl TcpClient {
         })?;
         secure_socket.write_frame(&encoded).await?;
 
-        let ack_frame = tokio::time::timeout(
-            DEFAULT_COMPLETE_ACK_TIMEOUT,
-            secure_socket.read_frame(),
-        )
-        .await
-        .map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "waiting for receiver completion acknowledgement timed out",
-            )
-        })??;
+        let ack_frame =
+            tokio::time::timeout(DEFAULT_COMPLETE_ACK_TIMEOUT, secure_socket.read_frame())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "waiting for receiver completion acknowledgement timed out",
+                    )
+                })??;
         let mut decoder = MessageDecoder::new();
         let messages = decoder.push(&ack_frame).map_err(|error| {
             std::io::Error::new(
@@ -1551,9 +1587,10 @@ impl TcpClient {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_control_frame, normalize_remote_address};
+    use super::{decode_control_frame, live_transfer_metrics, normalize_remote_address};
     use crate::transfer::codec::encode_message;
     use crate::transfer::protocol::ProtocolMessage;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn normalize_remote_address_strips_ipv4_mapped_prefix() {
@@ -1607,5 +1644,18 @@ mod tests {
     fn decode_control_frame_rejects_plain_file_bytes() {
         let payload = b"hello world this is file data";
         assert!(decode_control_frame(payload).is_none());
+    }
+
+    #[test]
+    fn live_transfer_metrics_reports_rate_and_completion_eta() {
+        let started_at = Instant::now() - Duration::from_secs(2);
+
+        let (rate, eta) = live_transfer_metrics(1_000, 2_000, started_at);
+
+        assert!(rate.unwrap_or_default() > 0);
+        assert!(eta.unwrap_or_default() > 0);
+
+        let (_, completed_eta) = live_transfer_metrics(2_000, 2_000, started_at);
+        assert_eq!(completed_eta, None);
     }
 }

@@ -130,6 +130,8 @@ impl Sandbox {
                     };
                 }
             }
+            let _ = fs::remove_file(&existing.partial_path);
+            let _ = fs::remove_file(self.resume_meta_path(request.file_id));
         }
 
         let final_path = self.path_for_incoming(request.device_id, request.file_name);
@@ -367,6 +369,38 @@ mod tests {
 
         assert_eq!(resumed.bytes_received, 3);
         assert_eq!(resumed.partial_path, first.partial_path);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepare_incoming_resume_discards_mismatched_partial() {
+        let (sandbox, root) = temp_sandbox();
+        let file_id = "file-1";
+
+        let first_request = IncomingResumeRequest {
+            file_id,
+            device_id: "device-1",
+            device_name: "Peer",
+            trust_fingerprint: "fingerprint",
+            trust_public_key: "public-key",
+            file_name: "photo.jpg",
+            file_size: 10,
+            sha256: "sha",
+        };
+
+        let first = sandbox.prepare_incoming_resume(first_request);
+        std::fs::write(&first.partial_path, b"abc").expect("write partial file");
+
+        let second = sandbox.prepare_incoming_resume(IncomingResumeRequest {
+            file_name: "photo-edited.jpg",
+            sha256: "different-sha",
+            ..first_request
+        });
+
+        assert_eq!(second.bytes_received, 0);
+        assert_ne!(second.partial_path, first.partial_path);
+        assert!(!first.partial_path.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }

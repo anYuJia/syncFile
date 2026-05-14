@@ -22,16 +22,29 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
       - name: Install dependencies
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
+      - name: Test renderer
         run: npm test
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
   release:
     needs: verify
@@ -126,8 +139,6 @@ jobs:
             patchelf
 
       - name: Install dependencies
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: npm ci
 
       - name: Build and publish ${{ matrix.name }}
