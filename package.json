@@ -1,7 +1,7 @@
 {
   "name": "syncfile",
   "productName": "syncFile",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "description": "LAN P2P file transfer tool",
   "author": "",
   "license": "MIT",
@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
+    "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.web.json",

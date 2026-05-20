@@ -151,4 +151,4 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
           uploadPlainBinary: ${{ matrix.upload_plain_binary }}
-          releaseAssetNamePattern: ${{ matrix.asset_pattern }}
+          assetNamePattern: ${{ matrix.asset_pattern }}
