@@ -224,6 +224,7 @@ export function DropZone({
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
+    event.stopPropagation();
     if (isSending) {
       return;
     }
@@ -232,6 +233,7 @@ export function DropZone({
 
   const handleDragLeave = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
+    event.stopPropagation();
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
       return;
     }
@@ -240,6 +242,7 @@ export function DropZone({
 
   const handleDrop = (event: DragEvent<HTMLDivElement>): void => {
     event.preventDefault();
+    event.stopPropagation();
     setIsDragActive(false);
     if (isSending) {
       return;
