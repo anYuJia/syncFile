@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { CircleHelp, Monitor } from 'lucide-react';
+
 import type { Device, DeviceReachability } from '@shared/types';
 import type { Messages } from '../i18n';
 import { Avatar } from './Avatar';
@@ -36,15 +39,15 @@ export function DeviceList({
   onRefresh,
   messages
 }: DeviceListProps): JSX.Element {
+  const [isTroubleshootOpen, setIsTroubleshootOpen] = useState(false);
+
   if (devices.length === 0) {
+    const troubleshootId = 'device-list-empty-troubleshoot';
+
     return (
       <div className="device-list-empty">
         <div className="device-list-empty-icon" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="3" width="20" height="14" rx="2" />
-            <line x1="8" y1="21" x2="16" y2="21" />
-            <line x1="12" y1="17" x2="12" y2="21" />
-          </svg>
+          <Monitor aria-hidden="true" />
         </div>
         <div className="device-list-empty-copy">
           <p className="device-list-empty-title">{messages.noOnlinePeers}</p>
@@ -55,15 +58,32 @@ export function DeviceList({
             <li>{messages.deviceListEmptyStepRefresh}</li>
           </ol>
           {onRefresh && (
-            <button
-              type="button"
-              className="button device-list-empty-refresh"
-              onClick={() => void onRefresh()}
-              disabled={isRefreshing}
-              aria-busy={isRefreshing}
-            >
-              {isRefreshing ? messages.refreshingDevices : messages.refreshDevices}
-            </button>
+            <div className="device-list-empty-actions">
+              <button
+                type="button"
+                className="button device-list-empty-refresh"
+                onClick={() => void onRefresh()}
+                disabled={isRefreshing}
+                aria-busy={isRefreshing}
+              >
+                {isRefreshing ? messages.refreshingDevices : messages.refreshDevices}
+              </button>
+              <button
+                type="button"
+                className="button button-ghost device-list-empty-help"
+                aria-expanded={isTroubleshootOpen}
+                aria-controls={troubleshootId}
+                onClick={() => setIsTroubleshootOpen((current) => !current)}
+              >
+                <CircleHelp aria-hidden="true" />
+                {messages.deviceListTroubleshoot}
+              </button>
+            </div>
+          )}
+          {isTroubleshootOpen && (
+            <p id={troubleshootId} className="device-list-empty-help-panel">
+              {messages.deviceListTroubleshootBody}
+            </p>
           )}
         </div>
       </div>

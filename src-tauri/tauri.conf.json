@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2.10",
   "productName": "syncFile",
-  "version": "0.0.29",
-  "identifier": "com.syncfile.app",
+  "version": "0.0.30",
+  "identifier": "com.anyujia.syncfile",
   "build": {
     "beforeDevCommand": "npm run dev:vite",
     "beforeBuildCommand": "npm run build:vite",

@@ -1,5 +1,5 @@
 // Shared types between main and renderer processes.
-// Keep this file runtime-agnostic (no Electron/Node imports).
+// Keep this file runtime-agnostic (no desktop-shell or Node imports).
 
 export interface Device {
   deviceId: string;

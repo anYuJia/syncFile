@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent, type MouseEvent, type JSX } from 'react';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import {
   Archive,
   File,
@@ -61,7 +60,7 @@ function fileToEntry(file: File): PendingFile | null {
   return null;
 }
 
-function pathToPendingFile(path: string): PendingFile | null {
+export function pathToPendingFile(path: string): PendingFile | null {
   if (!path) {
     return null;
   }
@@ -94,13 +93,13 @@ const EXT_MAP: Record<string, FileCategory> = {
 };
 
 const CATEGORY_COLORS: Record<FileCategory, string> = {
-  image: '#a855f7',
-  video: '#ef4444',
-  audio: '#f97316',
-  document: '#3b82f6',
-  code: '#10b981',
-  archive: '#eab308',
-  default: '#94a3b8'
+  image: 'oklch(56% 0.095 305)',
+  video: 'var(--danger)',
+  audio: 'oklch(58% 0.105 62)',
+  document: 'var(--accent)',
+  code: 'var(--success)',
+  archive: 'var(--warning)',
+  default: 'var(--text-tertiary)'
 };
 
 function FileIcon({ name }: { name: string }): JSX.Element {
@@ -118,7 +117,7 @@ function FileIcon({ name }: { name: string }): JSX.Element {
   }[cat];
 
   return (
-    <span className="dz-file-icon" style={{ background: `${color}18`, color }}>
+    <span className="dz-file-icon" style={{ background: `color-mix(in srgb, ${color} 14%, transparent)`, color }}>
       <Icon aria-hidden="true" />
     </span>
   );
@@ -135,13 +134,7 @@ function hasTauriRuntime(): boolean {
 }
 
 function hasNativeFileAccess(): boolean {
-  if (hasTauriRuntime()) {
-    return true;
-  }
-  if (typeof navigator === 'undefined') {
-    return false;
-  }
-  return /\bElectron\//.test(navigator.userAgent);
+  return hasTauriRuntime();
 }
 
 function hasUsableRecipientRoute(
@@ -217,54 +210,6 @@ export function DropZone({
     },
     [commitPendingFiles, isSending]
   );
-
-  useEffect(() => {
-    if (!hasTauriRuntime()) {
-      return undefined;
-    }
-
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-
-    try {
-      void getCurrentWebviewWindow().onDragDropEvent((event) => {
-        if (disposed) {
-          return;
-        }
-
-        if (event.payload.type === 'enter' || event.payload.type === 'over') {
-          setIsDragActive(true);
-          return;
-        }
-
-        if (event.payload.type === 'leave') {
-          setIsDragActive(false);
-          return;
-        }
-
-        if (event.payload.type === 'drop') {
-          setIsDragActive(false);
-          const entries = event.payload.paths
-            .map(pathToPendingFile)
-            .filter((entry): entry is PendingFile => Boolean(entry));
-          addPendingEntries(entries);
-        }
-      })
-        .then((nextUnlisten) => {
-          unlisten = nextUnlisten;
-        })
-        .catch(() => {
-          // Window-level drag and drop is best-effort; HTML5 handlers remain as fallback.
-        });
-    } catch {
-      // Standalone browser previews do not have Tauri internals.
-    }
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [addPendingEntries]);
 
   const addFiles = (fileList: FileList): void => {
     const entries: PendingFile[] = [];
@@ -639,7 +584,7 @@ export function DropZone({
   );
 }
 
-async function collectDataTransferEntries(dataTransfer: DataTransfer): Promise<PendingFile[]> {
+export async function collectDataTransferEntries(dataTransfer: DataTransfer): Promise<PendingFile[]> {
   const items = Array.from(dataTransfer.items ?? []) as DataTransferItemWithEntry[];
   const entries = items
     .map((item) => item.webkitGetAsEntry?.())

@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { AnimatePresence, motion } from 'framer-motion';
+import { AlertTriangle, CheckCircle2, UploadCloud, X } from 'lucide-react';
 
-import { type PendingFile } from './components/DropZone';
+import { collectDataTransferEntries, pathToPendingFile, type PendingFile } from './components/DropZone';
 import { DispatchPanel } from './components/DispatchPanel';
 import { LedgerPanel } from './components/LedgerPanel';
 import { ManifestPanel } from './components/ManifestPanel';
@@ -12,6 +15,7 @@ import { AppSidebar } from './components/AppSidebar';
 import { WorkspaceHeader } from './components/WorkspaceHeader';
 import { useLocale } from './hooks/useLocale';
 import { useSyncFile } from './hooks/useSyncFile';
+import type { Messages } from './i18n';
 import type { SelectedRecipientSnapshot, WorkspaceSection } from './types/workspace';
 import { fileNameFromPath, isLikelyAbsolutePath } from './utils/native-path';
 import { formatTransferRate } from './utils/format';
@@ -27,9 +31,11 @@ import type {
 const SIDEBAR_COLLAPSED_KEY = 'syncfile.sidebar-collapsed-v1';
 const SEND_DRAFT_KEY = 'syncfile.send-draft-v1';
 const THEME_KEY = 'syncfile.theme-v2';
-const COMPACT_LAYOUT_QUERY = '(max-width: 1040px)';
+const COMPACT_LAYOUT_QUERY = '(max-width: 720px)';
+const DARK_MODE_QUERY = '(prefers-color-scheme: dark)';
 
 type RequestsInboxTab = 'files' | 'pairs';
+type ThemeMode = 'light' | 'dark' | 'system';
 
 interface StoredRecipientDraft {
   deviceId: string;
@@ -46,7 +52,8 @@ interface StoredRecipientDraft {
   version: string;
 }
 
-interface NoticeState {
+interface ToastState {
+  id: string;
   kind: 'info' | 'warn';
   message: string;
   action?: {
@@ -54,6 +61,56 @@ interface NoticeState {
     section: WorkspaceSection;
     transferId?: string;
   };
+}
+
+function hasTauriRuntime(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const internals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
+  return typeof internals?.invoke === 'function';
+}
+
+function getInitialThemeMode(): ThemeMode {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light' || saved === 'system') {
+    return saved;
+  }
+  return 'system';
+}
+
+function nextThemeMode(themeMode: ThemeMode): ThemeMode {
+  if (themeMode === 'light') {
+    return 'dark';
+  }
+  if (themeMode === 'dark') {
+    return 'system';
+  }
+  return 'light';
+}
+
+function mergePendingFiles(current: PendingFile[], entries: PendingFile[]): PendingFile[] {
+  if (entries.length === 0) {
+    return current;
+  }
+
+  const seen = new Set(current.map((file) => file.path));
+  const nextEntries = entries.filter((entry) => {
+    if (seen.has(entry.path)) {
+      return false;
+    }
+    seen.add(entry.path);
+    return true;
+  });
+
+  return nextEntries.length > 0 ? [...current, ...nextEntries] : current;
+}
+
+function makeToastId(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function progressPercent(fileSize: number, bytesTransferred: number, status?: string): number {
@@ -260,7 +317,8 @@ export function App(): JSX.Element {
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
   const [requestsInboxTab, setRequestsInboxTab] = useState<RequestsInboxTab>('files');
   const [isRefreshingDevices, setIsRefreshingDevices] = useState(false);
-  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [toasts, setToasts] = useState<ToastState[]>([]);
+  const [isGlobalDragActive, setIsGlobalDragActive] = useState(false);
   const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
   const [runtimeLogEntries, setRuntimeLogEntries] = useState<RuntimeLogEntry[]>([]);
   const [reachabilityByDeviceId, setReachabilityByDeviceId] = useState<Record<string, DeviceReachability>>({});
@@ -269,9 +327,9 @@ export function App(): JSX.Element {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
   });
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem(THEME_KEY);
-    return saved ? saved === 'dark' : false;
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => getInitialThemeMode());
+  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(() => {
+    return window.matchMedia(DARK_MODE_QUERY).matches;
   });
   const [isCompactLayout, setIsCompactLayout] = useState<boolean>(() => {
     return window.matchMedia(COMPACT_LAYOUT_QUERY).matches;
@@ -289,6 +347,14 @@ export function App(): JSX.Element {
   const lastTransferNotificationStatusRef = useRef<Map<string, string>>(new Map());
   const probeKeyByDeviceIdRef = useRef<Map<string, string>>(new Map());
   const busyTransferIdsRef = useRef<Set<string>>(new Set());
+  const htmlDragDepthRef = useRef(0);
+  const isDarkMode = themeMode === 'dark' || (themeMode === 'system' && systemPrefersDark);
+  const pushToast = useCallback((toast: Omit<ToastState, 'id'>): void => {
+    setToasts((current) => [{ ...toast, id: makeToastId() }, ...current].slice(0, 5));
+  }, []);
+  const dismissToast = useCallback((toastId: string): void => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId));
+  }, []);
   const selectedDevices = useMemo<SelectedRecipientSnapshot[]>(
     () => selectedDeviceIds.flatMap((deviceId) => {
       const onlineDevice = devices.find((device) => device.deviceId === deviceId);
@@ -491,6 +557,143 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia(DARK_MODE_QUERY);
+    const updateSystemTheme = (): void => {
+      setSystemPrefersDark(mediaQuery.matches);
+    };
+    updateSystemTheme();
+    mediaQuery.addEventListener('change', updateSystemTheme);
+    return () => mediaQuery.removeEventListener('change', updateSystemTheme);
+  }, []);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return undefined;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    try {
+      void getCurrentWebviewWindow().onDragDropEvent((event) => {
+        if (disposed) {
+          return;
+        }
+
+        if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setIsGlobalDragActive(true);
+          return;
+        }
+
+        if (event.payload.type === 'leave') {
+          setIsGlobalDragActive(false);
+          return;
+        }
+
+        if (event.payload.type === 'drop') {
+          setIsGlobalDragActive(false);
+          const entries = event.payload.paths
+            .map(pathToPendingFile)
+            .filter((entry): entry is PendingFile => Boolean(entry));
+          if (entries.length === 0) {
+            return;
+          }
+
+          setPendingSendFiles((current) => mergePendingFiles(current, entries));
+          setActiveSection('dispatch');
+          pushToast({
+            kind: 'info',
+            message: messages.globalDropQueued(entries.length)
+          });
+        }
+      })
+        .then((nextUnlisten) => {
+          unlisten = nextUnlisten;
+        })
+        .catch(() => {
+          // Window-level drag and drop is best-effort; the dispatch drop zone still handles HTML5 drops.
+        });
+    } catch {
+      // Standalone browser previews do not have Tauri internals.
+    }
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [messages, pushToast]);
+
+  useEffect(() => {
+    const hasFiles = (event: DragEvent): boolean => {
+      return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    };
+
+    const handleDragEnter = (event: DragEvent): void => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      htmlDragDepthRef.current += 1;
+      setIsGlobalDragActive(true);
+    };
+
+    const handleDragOver = (event: DragEvent): void => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer!.dropEffect = 'copy';
+      setIsGlobalDragActive(true);
+    };
+
+    const handleDragLeave = (event: DragEvent): void => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      htmlDragDepthRef.current = Math.max(0, htmlDragDepthRef.current - 1);
+      if (htmlDragDepthRef.current === 0) {
+        setIsGlobalDragActive(false);
+      }
+    };
+
+    const handleDrop = (event: DragEvent): void => {
+      if (!hasFiles(event)) {
+        return;
+      }
+      event.preventDefault();
+      htmlDragDepthRef.current = 0;
+      setIsGlobalDragActive(false);
+
+      if (!event.dataTransfer) {
+        return;
+      }
+
+      void collectDataTransferEntries(event.dataTransfer).then((entries) => {
+        if (entries.length === 0) {
+          return;
+        }
+        setPendingSendFiles((current) => mergePendingFiles(current, entries));
+        setActiveSection('dispatch');
+        pushToast({
+          kind: 'info',
+          message: messages.globalDropQueued(entries.length)
+        });
+      });
+    };
+
+    window.addEventListener('dragenter', handleDragEnter);
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, [messages, pushToast]);
+
+  useEffect(() => {
     for (const offer of pendingOffers) {
       if (seenOfferIdsRef.current.has(offer.offerId)) {
         continue;
@@ -613,6 +816,15 @@ export function App(): JSX.Element {
       }
 
       if (transfer.status === 'completed') {
+        pushToast({
+          kind: 'info',
+          message: messages.notificationTransferCompleteBody(transfer.fileName),
+          action: {
+            label: messages.transferDetails,
+            section: 'ledger',
+            transferId: transfer.transferId
+          }
+        });
         maybeShowDesktopNotification(
           desktopNotificationsEnabled,
           messages.notificationTransferCompleteTitle,
@@ -625,7 +837,7 @@ export function App(): JSX.Element {
           }
         );
       } else {
-        setNotice({
+        pushToast({
           kind: 'warn',
           message: messages.notificationTransferFailedBody(transfer.fileName),
           action: {
@@ -647,18 +859,14 @@ export function App(): JSX.Element {
         );
       }
     }
-  }, [desktopNotificationsEnabled, isCompactLayout, messages, transfers]);
+  }, [desktopNotificationsEnabled, isCompactLayout, messages, pushToast, transfers]);
 
   useEffect(() => {
     const root = document.documentElement;
-    if (isDarkMode) {
-      root.setAttribute('data-theme', 'dark');
-      localStorage.setItem(THEME_KEY, 'dark');
-    } else {
-      root.setAttribute('data-theme', 'light');
-      localStorage.setItem(THEME_KEY, 'light');
-    }
-  }, [isDarkMode]);
+    root.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+    root.setAttribute('data-theme-mode', themeMode);
+    localStorage.setItem(THEME_KEY, themeMode);
+  }, [isDarkMode, themeMode]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
@@ -681,30 +889,17 @@ export function App(): JSX.Element {
   }, [pendingSendFiles, selectedDeviceIds, selectedRecipientSnapshots]);
 
   useEffect(() => {
-    if (!notice) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setNotice(null);
-    }, notice.kind === 'warn' ? 5200 : 3600);
-
-    return () => window.clearTimeout(timer);
-  }, [notice]);
-
-  useEffect(() => {
     if (activeSection !== 'ledger' && selectedTransferId) {
       setSelectedTransferId(null);
     }
   }, [activeSection, selectedTransferId]);
 
   async function handleSendFiles(filePaths: string[]): Promise<void> {
-    setNotice(null);
     const targetDeviceIds = selectedDevices
       .filter(canAttemptRecipientSend)
       .map((device) => device.deviceId);
     if (targetDeviceIds.length === 0) {
-      setNotice({
+      pushToast({
         kind: 'warn',
         message: messages.sendQueueUnavailable(selectedDevices.length)
       });
@@ -740,7 +935,7 @@ export function App(): JSX.Element {
 
     if (skippedCount === 0 && successfulDeviceIds.size === targetDeviceIds.length) {
       setPendingSendFiles([]);
-      setNotice({
+      pushToast({
         kind: 'info',
         message: messages.sendQueueStarted(filePaths.length, successfulDeviceIds.size)
       });
@@ -753,7 +948,7 @@ export function App(): JSX.Element {
         }
         return next;
       });
-      setNotice({
+      pushToast({
         kind: 'warn',
         message: appendFailureReason(
           messages.sendQueuePartial(
@@ -766,7 +961,7 @@ export function App(): JSX.Element {
         )
       });
     } else {
-      setNotice({
+      pushToast({
         kind: 'warn',
         message: appendFailureReason(
           messages.sendQueuePartial(0, targetDeviceIds.length, skippedCount),
@@ -1212,6 +1407,7 @@ export function App(): JSX.Element {
         activeTransferCount={activeTransferCount}
         pendingRequestCount={pendingRequestCount}
         unreadRequestCount={unreadRequestCount}
+        themeMode={themeMode}
         isDarkMode={isDarkMode}
         onOpenRequestsInbox={handleOpenRequestsInbox}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -1220,7 +1416,7 @@ export function App(): JSX.Element {
           void refreshRuntimeLogs();
         }}
         onOpenSandbox={() => void handleOpenSandbox()}
-        onToggleTheme={() => setIsDarkMode((prev) => !prev)}
+        onToggleTheme={() => setThemeMode((current) => nextThemeMode(current))}
       />
 
       <div className="workspace-main">
@@ -1231,6 +1427,9 @@ export function App(): JSX.Element {
           pendingFileCount={pendingSendFiles.length}
           selectedRecipientCount={selectedDevices.length}
           activeTransferCount={activeTransferCount}
+          activeSendTransferCount={activeSendTransfers.length}
+          completedTransferCount={completedTransferCount}
+          issueTransferCount={issueTransferCount}
           pendingRequestCount={pendingRequestCount}
         />
         {errorMessage && (
@@ -1241,34 +1440,6 @@ export function App(): JSX.Element {
             </button>
           </div>
         )}
-        {notice && (
-          <div
-            className={`notice-banner is-${notice.kind}`}
-            role={notice.kind === 'warn' ? 'alert' : 'status'}
-            aria-live={notice.kind === 'warn' ? 'assertive' : 'polite'}
-          >
-            <span>{notice.message}</span>
-            {notice.action && (
-              <button
-                type="button"
-                className="button button-ghost"
-                onClick={() => {
-                  setActiveSection(notice.action!.section);
-                  if (notice.action!.transferId) {
-                    setSelectedTransferId(notice.action!.transferId);
-                  }
-                  setNotice(null);
-                }}
-              >
-                {notice.action.label}
-              </button>
-            )}
-            <button type="button" className="button button-ghost" onClick={() => setNotice(null)}>
-              {messages.dismiss}
-            </button>
-          </div>
-        )}
-
         <main
           className={`content-grid is-menu-layout is-active-${activeSection}`}
         >
@@ -1396,6 +1567,45 @@ export function App(): JSX.Element {
           onClose={() => setIsLogViewerOpen(false)}
         />
       )}
+      <AnimatePresence>
+        {isGlobalDragActive && (
+          <motion.div
+            className="global-drop-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.16 }}
+            aria-hidden="true"
+          >
+            <motion.div
+              className="global-drop-card"
+              initial={{ scale: 0.96, y: 8 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.98, y: 4 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            >
+              <UploadCloud aria-hidden="true" />
+              <strong>{messages.globalDropTitle}</strong>
+              <span>{messages.globalDropBody}</span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <ToastShelf
+        toasts={toasts}
+        messages={messages}
+        onDismiss={dismissToast}
+        onAction={(toast) => {
+          if (!toast.action) {
+            return;
+          }
+          setActiveSection(toast.action.section);
+          if (toast.action.transferId) {
+            setSelectedTransferId(toast.action.transferId);
+          }
+          dismissToast(toast.id);
+        }}
+      />
     </div>
   );
 }
@@ -1430,4 +1640,84 @@ function maybeShowDesktopNotification(
     onClick?.();
     notification.close();
   };
+}
+
+function ToastShelf({
+  toasts,
+  messages,
+  onDismiss,
+  onAction
+}: {
+  toasts: ToastState[];
+  messages: Messages;
+  onDismiss: (toastId: string) => void;
+  onAction: (toast: ToastState) => void;
+}): JSX.Element {
+  return (
+    <div className="toast-shelf" aria-live="polite" aria-label={messages.notificationsLabel}>
+      <AnimatePresence initial={false}>
+        {toasts.map((toast) => (
+          <ToastCard
+            key={toast.id}
+            toast={toast}
+            messages={messages}
+            onDismiss={onDismiss}
+            onAction={onAction}
+          />
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function ToastCard({
+  toast,
+  messages,
+  onDismiss,
+  onAction
+}: {
+  toast: ToastState;
+  messages: Messages;
+  onDismiss: (toastId: string) => void;
+  onAction: (toast: ToastState) => void;
+}): JSX.Element {
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      onDismiss(toast.id);
+    }, toast.kind === 'warn' ? 6800 : 4400);
+
+    return () => window.clearTimeout(timer);
+  }, [onDismiss, toast.id, toast.kind]);
+
+  const Icon = toast.kind === 'warn' ? AlertTriangle : CheckCircle2;
+
+  return (
+    <motion.div
+      className={`toast-card is-${toast.kind}`}
+      role={toast.kind === 'warn' ? 'alert' : 'status'}
+      layout
+      initial={{ opacity: 0, x: 24, scale: 0.96 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 18, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.9 }}
+    >
+      <span className="toast-card-icon" aria-hidden="true">
+        <Icon />
+      </span>
+      <span className="toast-card-copy">{toast.message}</span>
+      {toast.action && (
+        <button type="button" className="toast-card-action" onClick={() => onAction(toast)}>
+          {toast.action.label}
+        </button>
+      )}
+      <button
+        type="button"
+        className="toast-card-close"
+        onClick={() => onDismiss(toast.id)}
+        aria-label={messages.dismiss}
+      >
+        <X aria-hidden="true" />
+      </button>
+    </motion.div>
+  );
 }

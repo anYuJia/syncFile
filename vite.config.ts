@@ -7,6 +7,16 @@ export default defineConfig({
   build: {
     outDir: '../../out/renderer',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          motion: ['framer-motion'],
+          icons: ['lucide-react'],
+          tauri: ['@tauri-apps/api'],
+        },
+      },
+    },
   },
   resolve: {
     alias: {

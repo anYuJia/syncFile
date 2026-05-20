@@ -17,7 +17,7 @@ Think AirDrop-style flow, built for macOS and Windows.
 
 ## Overview
 
-`syncFile` is a LAN P2P file transfer tool built with Electron and TypeScript.
+`syncFile` is a LAN P2P file transfer tool built with Tauri, Rust, and React.
 
 The product goal is simple:
 
@@ -27,11 +27,13 @@ The product goal is simple:
 - manual confirmation on the receiver side
 - sandboxed file storage by default
 
-The current repository already implements the Phase 1 MVP path:
+The current repository already implements the core LAN transfer path:
 
 - mDNS peer discovery
 - direct TCP file transfer
-- Electron main / preload / renderer integration
+- Tauri command/event integration with the React renderer
+- secure handshake and trusted device pairing
+- transfer history, pause, cancel, and recovery cache
 - React desktop UI
 - GitHub Actions based release publishing
 
@@ -41,12 +43,12 @@ The current repository already implements the Phase 1 MVP path:
 
 | Capability | Details |
 | --- | --- |
-| Zero-config discovery | Device discovery via `bonjour-service` |
-| Direct transfer | Plain TCP built on Node `net` |
-| Safe by default | Manual receive confirmation and sandboxed storage |
-| Type-safe | Shared TypeScript contracts across processes |
-| Testable core | Vitest coverage for transport-critical modules |
-| Releasable | GitHub Actions + `electron-builder` pipeline included |
+| Zero-config discovery | Device discovery via mDNS |
+| Direct transfer | LAN TCP transfer implemented in Rust |
+| Safe by default | Manual receive confirmation, sandboxed storage, and peer identity checks |
+| Trusted pairing | Devices can pair and identify peers by fingerprint and public key |
+| Cross-platform desktop | Tauri provides the native shell, React handles the UI |
+| Releasable | GitHub Actions builds multi-platform packages |
 
 ---
 
@@ -54,8 +56,9 @@ The current repository already implements the Phase 1 MVP path:
 
 The current CI publishes:
 
-- macOS `arm64`
-- Windows `ia32`
+- macOS `arm64` / `x64` DMG
+- Windows `x64` / `x86` / `arm64` installers and portable builds
+- Linux `x64` AppImage / DEB
 
 Release assets are published to:
 
@@ -65,7 +68,7 @@ Notes:
 
 - macOS packages are currently unsigned
 - Windows installers are currently unsigned
-- if by "Windows x86" you actually mean 64-bit Windows, switch the target arch from `ia32` to `x64`
+- Linux builds depend on the target distribution's WebKitGTK support
 
 ---
 
@@ -140,8 +143,7 @@ npm test
 Local packaging:
 
 ```bash
-npm run dist:mac:arm64
-npm run dist:win:ia32
+npm run build
 ```
 
 ---
@@ -154,8 +156,9 @@ When you push a tag like `v0.0.1`, the workflow will run:
 
 1. `typecheck`
 2. `test`
-3. Windows `ia32` build and publish
-4. macOS `arm64` build and publish
+3. Windows multi-architecture builds and publish
+4. macOS multi-architecture builds and publish
+5. Linux x64 builds and publish
 
 Example:
 
@@ -175,22 +178,21 @@ More details:
 ```text
 Renderer (React UI)
         |
-      IPC
+  Tauri commands/events
         |
-Main Process
-  |- mDNS Discovery
-  |- Device Registry
-  |- TCP Server / Client
-  |- Protocol Codec
-  |- Sandbox Storage
+Rust backend
+  |- mDNS discovery
+  |- Device registry
+  |- TCP server / client
+  |- Secure channel
+  |- Sandbox storage
 ```
 
 Core directories:
 
-- `src/main`: discovery, transfer, storage, IPC, app entry
-- `src/preload`: secure API bridge
+- `src-tauri/src`: discovery, transfer, security, storage, and Tauri commands
 - `src/renderer`: React UI
-- `src/shared`: shared types and IPC channels
+- `src/shared`: renderer/shared TypeScript types
 
 Design reference:
 
@@ -200,7 +202,7 @@ Design reference:
 
 ## Project Status
 
-Current milestone: `Phase 1 MVP`
+Current milestone: `Phase 2 usable build`
 
 Implemented:
 
@@ -208,14 +210,13 @@ Implemented:
 - single-file transfer
 - manual receive confirmation
 - sandbox file persistence
-- basic transfer activity UI
-- baseline release automation
+- trusted device pairing
+- secure handshake
+- recovery cache
+- multi-platform release automation
 
 Not implemented yet:
 
-- resume / breakpoint transfer
-- file hash verification
-- trusted device pairing
 - bandwidth limiting
 - WebRTC / internet transfer
 
@@ -223,12 +224,11 @@ Not implemented yet:
 
 ## Test Coverage
 
-Current tests focus on the transport-critical layer:
+Current tests focus on UI state helpers and Rust transport/storage/discovery modules:
 
-- `codec`
-- `sandbox`
-- `tcp-server`
-- `tcp-client`
+- TypeScript renderer utilities
+- Rust mDNS and TCP helpers
+- Rust secure-channel helpers
 
 Run:
 
@@ -240,13 +240,14 @@ npm test
 
 ## Stack
 
-- Electron
+- Tauri 2
+- Rust
 - React 18
 - TypeScript
-- electron-vite
+- Vite
 - Vitest
-- bonjour-service
-- electron-builder
+- Tokio
+- mdns-sd
 
 ---
 

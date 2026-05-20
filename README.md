@@ -109,7 +109,7 @@ xattr -cr /Applications/syncFile.app
 git clone https://github.com/anYuJia/syncFile.git
 cd syncFile
 npm install
-npm run tauri:dev
+npm run dev
 ```
 
 ---
@@ -144,9 +144,7 @@ npm run tauri:dev
 
 ```bash
 npm run dev
-npm run tauri:dev
 npm run build
-npm run tauri:build
 npm run typecheck
 npm test
 ```
@@ -154,7 +152,7 @@ npm test
 本地打包：
 
 ```bash
-npm run tauri:build
+npm run build
 ```
 
 ---
@@ -236,9 +234,9 @@ Rust backend
 
 ## 测试覆盖
 
-当前测试重点覆盖传输、存储、发现和 UI 状态计算：
+当前测试重点覆盖 UI 状态计算与 Rust 传输、存储、发现模块：
 
-- TypeScript: renderer hooks、格式化、传输指标、Electron legacy 模块
+- TypeScript: renderer hooks、格式化、传输指标
 - Rust: mDNS、TCP 控制帧、安全通道相关辅助逻辑
 
 运行：
@@ -251,7 +249,6 @@ npm test
 
 ## 技术栈
 
-- Electron
 - Tauri 2
 - Rust
 - React 18

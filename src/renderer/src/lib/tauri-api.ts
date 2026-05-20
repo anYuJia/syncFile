@@ -1,7 +1,5 @@
 /**
- * Tauri IPC 包装层 - 与 Electron API 100% 兼容
- * 这个文件暴露了和 Electron preload 完全相同的 API 接口，
- * 但底层使用 Tauri 的 invoke 和 event 系统
+ * Renderer API bridge backed by Tauri commands and events.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -106,7 +104,6 @@ export const tauriSyncFileApi = {
   chooseSandboxLocation: (): Promise<SandboxLocationInfo | null> => invoke('choose_sandbox_location'),
 
   selectFile: async (): Promise<string | null> => {
-    // 使用 Tauri dialog 插件选择文件
     try {
       const result = await invoke<string | null>('select_file');
       return result;
@@ -188,7 +185,7 @@ export const tauriSyncFileApi = {
     subscribe('self-device-updated', callback),
 };
 
-// 导出类型，保持与 Electron 兼容
+// 导出给 renderer 使用的全局 API 类型。
 export type SyncFileAPI = typeof tauriSyncFileApi;
 
 const previewDevice: Device = {
@@ -267,7 +264,7 @@ const previewSyncFileApi: SyncFileAPI = {
   onSelfDeviceUpdated: () => () => undefined
 };
 
-// 全局暴露，替代 window.syncFile
+// 全局暴露给现有 renderer 代码。
 if (typeof window !== 'undefined') {
   if (isTauriRuntime()) {
     window.syncFile = tauriSyncFileApi;

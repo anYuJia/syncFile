@@ -26,7 +26,10 @@ pub enum ProtocolMessage {
     #[serde(rename = "file-complete")]
     FileComplete { file_id: String, bytes_sent: u64 },
     #[serde(rename = "file-complete-ack")]
-    FileCompleteAck { file_id: String, bytes_received: u64 },
+    FileCompleteAck {
+        file_id: String,
+        bytes_received: u64,
+    },
     #[serde(rename = "file-cancel")]
     FileCancel { file_id: String, reason: String },
     #[serde(rename = "profile-request")]

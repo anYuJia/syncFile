@@ -50,6 +50,7 @@ interface AppSidebarProps {
   activeTransferCount: number;
   pendingRequestCount: number;
   unreadRequestCount: number;
+  themeMode: 'light' | 'dark' | 'system';
   isDarkMode: boolean;
   onOpenRequestsInbox: () => void;
   onOpenSettings: () => void;
@@ -103,6 +104,7 @@ export function AppSidebar({
   activeTransferCount,
   pendingRequestCount,
   unreadRequestCount,
+  themeMode,
   isDarkMode,
   onOpenRequestsInbox,
   onOpenSettings,
@@ -135,7 +137,7 @@ export function AppSidebar({
     {
       section: 'inbox',
       label: messages.requestsInbox,
-      meta: `${unreadRequestCount}/${pendingRequestCount || 0}`,
+      meta: pendingRequestCount > 0 ? messages.waitingRequests(pendingRequestCount) : messages.requestsEmptyTitle,
       count: pendingRequestCount,
       icon: <Inbox aria-hidden="true" />,
       hasUnread: unreadRequestCount > 0
@@ -146,9 +148,23 @@ export function AppSidebar({
     { label: messages.logs, onClick: onOpenLogs, icon: <ScrollText aria-hidden="true" /> },
     { label: messages.openSandbox, onClick: onOpenSandbox, icon: <FolderOpen aria-hidden="true" /> },
     {
-      label: isDarkMode ? messages.appearanceLight : messages.appearanceDark,
+      label:
+        themeMode === 'light'
+          ? messages.appearanceDark
+          : themeMode === 'dark'
+            ? messages.appearanceSystem
+            : messages.appearanceLight,
       onClick: onToggleTheme,
-      icon: isDarkMode ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />
+      icon:
+        themeMode === 'light' ? (
+          <Moon aria-hidden="true" />
+        ) : themeMode === 'dark' ? (
+          <Monitor aria-hidden="true" />
+        ) : isDarkMode ? (
+          <Sun aria-hidden="true" />
+        ) : (
+          <Moon aria-hidden="true" />
+        )
     }
   ];
 
@@ -245,7 +261,11 @@ export function AppSidebar({
                 <strong>{item.label}</strong>
                 <small>{item.meta}</small>
               </span>
-              <span className="sidebar-nav-count">{item.count}</span>
+              {item.hasUnread ? (
+                <span className="sidebar-nav-unread-dot" aria-label={messages.requestsUnreadIndicator(unreadRequestCount)} />
+              ) : (
+                <span className="sidebar-nav-count">{item.count}</span>
+              )}
             </motion.button>
           </SidebarTooltip>
         ))}

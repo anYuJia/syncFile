@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import type { RuntimeLogEntry } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -106,10 +107,7 @@ export function LogViewer({
           onClick={onClose}
           aria-label={messages.dismiss}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <X aria-hidden="true" />
         </button>
         <header className="log-viewer-header">
           <div>

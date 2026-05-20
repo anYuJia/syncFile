@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
+import {
+  Bell,
+  ChevronLeft,
+  FolderOpen,
+  HardDrive,
+  Inbox,
+  Save,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+  Wrench,
+  X
+} from 'lucide-react';
 import type { Device, SandboxLocationInfo, Settings, SettingsPayload } from '@shared/types';
 import type { Messages } from '../i18n';
 import { useDialogA11y } from '../hooks/useDialogA11y';
@@ -25,8 +38,25 @@ const DEFAULT_SETTINGS: Settings = {
   trustedDevices: []
 };
 
+type SettingsSectionId =
+  | 'settings-profile'
+  | 'settings-receive'
+  | 'settings-storage'
+  | 'settings-maintenance';
+
+const SETTINGS_SECTION_IDS: SettingsSectionId[] = [
+  'settings-profile',
+  'settings-receive',
+  'settings-storage',
+  'settings-maintenance'
+];
+
 function hasSandboxLocation(payload: unknown): payload is SettingsPayload {
   return typeof payload === 'object' && payload !== null && 'sandboxLocation' in payload;
+}
+
+function isSettingsSectionId(sectionId: string): sectionId is SettingsSectionId {
+  return SETTINGS_SECTION_IDS.includes(sectionId as SettingsSectionId);
 }
 
 export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.Element {
@@ -47,6 +77,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
   const [requestingNotificationPermission, setRequestingNotificationPermission] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [confirmingAction, setConfirmingAction] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>('settings-profile');
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
     return typeof window.Notification?.permission === 'string' ? window.Notification.permission : 'default';
   });
@@ -90,6 +121,37 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
   useEffect(() => {
     void refreshSettings();
+  }, []);
+
+  useEffect(() => {
+    const scrollRoot = document.querySelector('.settings-body');
+    const sections = SETTINGS_SECTION_IDS.map((sectionId) => document.getElementById(sectionId)).filter(
+      (section): section is HTMLElement => section instanceof HTMLElement
+    );
+
+    if (!scrollRoot || sections.length === 0) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntry = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((first, second) => second.intersectionRatio - first.intersectionRatio)[0];
+
+        if (visibleEntry?.target.id && isSettingsSectionId(visibleEntry.target.id)) {
+          setActiveSection(visibleEntry.target.id);
+        }
+      },
+      {
+        root: scrollRoot,
+        rootMargin: '-24px 0px -55% 0px',
+        threshold: [0.24, 0.5, 0.76]
+      }
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -291,6 +353,9 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
     if (busy) {
       return;
     }
+    if (isSettingsSectionId(sectionId)) {
+      setActiveSection(sectionId);
+    }
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document
       .getElementById(sectionId)
@@ -318,9 +383,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
               disabled={busy}
               aria-label={messages.dismiss}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
+              <ChevronLeft aria-hidden="true" />
             </button>
             <div className="settings-rail-brand">
               <span className="settings-rail-kicker">syncFile</span>
@@ -330,39 +393,47 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
             <nav className="settings-rail-nav" aria-label={messages.settings}>
               <button
                 type="button"
-                className="settings-rail-link"
+                className={`settings-rail-link${activeSection === 'settings-profile' ? ' is-active' : ''}`}
                 onClick={() => handleScrollToSettingsSection('settings-profile')}
                 disabled={busy}
+                aria-current={activeSection === 'settings-profile' ? 'page' : undefined}
               >
-                <span>01</span>
-                {messages.settingsProfileSection}
+                <UserRound aria-hidden="true" />
+                <span className="settings-rail-index">01</span>
+                <span className="settings-rail-label">{messages.settingsProfileSection}</span>
               </button>
               <button
                 type="button"
-                className="settings-rail-link"
+                className={`settings-rail-link${activeSection === 'settings-receive' ? ' is-active' : ''}`}
                 onClick={() => handleScrollToSettingsSection('settings-receive')}
                 disabled={busy}
+                aria-current={activeSection === 'settings-receive' ? 'page' : undefined}
               >
-                <span>02</span>
-                {messages.settingsReceiveSection}
+                <Inbox aria-hidden="true" />
+                <span className="settings-rail-index">02</span>
+                <span className="settings-rail-label">{messages.settingsReceiveSection}</span>
               </button>
               <button
                 type="button"
-                className="settings-rail-link"
+                className={`settings-rail-link${activeSection === 'settings-storage' ? ' is-active' : ''}`}
                 onClick={() => handleScrollToSettingsSection('settings-storage')}
                 disabled={busy}
+                aria-current={activeSection === 'settings-storage' ? 'page' : undefined}
               >
-                <span>03</span>
-                {messages.settingsStorageSection}
+                <HardDrive aria-hidden="true" />
+                <span className="settings-rail-index">03</span>
+                <span className="settings-rail-label">{messages.settingsStorageSection}</span>
               </button>
               <button
                 type="button"
-                className="settings-rail-link"
+                className={`settings-rail-link${activeSection === 'settings-maintenance' ? ' is-active' : ''}`}
                 onClick={() => handleScrollToSettingsSection('settings-maintenance')}
                 disabled={busy}
+                aria-current={activeSection === 'settings-maintenance' ? 'page' : undefined}
               >
-                <span>04</span>
-                {messages.settingsMaintenanceSection}
+                <Wrench aria-hidden="true" />
+                <span className="settings-rail-index">04</span>
+                <span className="settings-rail-label">{messages.settingsMaintenanceSection}</span>
               </button>
             </nav>
             <div className="settings-rail-meter">
@@ -381,6 +452,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 <h2 className="settings-title">{messages.settings}</h2>
               </div>
               <button type="button" className="button button-ghost settings-close-button" onClick={handleClose} disabled={busy}>
+                <X aria-hidden="true" />
                 {messages.dismiss}
               </button>
             </div>
@@ -390,7 +462,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
           <section id="settings-profile" className="settings-section">
             <div className="settings-section-head">
-              <h3 className="settings-section-title">{messages.settingsProfileSection}</h3>
+              <h3 className="settings-section-title">
+                <UserRound aria-hidden="true" />
+                {messages.settingsProfileSection}
+              </h3>
               <p className="settings-section-copy">{messages.settingsProfileSectionDesc}</p>
             </div>
 
@@ -417,6 +492,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                         onClick={handlePickAvatar}
                         disabled={busy}
                       >
+                        <UserRound aria-hidden="true" />
                         {messages.settingsProfileChangeAvatar}
                       </button>
                       {profileAvatarDataUrl && (
@@ -426,6 +502,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                           onClick={() => setProfileAvatarDataUrl(undefined)}
                           disabled={busy}
                         >
+                          <X aria-hidden="true" />
                           {messages.settingsProfileRemoveAvatar}
                         </button>
                       )}
@@ -460,7 +537,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
           <section id="settings-receive" className="settings-section">
             <div className="settings-section-head">
-              <h3 className="settings-section-title">{messages.settingsReceiveSection}</h3>
+              <h3 className="settings-section-title">
+                <Inbox aria-hidden="true" />
+                {messages.settingsReceiveSection}
+              </h3>
               <p className="settings-section-copy">{messages.settingsReceiveSectionDesc}</p>
             </div>
 
@@ -516,7 +596,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
               <div className="settings-card">
                 <div className="settings-toggle-row">
                   <div className="settings-toggle-text">
-                    <span className="settings-label">{messages.settingsOpenReceivedFolder}</span>
+                    <span className="settings-label">
+                      <FolderOpen aria-hidden="true" />
+                      {messages.settingsOpenReceivedFolder}
+                    </span>
                     <span className="settings-desc">{messages.settingsOpenReceivedFolderDesc}</span>
                   </div>
                   <button
@@ -540,7 +623,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
               <div className="settings-card">
                 <div className="settings-toggle-row">
                   <div className="settings-toggle-text">
-                    <span className="settings-label">{messages.settingsDesktopNotifications}</span>
+                    <span className="settings-label">
+                      <Bell aria-hidden="true" />
+                      {messages.settingsDesktopNotifications}
+                    </span>
                     <span className="settings-desc">{messages.settingsDesktopNotificationsDesc}</span>
                   </div>
                   <button
@@ -584,7 +670,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 </div>
 
               <div className="settings-card">
-                <span className="settings-label">{messages.settingsTrustedDevices}</span>
+                <span className="settings-label">
+                  <ShieldCheck aria-hidden="true" />
+                  {messages.settingsTrustedDevices}
+                </span>
                 <span className="settings-desc">{messages.settingsTrustedDevicesDesc}</span>
 
                 {settings.trustedDevices.length === 0 ? (
@@ -626,7 +715,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
           <section id="settings-storage" className="settings-section">
             <div className="settings-section-head">
-              <h3 className="settings-section-title">{messages.settingsStorageSection}</h3>
+              <h3 className="settings-section-title">
+                <HardDrive aria-hidden="true" />
+                {messages.settingsStorageSection}
+              </h3>
               <p className="settings-section-copy">{messages.settingsStorageSectionDesc}</p>
             </div>
 
@@ -694,6 +786,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     disabled={busy}
                     aria-busy={settingsAction === 'open-sandbox'}
                   >
+                    <FolderOpen aria-hidden="true" />
                     {messages.openSandbox}
                   </button>
                   <button
@@ -703,6 +796,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                     disabled={busy}
                     aria-busy={settingsAction === 'choose-sandbox'}
                   >
+                    <HardDrive aria-hidden="true" />
                     {messages.settingsChangeSandboxFolder}
                   </button>
                 </div>
@@ -712,7 +806,10 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
           <section id="settings-maintenance" className="settings-section">
             <div className="settings-section-head">
-              <h3 className="settings-section-title">{messages.settingsMaintenanceSection}</h3>
+              <h3 className="settings-section-title">
+                <Wrench aria-hidden="true" />
+                {messages.settingsMaintenanceSection}
+              </h3>
               <p className="settings-section-copy">{messages.settingsMaintenanceSectionDesc}</p>
             </div>
 
@@ -729,6 +826,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   disabled={busy || maintenance.transferHistoryCount === 0}
                   aria-busy={settingsAction === 'clear-history'}
                 >
+                  <Trash2 aria-hidden="true" />
                   {confirmingAction === 'clear-history'
                     ? messages.settingsClearTransferHistoryConfirm
                     : messages.settingsClearTransferHistory}
@@ -753,6 +851,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                   disabled={busy || maintenance.resumableTransferCount === 0}
                   aria-busy={settingsAction === 'clear-resume-cache'}
                 >
+                  <Trash2 aria-hidden="true" />
                   {confirmingAction === 'clear-resume-cache'
                     ? messages.settingsClearResumeCacheConfirm
                     : messages.settingsClearResumeCache}
@@ -764,6 +863,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
 
             <div className="settings-actions">
               <button type="button" className="button button-muted" onClick={handleClose} disabled={busy}>
+                <X aria-hidden="true" />
                 {messages.settingsCancel}
               </button>
               <button
@@ -773,6 +873,7 @@ export function SettingsModal({ messages, onClose }: SettingsModalProps): JSX.El
                 onClick={() => void handleSave()}
                 aria-busy={saving}
               >
+                <Save aria-hidden="true" />
                 {saving ? messages.settingsSaving : messages.settingsSave}
               </button>
             </div>

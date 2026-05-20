@@ -48,6 +48,8 @@ export interface Messages {
   workspaceMetricFiles: string;
   workspaceMetricActive: string;
   workspaceMetricRequests: string;
+  workspaceMetricCompleted: string;
+  workspaceMetricIssues: string;
   onlineDevices: string;
   refreshDevices: string;
   refreshingDevices: string;
@@ -64,6 +66,8 @@ export interface Messages {
   deviceListEmptyStepOpen: string;
   deviceListEmptyStepLan: string;
   deviceListEmptyStepRefresh: string;
+  deviceListTroubleshoot: string;
+  deviceListTroubleshootBody: string;
   onlineDevicesAriaLabel: string;
   dropZonePassport: string;
   dropZoneTitle: string;
@@ -143,6 +147,12 @@ export interface Messages {
   toolsMenuLabel: string;
   appearanceLight: string;
   appearanceDark: string;
+  appearanceSystem: string;
+  requestsUnreadIndicator: (count: number) => string;
+  notificationsLabel: string;
+  globalDropTitle: string;
+  globalDropBody: string;
+  globalDropQueued: (count: number) => string;
   logViewerTitle: string;
   logViewerEmpty: string;
   logViewerRefresh: string;
@@ -342,6 +352,8 @@ const zh: Messages = {
   workspaceMetricFiles: '文件',
   workspaceMetricActive: '活跃',
   workspaceMetricRequests: '请求',
+  workspaceMetricCompleted: '完成',
+  workspaceMetricIssues: '异常',
   onlineDevices: '在线设备',
   refreshDevices: '刷新设备',
   refreshingDevices: '刷新中...',
@@ -358,6 +370,8 @@ const zh: Messages = {
   deviceListEmptyStepOpen: '在另一台设备上安装并打开 syncFile。',
   deviceListEmptyStepLan: '确保两台设备处于同一局域网或同一 Wi-Fi。',
   deviceListEmptyStepRefresh: '返回这里点击“刷新设备”，等待发现完成。',
+  deviceListTroubleshoot: '排障提示',
+  deviceListTroubleshootBody: '检查防火墙是否允许 syncFile 通信，并确认两台设备处于同一 Wi-Fi 或局域网。',
   onlineDevicesAriaLabel: '在线设备列表',
   dropZonePassport: '发送条件',
   dropZoneTitle: '拖入文件，立刻发出',
@@ -428,15 +442,21 @@ const zh: Messages = {
   requestShowFiles: '查看文件请求',
   requestShowPairs: '查看配对请求',
   requestsEmptyTitle: '暂时没有待处理请求。',
-  requestsEmptyBody: '新的文件请求和配对请求会集中出现在这里。',
+  requestsEmptyBody: '当前没有待处理的接收请求，你的局域网非常安静。',
   requestFilesEmptyTitle: '暂无文件请求。',
-  requestFilesEmptyBody: '其他设备发来的文件会显示在这里，你可以接受、拒绝，或先信任设备再接受。',
+  requestFilesEmptyBody: '当前没有设备在向你发送文件，局域网里很安静。',
   requestPairsEmptyTitle: '暂无配对请求。',
-  requestPairsEmptyBody: '当另一台设备请求建立信任关系时，会在这里显示双方设备指纹。',
+  requestPairsEmptyBody: '还没有新的信任请求。有人靠近时，这里会亮起来。',
   logs: '日志',
   toolsMenuLabel: '工具',
   appearanceLight: '切换到浅色模式',
   appearanceDark: '切换到深色模式',
+  appearanceSystem: '跟随系统外观',
+  requestsUnreadIndicator: (count) => `${count} 个未读请求`,
+  notificationsLabel: '通知',
+  globalDropTitle: '松开即可添加文件',
+  globalDropBody: 'syncFile 会切回发送工作台，并把文件加入当前队列。',
+  globalDropQueued: (count) => `已添加 ${count} 个拖入项目，发送工作台已准备好。`,
   logViewerTitle: '运行日志',
   logViewerEmpty: '暂无日志。执行发现、配对或传输后会在这里显示。',
   logViewerRefresh: '刷新',
@@ -529,7 +549,7 @@ const zh: Messages = {
   settingsDesktopNotificationsDesc: '应用在后台时，为新请求和传输结果显示系统通知。',
   settingsNotificationsPermissionGranted: '系统通知权限已开启。',
   settingsNotificationsPermissionDefault: '尚未请求系统通知权限。',
-  settingsNotificationsPermissionDenied: '系统通知权限已被拒绝，需要在系统或 Electron 权限设置里手动开启。',
+  settingsNotificationsPermissionDenied: '系统通知权限已被拒绝，需要在系统设置里手动开启。',
   settingsNotificationsRequestPermission: '请求通知权限',
   settingsNotificationsRequestingPermission: '正在请求权限...',
   settingsTrustedDevices: '已信任设备',
@@ -632,6 +652,8 @@ const en: Messages = {
   workspaceMetricFiles: 'Files',
   workspaceMetricActive: 'Active',
   workspaceMetricRequests: 'Requests',
+  workspaceMetricCompleted: 'Done',
+  workspaceMetricIssues: 'Issues',
   onlineDevices: 'Online devices',
   refreshDevices: 'Refresh devices',
   refreshingDevices: 'Refreshing...',
@@ -648,6 +670,8 @@ const en: Messages = {
   deviceListEmptyStepOpen: 'Install and open syncFile on another device.',
   deviceListEmptyStepLan: 'Make sure both devices are on the same LAN or Wi-Fi.',
   deviceListEmptyStepRefresh: 'Come back here and click refresh to discover it.',
+  deviceListTroubleshoot: 'Troubleshoot',
+  deviceListTroubleshootBody: 'Check firewall rules for syncFile and make sure both devices are on the same Wi-Fi or LAN.',
   onlineDevicesAriaLabel: 'Online devices',
   dropZonePassport: 'Send conditions',
   dropZoneTitle: 'Drop a file to send immediately',
@@ -718,15 +742,21 @@ const en: Messages = {
   requestShowFiles: 'View file requests',
   requestShowPairs: 'View pair requests',
   requestsEmptyTitle: 'No pending requests right now.',
-  requestsEmptyBody: 'Incoming file offers and pair requests will appear here.',
+  requestsEmptyBody: 'No pending receive requests. The LAN is quiet right now.',
   requestFilesEmptyTitle: 'No file requests.',
-  requestFilesEmptyBody: 'Files offered by nearby devices will appear here so you can accept, reject, or trust first.',
+  requestFilesEmptyBody: 'No nearby device is sending a file right now.',
   requestPairsEmptyTitle: 'No pair requests.',
-  requestPairsEmptyBody: 'When another device asks to pair, both device fingerprints will be shown here.',
+  requestPairsEmptyBody: 'No new trust requests yet. This panel lights up when one arrives.',
   logs: 'Logs',
   toolsMenuLabel: 'Tools',
   appearanceLight: 'Switch to light mode',
   appearanceDark: 'Switch to dark mode',
+  appearanceSystem: 'Follow system appearance',
+  requestsUnreadIndicator: (count) => `${count} unread request(s)`,
+  notificationsLabel: 'Notifications',
+  globalDropTitle: 'Release to add files',
+  globalDropBody: 'syncFile will switch to the send workspace and queue the dropped files.',
+  globalDropQueued: (count) => `Added ${count} dropped item(s); the send workspace is ready.`,
   logViewerTitle: 'Runtime logs',
   logViewerEmpty: 'No logs yet. Discovery, pairing, and transfer events will appear here.',
   logViewerRefresh: 'Refresh',
@@ -822,7 +852,7 @@ const en: Messages = {
   settingsDesktopNotificationsDesc: 'Show system notifications for new requests and transfer results while the app is in the background.',
   settingsNotificationsPermissionGranted: 'System notification permission is enabled.',
   settingsNotificationsPermissionDefault: 'System notification permission has not been requested yet.',
-  settingsNotificationsPermissionDenied: 'System notification permission is denied. Re-enable it in system or Electron permission settings.',
+  settingsNotificationsPermissionDenied: 'System notification permission is denied. Re-enable it in system settings.',
   settingsNotificationsRequestPermission: 'Request notification permission',
   settingsNotificationsRequestingPermission: 'Requesting permission...',
   settingsTrustedDevices: 'Trusted devices',
